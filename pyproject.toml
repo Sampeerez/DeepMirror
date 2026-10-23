@@ -1,0 +1,97 @@
+[project]
+name = "openvoicechanger"
+description = "Realtime and offline RVC voice conversion studio"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dynamic = ["version"]
+dependencies = [
+    "fastapi>=0.161",
+    "uvicorn[standard]>=0.54",
+    "python-multipart>=0.0.20",
+    "pydantic-settings>=2.16",
+    "numpy>=2.5",
+    "scipy>=1.18",
+    "soxr>=1.1",
+    "soundfile>=0.14",
+    "torch>=2.14",
+    "praat-parselmouth>=0.4.7",
+    # Harvest/DIO pitch trackers. pyworld only publishes wheels for Windows;
+    # elsewhere install the `classic-f0` extra (needs a C compiler).
+    "pyworld>=0.3.5; sys_platform == 'win32' and python_version < '3.14'",
+]
+
+[project.optional-dependencies]
+# Torch build. The start scripts pick one automatically (CUDA when an NVIDIA
+# GPU is present); pass `--extra cpu` or `--extra cuda` to choose explicitly.
+cpu = ["torch>=2.14", "torchaudio>=2.11"]
+cuda = ["torch>=2.14", "torchaudio>=2.11"]
+# Extra neural pitch trackers (Crepe, FCPE). RMVPE and PM are built in.
+neural-f0 = ["torchcrepe>=0.0.24", "torchfcpe>=0.0.4"]
+classic-f0 = ["pyworld>=0.3.5"]
+
+[project.scripts]
+openvoicechanger = "backend.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9",
+    "httpx2>=2.16",
+    "anyio>=4.9",
+    "ruff>=0.14",
+    "pyright>=1.1.400",
+    "vulture>=2.14",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "regex"
+path = "VERSION"
+pattern = "(?P<version>[^\\s]+)"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
+
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cuda", extra = "cuda", marker = "sys_platform != 'darwin'" },
+]
+torchaudio = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cuda", extra = "cuda", marker = "sys_platform != 'darwin'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+# CUDA 12.6 builds run on drivers >= 525 and on Maxwell through Blackwell GPUs.
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501", "RUF001", "RUF002", "RUF003", "SIM108"]
+
+[tool.pyright]
+include = ["backend"]
+typeCheckingMode = "basic"
+pythonVersion = "3.12"

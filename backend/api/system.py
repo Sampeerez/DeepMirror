@@ -1,0 +1,50 @@
+"""Health and runtime configuration (``/health``, ``/api/config``)."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
+
+from backend.assets import AssetStore
+from backend.config import Settings
+from backend.model_manager import ModelManager
+
+router = APIRouter(tags=["system"])
+
+
+@router.get("/health")
+async def health() -> dict:
+    return {"status": "ok"}
+
+
+@router.get("/api/config")
+async def runtime_config(request: Request) -> dict:
+    settings: Settings = request.app.state.settings
+    manager: ModelManager = request.app.state.model_manager
+    assets: AssetStore = request.app.state.assets
+    defaults = manager.default_conversion()
+    lookahead = settings.STREAM_LOOKAHEAD_SECONDS
+    return {
+        "version": request.app.version,
+        "sample_rate": settings.SAMPLE_RATE,
+        "chunk_size": settings.CHUNK_SIZE,
+        "silence_saver": settings.SILENCE_SAVER,
+        "silence_threshold_db": settings.SILENCE_THRESHOLD_DB,
+        "stream": {
+            "lookback_seconds": settings.STREAM_LOOKBACK_SECONDS,
+            "lookahead_seconds": lookahead,
+            "crossfade_seconds": settings.STREAM_CROSSFADE_SECONDS,
+            "algorithmic_delay_ms": round(
+                (lookahead + settings.STREAM_CROSSFADE_SECONDS + settings.STREAM_SEARCH_SECONDS / 2) * 1000, 1),
+        },
+        "device": manager.compute.describe(),
+        "assets": assets.status(),
+        "f0_methods": manager.pitch_methods(),
+        "default_f0_method": defaults.f0_method,
+        "defaults": {
+            "index_rate": defaults.index_rate,
+            "filter_radius": defaults.filter_radius,
+            "rms_mix_rate": defaults.rms_mix_rate,
+            "protect": defaults.protect,
+            "crepe_hop_length": defaults.crepe_hop_length,
+        },
+    }
