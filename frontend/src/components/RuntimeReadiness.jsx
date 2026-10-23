@@ -5,6 +5,7 @@ import { formatBytes } from '../lib/format';
 const ASSET_LABELS = {
   hubert: 'HuBERT content encoder',
   rmvpe: 'RMVPE pitch tracker',
+  vad: 'Silero voice detector',
 };
 
 function AssetRow({ asset }) {

@@ -36,7 +36,7 @@ function MetaBadge({ children, tone = 'default' }) {
 //
 // `active` is true while the Models tab is showing. The panel stays mounted
 // across tab switches, so this is what triggers a fresh listing on each visit.
-function ModelManager({ activeModel = null, onActiveModelChange, active = true }) {
+function ModelManager({ activeModel = null, onActiveModelChange, active = true, loadingModel = null }) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -290,7 +290,9 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
             const hasIndex = typeof model === 'object' && Boolean(model.has_index);
             const details = typeof model === 'object' ? model.details : null;
             const isActive = activeModel === name;
-            const isOperating = operatingOn === name;
+            // The server prepares a voice completely (weights, index, warm-up) before it is
+            // active; until then it shows as loading, also when restored at start-up.
+            const isOperating = operatingOn === name || loadingModel === name;
             const type = getModelType(name);
 
             return (
@@ -346,7 +348,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
                         disabled={isOperating}
                         className="chip-button"
                       >
-                        {isOperating ? 'Loading…' : 'Activate'}
+                        {isOperating ? 'Loading… (warming up)' : 'Activate'}
                       </button>
                     )}
 

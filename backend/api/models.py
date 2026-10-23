@@ -66,4 +66,6 @@ async def deactivate_model(request: Request) -> dict:
 
 @router.get("/active")
 async def active_model(request: Request) -> dict:
-    return _manager(request).active_model() or {"active": False}
+    manager = _manager(request)
+    # ``loading`` names a voice still being prepared: it becomes active only when fully ready.
+    return manager.active_model() or {"active": False, "loading": manager.loading}

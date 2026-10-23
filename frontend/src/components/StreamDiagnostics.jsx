@@ -29,6 +29,10 @@ export default function StreamDiagnostics({ streamInfo, playbackStats, transport
     ['Playback trimmed', ms(playbackStats == null ? null : playbackStats.droppedSamples / rate * 1000)],
     ['Mic level / sleep threshold', serverStats.inputLevelDb == null ? '--'
       : `${Math.round(serverStats.inputLevelDb)} / ${Math.round(serverStats.silenceThresholdDb ?? -60)} dB`],
+    ['Voice detector / speech now', serverStats.voiceDetector == null ? '--'
+      : `${serverStats.voiceDetector === 'neural' ? 'Silero VAD' : 'Level'} / ${Math.round((serverStats.speechProbability || 0) * 100)}%`],
+    ['Noise removed / volume match', serverStats.voiceDetector == null ? '--'
+      : `${serverStats.noiseReducedDb ?? 0} dB / ${(serverStats.loudnessGainDb ?? 0) > 0 ? '+' : ''}${serverStats.loudnessGainDb ?? 0} dB`],
   ];
   return (
     <details className="mt-4 border-t border-line pt-3">

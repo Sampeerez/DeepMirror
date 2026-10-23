@@ -19,6 +19,7 @@ import contextlib
 import json
 import logging
 import math
+import threading
 import time
 from dataclasses import dataclass, replace
 from typing import Any
@@ -28,7 +29,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.audio.effects import EffectsChain
 from backend.audio.protocol import decode_frame, encode_frame
-from backend.audio.streaming import RealtimeVoiceStream, StreamTiming
+from backend.audio.streaming import RealtimeVoiceStream, StreamCleanup, StreamTiming
+from backend.audio.voice_activity import load_vad
 from backend.config import Settings
 from backend.inference.auto_pitch import AutoPitch
 from backend.inference.pipeline import ConversionSettings, VoiceConverter
@@ -44,6 +46,8 @@ CHUNK_SIZE_RANGE = (128, 65536)
 SILENCE_THRESHOLD_RANGE = (-80.0, -20.0)
 LOOKBACK_RANGE = (0.2, 3.0)
 LOOKAHEAD_RANGE = (0.0, 0.5)
+NOISE_REDUCTION_RANGE = (0.0, 30.0)
+AMBIENT_RANGE = (-60.0, 0.0)
 
 
 def bounded_number(value: Any, cast: type, low: float, high: float) -> Any:
@@ -59,8 +63,6 @@ def bounded_number(value: Any, cast: type, low: float, high: float) -> Any:
     return number if low <= number <= high else None
 
 
-# Falling asleep needs the level this far below the wake threshold.
-SILENCE_HYSTERESIS_DB = 3.0
 LEVEL_FRAME_SECONDS = 0.01
 
 
@@ -98,6 +100,7 @@ class StreamSession:
         self.chunk_size = chunk_size
         self.conversion = manager.default_conversion()
         self.formant_shift = 0.0
+        self._pending_f0: str | None = None   # pitch tracker loading in the background
         # "auto": follow the speaker's register onto the voice's (needs voice F0 stats).
         self.pitch_mode = "auto"
         self._auto_pitch: AutoPitch | None = None
@@ -106,6 +109,10 @@ class StreamSession:
         self.bypass = False
         self.silence_saver = settings.SILENCE_SAVER
         self.silence_threshold_db = settings.SILENCE_THRESHOLD_DB
+        # Around the model: voice isolation, noise reduction, ambience, loudness matching.
+        self.cleanup = StreamCleanup(isolate_voice=settings.VOICE_ISOLATION,
+                                     noise_reduction_db=settings.NOISE_REDUCTION_DB,
+                                     ambient_db=settings.AMBIENT_DB, match_loudness=settings.MATCH_LOUDNESS)
         self.timing = StreamTiming(
             lookback_seconds=lookback,
             lookahead_seconds=lookahead,
@@ -129,6 +136,7 @@ class StreamSession:
 
     def apply(self, payload: dict) -> None:
         """Merge a config or settings message; invalid fields are logged and ignored."""
+        previous_f0 = self.conversion.f0_method
         self.conversion = self.conversion.with_payload(payload)
         formant = bounded_number(payload.get("formant_shift"), float, -24.0, 24.0)
         if formant is not None:
@@ -146,8 +154,58 @@ class StreamSession:
         threshold = bounded_number(payload.get("silence_threshold_db"), float, *SILENCE_THRESHOLD_RANGE)
         if threshold is not None:
             self.silence_threshold_db = threshold
+        self._apply_cleanup(payload)
+        self._preload_new_f0(previous_f0)
         self._apply_transport(payload)
         self._apply_timing(payload)
+
+    def _preload_new_f0(self, previous: str) -> None:
+        """A newly chosen pitch tracker loads in the background; until then the old one keeps running."""
+        method = self.conversion.f0_method
+        if method == previous:
+            return
+        self.manager.note_f0_method(method)
+        if self.manager.converter is None or self.manager.pitch_ready(method):
+            self._pending_f0 = None
+            return
+        self.conversion = replace(self.conversion, f0_method=previous)
+        self._pending_f0 = method
+
+        def load() -> None:
+            try:
+                self.manager.prepare_pitch(method)
+            except Exception:
+                logger.exception("Could not load the %s pitch tracker", method)
+                self._pending_f0 = None
+                return
+            if self._pending_f0 == method:
+                self.conversion = replace(self.conversion, f0_method=method)
+                self._pending_f0 = None
+
+        threading.Thread(target=load, name=f"load-{method}", daemon=True).start()
+
+    def _apply_cleanup(self, payload: dict) -> None:
+        cleanup = self.cleanup
+        changes: dict[str, Any] = {}
+        for key in ("isolate_voice", "match_loudness"):
+            if isinstance(payload.get(key), bool):
+                changes[key] = payload[key]
+        reduction = bounded_number(payload.get("noise_reduction_db"), float, *NOISE_REDUCTION_RANGE)
+        if reduction is not None:
+            changes["noise_reduction_db"] = reduction
+        ambient = bounded_number(payload.get("ambient_db"), float, *AMBIENT_RANGE)
+        if ambient is not None:
+            changes["ambient_db"] = ambient
+        if changes:
+            self.cleanup = replace(cleanup, **changes)
+            if self._stream is not None:
+                self._stream.set_cleanup(self._stream_cleanup())
+
+    def _stream_cleanup(self) -> StreamCleanup:
+        """The cleanup the stream can honour: voice isolation needs the neural detector."""
+        stream = self._stream
+        neural = stream is not None and stream.speech is not None and stream.speech.neural
+        return replace(self.cleanup, isolate_voice=self.cleanup.isolate_voice and neural)
 
     def _apply_transport(self, payload: dict) -> None:
         for key, (low, high) in (("sample_rate", SAMPLE_RATE_RANGE), ("chunk_size", CHUNK_SIZE_RANGE)):
@@ -228,7 +286,10 @@ class StreamSession:
                                           on_f0=observe_f0)
                 return audio, converter.output_rate
 
-            self._stream = RealtimeVoiceStream(self.sample_rate, render, self.timing)
+            vad = load_vad(self.manager.vad_path(), lambda: self.silence_threshold_db)
+            stream = RealtimeVoiceStream(self.sample_rate, render, self.timing, vad=vad)
+            self._stream = stream
+            stream.set_cleanup(self._stream_cleanup())
             self._stream_converter = converter
         return self._stream
 
@@ -241,14 +302,12 @@ class StreamSession:
         return (self.config.SILENCE_HOLD_SECONDS + self.timing.algorithmic_delay()
                 + self.chunk_size / self.sample_rate)
 
-    def _update_silence(self, audio: np.ndarray) -> bool:
+    def _update_silence(self, audio: np.ndarray, speech: bool) -> bool:
+        """True when inference may sleep: no speech for the hold plus everything in flight."""
         if not self.silence_saver:
             self._silence_seconds = 0.0
             return False
-        threshold = self.silence_threshold_db
-        if not self.sleeping:
-            threshold -= SILENCE_HYSTERESIS_DB
-        if self.input_level_db >= threshold:
+        if speech:
             self._silence_seconds = 0.0
             return False
         self._silence_seconds += len(audio) / self.sample_rate
@@ -274,20 +333,21 @@ class StreamSession:
         else:
             mode = "rvc"
             self.eligible_frames += 1
-            asleep = self._update_silence(processed)
+            stream = self._realtime_stream(converter)
+            speech = stream.listen(processed)
+            asleep = self._update_silence(processed, speech)
             if asleep and self.sleeping:
-                # Keep listening so the next onset is rendered with real context.
-                processed = self._realtime_stream(converter).idle(processed)
+                # Keep listening (the next onset gets real context); the room still plays.
+                processed = stream.ambient()
             else:
                 model_started = time.perf_counter()
                 try:
-                    rendered = self._realtime_stream(converter).process(processed)
+                    # Last render before sleeping: the voice fades out instead of stepping to zero.
+                    rendered = stream.convert(fade_out=asleep)
                 except Exception as exc:
                     return self._failure(exc, audio, model_started)
-                if asleep:  # last render before sleeping: fade out instead of a step to zero
-                    rendered = rendered * np.linspace(1.0, 0.0, len(rendered), dtype=np.float32)
-                    if self._auto_pitch is not None:
-                        self._auto_pitch.on_pause()
+                if asleep and self._auto_pitch is not None:
+                    self._auto_pitch.on_pause()
                 processed = rendered
                 self.sleeping = asleep
                 model_ms = (time.perf_counter() - model_started) * 1000.0
@@ -313,6 +373,21 @@ class StreamSession:
 
     # --- Status -------------------------------------------------------------
 
+    def _cleanup_status(self) -> dict:
+        stream = self._stream
+        stats = stream.stats if stream is not None else None
+        return {
+            "isolate_voice": self.cleanup.isolate_voice,
+            "noise_reduction_db": self.cleanup.noise_reduction_db,
+            "ambient_db": self.cleanup.ambient_db,
+            "match_loudness": self.cleanup.match_loudness,
+            "voice_detector": "neural" if (stats and stats.neural_vad) or (stream is None and self.manager.vad_path())
+            else "level",
+            "speech_probability": stats.speech_probability if stats else 0.0,
+            "noise_reduced_db": stats.noise_reduction_db if stats else 0.0,
+            "loudness_gain_db": stats.loudness_gain_db if stats else 0.0,
+        }
+
     def status(self) -> dict:
         converter = self.manager.converter
         active = self.manager.active_model_name
@@ -327,6 +402,9 @@ class StreamSession:
             "processing_error": self.processing_error,
             "bypass": self.bypass,
             "active_model": active,
+            "loading_model": (self.manager.loading or {}).get("name"),
+            "loading_stage": (self.manager.loading or {}).get("stage"),
+            "f0_pending": self._pending_f0,
             "silence_saver": self.silence_saver,
             "silence_threshold_db": self.silence_threshold_db,
             "inference_sleeping": bool(active and not self.bypass and self.sleeping),
@@ -337,6 +415,7 @@ class StreamSession:
             "auto_pitch_available": bool(converter is not None and converter.voice.f0_stats is not None),
             "auto_pitch_shift": self.auto_pitch_shift,
             "input_level_db": None if math.isinf(self.input_level_db) else round(self.input_level_db, 1),
+            **self._cleanup_status(),
         }
         self.eligible_frames = self.inference_frames = 0
         return message

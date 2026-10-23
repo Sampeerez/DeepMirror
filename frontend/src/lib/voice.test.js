@@ -74,4 +74,12 @@ describe('recommended defaults', () => {
     const payload = streamSettingsPayload(DEFAULT_VOICE, {}, false, { silenceSaver: true, silenceThresholdDb: -60 });
     expect(payload.pitch_mode).toBe('auto');
   });
+
+  it('sends the clean-up around the model with recommended defaults', () => {
+    const payload = streamSettingsPayload(DEFAULT_VOICE, {}, false, { silenceSaver: true, silenceThresholdDb: -60 });
+    expect(payload).toMatchObject({ isolate_voice: true, noise_reduction_db: 12, ambient_db: -6, match_loudness: true });
+    const custom = withChanges(DEFAULT_VOICE, { ambientDb: -60 });
+    expect(custom.customized).toContain('ambientDb');
+    expect(restoreStoredVoice({ ...custom, noiseReductionDb: 3 }).noiseReductionDb).toBe(12);
+  });
 });

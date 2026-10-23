@@ -1,0 +1,231 @@
+"""Voice activity: which parts of the input are someone speaking.
+
+Silero VAD (MIT, ONNX, about 0.1 ms per 32 ms frame on a CPU) tells speech
+from room noise, breaths, clicks and keyboard sounds far better than a level
+threshold, and it is level-independent: a whisper at -70 dBFS still counts
+as speech, a loud breath does not. When its weights are not available yet,
+a level detector stands in so the stream keeps working.
+
+``SpeechTimeline`` keeps the per-frame decisions on an absolute timeline and
+turns them into a smooth 0..1 gain for any span of the input, with:
+
+* hysteresis (enter at p >= 0.5, leave below 0.35), so one frame does not
+  flip the decision, and a minimum of confident frames per segment, so the
+  brief wobble a breath or a click causes is not taken for speech;
+* pre-roll: speech starts a little before the detector is sure, so attacks
+  and soft first consonants are kept (the realtime stream emits audio with a
+  lookahead, so these future frames are already known);
+* hang-over: speech lasts a little after it, so word endings, final
+  consonants and short gaps between words are kept;
+* raised-cosine ramps instead of steps.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+from collections.abc import Callable
+from functools import cache
+from pathlib import Path
+
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+RATE = 16000
+FRAME = 512                 # Silero's frame at 16 kHz (32 ms)
+CONTEXT = 64                # samples of the previous frame it expects in front
+ENTER, LEAVE = 0.5, 0.35
+# A segment is speech only with this many confident frames: breaths and clicks
+# make the detector waver around 0.5 for a frame or two, speech sits near 1.
+CONFIDENT, MIN_CONFIDENT_FRAMES = 0.7, 3
+PRE_ROLL_SECONDS = 0.08
+HANG_OVER_SECONDS = 0.3
+RAMP_SECONDS = 0.02
+HISTORY_SECONDS = 8.0       # decisions kept (more than any stream window)
+
+
+@cache
+def _session(model_path: str):
+    """One ONNX Runtime session per process; each stream keeps its own recurrent state."""
+    import onnxruntime as ort
+
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    options.log_severity_level = 3
+    return ort.InferenceSession(model_path, options, providers=["CPUExecutionProvider"])
+
+
+class SileroVad:
+    """Streaming Silero VAD: feed 16 kHz audio, get one speech probability per 32 ms."""
+
+    neural = True
+
+    def __init__(self, model_path: Path) -> None:
+        self._session = _session(str(model_path))
+        self._rate = np.array(RATE, dtype=np.int64)
+        self.reset()
+
+    def reset(self) -> None:
+        self._state = np.zeros((2, 1, 128), np.float32)
+        self._context = np.zeros((1, CONTEXT), np.float32)
+        self._pending = np.zeros(0, np.float32)
+
+    def feed(self, audio16: np.ndarray) -> np.ndarray:
+        audio = np.concatenate([self._pending, np.asarray(audio16, np.float32)])
+        count = len(audio) // FRAME
+        self._pending = audio[count * FRAME:]
+        probabilities = np.empty(count, np.float32)
+        for k in range(count):
+            frame = np.concatenate([self._context, audio[None, k * FRAME:(k + 1) * FRAME]], axis=1)
+            output, state = self._session.run(None, {"input": frame, "state": self._state, "sr": self._rate})
+            self._state = np.asarray(state, np.float32)
+            self._context = frame[:, -CONTEXT:]
+            probabilities[k] = float(np.asarray(output).reshape(-1)[0])
+        return probabilities
+
+
+class LevelVad:
+    """Stand-in when Silero is unavailable: a frame is speech when it is loud enough."""
+
+    neural = False
+
+    def __init__(self, threshold_db: Callable[[], float]) -> None:
+        self.threshold_db = threshold_db
+        self.reset()
+
+    def reset(self) -> None:
+        self._pending = np.zeros(0, np.float32)
+
+    def feed(self, audio16: np.ndarray) -> np.ndarray:
+        audio = np.concatenate([self._pending, np.asarray(audio16, np.float32)])
+        count = len(audio) // FRAME
+        self._pending = audio[count * FRAME:]
+        if count == 0:
+            return np.zeros(0, np.float32)
+        frames = audio[: count * FRAME].reshape(count, FRAME).astype(np.float64)
+        # Loudest 10 ms (160 samples) of each frame, like the chunk level meter.
+        power = np.square(frames[:, :480]).reshape(count, 3, 160).mean(axis=2).max(axis=1)
+        level = 10 * np.log10(np.maximum(power, 1e-12))
+        return (level >= self.threshold_db()).astype(np.float32)
+
+
+def load_vad(model_path: Path | None, threshold_db: Callable[[], float]) -> SileroVad | LevelVad:
+    if model_path is not None and model_path.is_file():
+        try:
+            return SileroVad(model_path)
+        except Exception:
+            logger.exception("Silero VAD failed to load; using the level detector")
+    return LevelVad(threshold_db)
+
+
+class SpeechTimeline:
+    """Speech decisions on the absolute 16 kHz timeline of one stream."""
+
+    def __init__(self, detector: SileroVad | LevelVad) -> None:
+        self.detector = detector
+        self.reset()
+
+    @property
+    def neural(self) -> bool:
+        return bool(self.detector.neural)
+
+    def reset(self) -> None:
+        self.detector.reset()
+        self._probabilities = np.zeros(0, np.float32)
+        self._first_frame = 0          # absolute index of _probabilities[0]
+        self._fed = 0                  # 16 kHz samples fed so far
+
+    @property
+    def frames_known(self) -> int:
+        return self._first_frame + len(self._probabilities)
+
+    def feed(self, audio16: np.ndarray) -> np.ndarray:
+        """Add newly heard 16 kHz audio; returns the probabilities of the frames it completed."""
+        fresh = self.detector.feed(audio16)
+        self._fed += len(audio16)
+        self._probabilities = np.concatenate([self._probabilities, fresh])
+        keep = int(HISTORY_SECONDS * RATE / FRAME)
+        if len(self._probabilities) > keep:
+            drop = len(self._probabilities) - keep
+            self._probabilities = self._probabilities[drop:]
+            self._first_frame += drop
+        return fresh
+
+    def last_probability(self) -> float:
+        return float(self._probabilities[-1]) if len(self._probabilities) else 0.0
+
+    def _speech_frames(self) -> np.ndarray:
+        """Hysteresis, pre-roll and hang-over over the known frames (bool per frame)."""
+        probabilities = self._probabilities
+        state = np.zeros(len(probabilities), bool)
+        speaking = False
+        start = 0
+        for i, p in enumerate(probabilities):
+            now = p >= ENTER or (speaking and p >= LEAVE)
+            if now and not speaking:
+                start = i
+            if speaking and not now:
+                self._accept(state, probabilities, start, i)
+            speaking = now
+        if speaking:
+            self._accept(state, probabilities, start, len(probabilities))
+        if not state.any():
+            return state
+        frame_seconds = FRAME / RATE
+        pre, hang = math.ceil(PRE_ROLL_SECONDS / frame_seconds), math.ceil(HANG_OVER_SECONDS / frame_seconds)
+        kernel = np.ones(pre + hang + 1)
+        # Frame i is speech if any speech frame lies in [i - hang, i + pre].
+        widened = np.convolve(state.astype(float), kernel, mode="full")[pre:pre + len(state)] > 0
+        return widened
+
+    @staticmethod
+    def _accept(state: np.ndarray, probabilities: np.ndarray, start: int, end: int) -> None:
+        if int(np.count_nonzero(probabilities[start:end] >= CONFIDENT)) >= MIN_CONFIDENT_FRAMES:
+            state[start:end] = True
+
+    def gain(self, start: int, length: int, rate: int) -> np.ndarray:
+        """Speech gain (0..1) for ``length`` samples at ``rate`` starting at absolute sample ``start``.
+
+        Frames not heard yet repeat the newest decision.
+        """
+        if length <= 0:
+            return np.zeros(0, np.float32)
+        speech = self._speech_frames()
+        times = (start + np.arange(length)) * (RATE / rate)          # in 16 kHz samples
+        frames = np.floor(times / FRAME).astype(np.int64) - self._first_frame
+        if len(speech) == 0:
+            return np.zeros(length, np.float32)
+        hard = speech[np.clip(frames, 0, len(speech) - 1)].astype(np.float32)
+        ramp = max(1, round(RAMP_SECONDS * rate))
+        if ramp > 1 and 0 < hard.sum() < length:
+            window = np.sin(np.linspace(0, np.pi, 2 * ramp + 1)) ** 2
+            # Pad with the edge values so the span's borders are not faded.
+            padded = np.pad(hard, (ramp, ramp), mode="edge")
+            hard = (np.convolve(padded, window / window.sum(), mode="same")[ramp:-ramp]).astype(np.float32)
+        return np.clip(hard, 0.0, 1.0)
+
+    def noise_only(self, start: int, length: int, rate: int) -> np.ndarray:
+        """Samples that are certainly not speech (bool): safe to learn the room noise from.
+
+        Stricter than ``gain() == 0``: the detector must be clearly below its
+        thresholds, away from any (even rejected) speech-like wobble, and old
+        enough that no future frame can still turn it into speech.
+        """
+        if length <= 0 or len(self._probabilities) == 0:
+            return np.zeros(max(length, 0), bool)
+        unsure = self._probabilities >= 0.2
+        margin = math.ceil(HANG_OVER_SECONDS * RATE / FRAME)
+        unsure = np.convolve(unsure.astype(float), np.ones(2 * margin + 1), mode="same") > 0
+        settled = np.arange(len(unsure)) < len(unsure) - margin   # the newest frames may still change
+        quiet = ~unsure & settled
+        frames = np.floor((start + np.arange(length)) * (RATE / rate) / FRAME).astype(np.int64) - self._first_frame
+        known = (frames >= 0) & (frames < len(quiet))
+        return known & quiet[np.clip(frames, 0, len(quiet) - 1)]
+
+    def speech_in_last(self, seconds: float) -> bool:
+        """Whether the detector heard speech in the newest ``seconds`` (before pre-roll widening)."""
+        frames = max(1, math.ceil(seconds * RATE / FRAME))
+        recent = self._probabilities[-frames:]
+        return bool(len(recent) and recent.max() >= ENTER)

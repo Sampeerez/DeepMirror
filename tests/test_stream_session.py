@@ -53,7 +53,8 @@ class TestSilenceSaver:
     def test_sustained_silence_stops_inference_after_the_hold(self, session, fake_voice):
         quiet = np.zeros(CHUNK, dtype=np.float32)
         session.process(loud())
-        sleep_chunks = int(np.ceil(session._sleep_after_seconds() * RATE / CHUNK))
+        # +1: the detector's 32 ms frame straddling the last loud chunk still counts as speech.
+        sleep_chunks = int(np.ceil(session._sleep_after_seconds() * RATE / CHUNK)) + 1
         for _ in range(sleep_chunks):
             session.process(quiet)
         assert session.sleeping  # the last of those rendered once more, fading out

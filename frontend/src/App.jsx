@@ -51,6 +51,8 @@ export default function App() {
   // Deep links: ?tab=models|converter selects a tab, ?settings opens the modal.
   const [tab, setTab] = useState(() => readTabFromSearch(window.location.search));
   const [activeModel, setActiveModel] = useState(null);
+  // A voice the server is still preparing (loading, warming up): never shown as active.
+  const [loadingModel, setLoadingModel] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () => new URLSearchParams(window.location.search).has('settings')
   );
@@ -150,7 +152,10 @@ export default function App() {
       if (document.hidden) return;
       try {
         const active = await getActiveModel({ timeoutMs: ACTIVE_MODEL_POLL_MS });
-        if (!cancelled) setActiveModel(active?.name || active?.model || null);
+        if (!cancelled) {
+          setActiveModel(active?.name || active?.model || null);
+          setLoadingModel(active?.loading?.name || null);
+        }
       } catch {
         // Server may not be ready yet, or is busy loading a checkpoint.
       }
@@ -171,6 +176,7 @@ export default function App() {
       }
       if (msg.type === 'status' && msg.active_model !== undefined) {
         setActiveModel(msg.active_model);
+        setLoadingModel(msg.loading_model || null);
       }
     });
   }, [setOnSettingsResponse]);
@@ -332,6 +338,9 @@ export default function App() {
               onRestoreRecommended={handleRestoreRecommended}
               autoPitchAvailable={serverStats.autoPitchAvailable}
               autoPitchShift={serverStats.autoPitchShift}
+              f0Pending={serverStats.f0Pending}
+              tooSlow={pipeline.isRunning && !serverStats.inferenceSleeping && serverStats.modelMs > 0
+                && serverStats.modelMs > (runtimeConfig.chunkSize / runtimeConfig.sampleRate) * 1000 * 0.95}
               hasModel={Boolean(activeModel)}
               isRunning={pipeline.isRunning}
               f0Methods={runtimeConfig.f0Methods}
@@ -357,6 +366,7 @@ export default function App() {
         <ModelManager
           activeModel={activeModel}
           onActiveModelChange={setActiveModel}
+          loadingModel={loadingModel}
           active={tab === 'models'}
         />
         <RuntimeReadiness config={runtimeConfig} checking={runtime.checking} error={runtime.error}

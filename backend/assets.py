@@ -1,4 +1,4 @@
-"""Model assets: the HuBERT content encoder and RMVPE weights every voice needs.
+"""Model assets: the HuBERT content encoder and RMVPE weights every voice needs, plus the voice detector.
 
 They are fetched once from pinned Hugging Face revisions and verified by
 SHA-256 before use. Copies left by earlier OpenVoiceChanger versions are
@@ -65,6 +65,10 @@ ASSETS = (
     Asset("hubert", "hubert_base.pt", f"{PINNED_REVISION}/hubert_base.pt", HUBERT_SHA256, 189507909, True),
     Asset("rmvpe", "rmvpe.pt", f"{PINNED_REVISION}/rmvpe.pt",
           "6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193", 181184272, False),
+    # Silero VAD (MIT): tells speech from noise and breaths in the live stream.
+    Asset("vad", "silero_vad.onnx",
+          "https://github.com/snakers4/silero-vad/raw/v6.2.3/src/silero_vad/data/silero_vad.onnx",
+          "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3", 2327524, False),
 )
 
 

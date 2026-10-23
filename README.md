@@ -64,7 +64,11 @@ OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OV
 - Pitch and formant shifting, RVC controls (index rate, filter radius, RMS mix, protect, Crepe hop) and **13 pitch trackers**: PM, Harvest, DIO, Crepe/Mangio-Crepe (full and tiny), RMVPE, FCPE and offline hybrids. RMVPE is chosen automatically on a GPU
 - **13-effect DSP rack**: noise gate, robot, whisper, telephone, distortion, bitcrush, chorus, echo, reverb, EQ, compressor, output gain, limiter
 - **16 built-in presets** plus your own, saving the whole Voice Lab state
-- **Silence Saver** pauses inference during silence without cutting the end of the last word, wakes on a single quiet syllable and keeps listening while asleep, so the next word starts with real context
+- **Speech-only conversion**: a neural voice detector (Silero VAD) converts only speech. Room noise, breaths and clicks are never sent through the voice model; the room stays audible, unconverted and time-aligned (Room ambience slider)
+- **Noise reduction** for what the model hears, learnt from the pauses, gentle while you speak so soft word endings survive
+- **Match my volume**: the converted voice comes out as loud as you speak, whatever the model's own level, with a soft limiter against clipping
+- **Silence Saver** pauses inference when nobody speaks without cutting the end of the last word, wakes on a single quiet syllable and keeps listening while asleep, so the next word starts with real context
+- Switching voices is seamless: the previous voice keeps converting until the new one is fully loaded and warm, and only then is it shown as active
 - **Auto pitch**: voices trained in the studio store their pitch range, and the live stream moves your register onto the voice's (for example about +12 semitones from a low voice to a high one) while keeping your intonation. Pitch and formant start at 0, and every RVC control starts at its recommended value until you change it
 - Spectrum, meters, latency history, server timing (model/DSP/network) and stream diagnostics
 - Output recorder (<kbd>R</kbd>) with a take library stored in the browser; <kbd>B</kbd> toggles an A/B bypass
@@ -130,6 +134,8 @@ intonation at every chunk boundary and the seams click. For every chunk, the eng
 3. **Joins renders with SOLA.** The tail held back from the previous render is matched against the new one within ±6 ms, then crossfaded at the best-correlated offset. Windows join without clicks or phasing.
 4. **Resamples with soxr.** soxr is a band-limited resampler, unlike FFT resampling, which wraps the end of each window into its start.
 5. **Applies a shift-invariant loudness envelope.** The RMS mix envelope is computed with a sliding window, so overlapping renders agree on the level they apply.
+6. **Converts speech only.** Silero VAD marks speech every 32 ms, with pre-roll and hang-over so attacks and endings are kept, and a minimum of confident frames so a breath is not taken for speech. Outside speech the output is your room, unconverted, at the ambience level; under speech, the noise the reducer removed plays back too, so there are no holes in the room sound.
+7. **Matches your level.** The converted voice is measured against your voice over the same speech frames and a slow gain (about 0.5 s) brings it to your loudness.
 
 Only the end of each window is vocoded (the content encoder and flow still see the whole
 window), and on CPU the vocoder runs on ONNX Runtime. On a GTX 1660 SUPER the Quality
@@ -163,6 +169,10 @@ project folder. Common ones:
 | `OVC_DEFAULT_INDEX_RATE` / `OVC_DEFAULT_PROTECT` / ... | RVC defaults | Starting values of the Voice Lab controls |
 | `OVC_SILENCE_THRESHOLD_DB` | `-60` | Level (loudest 10 ms of a chunk) below which Silence Saver pauses inference |
 | `OVC_RESTORE_LAST_VOICE` | `true` | Load the voice that was active when the studio last closed |
+| `OVC_VOICE_ISOLATION` | `true` | Convert speech only; noise and breaths play as unconverted ambience |
+| `OVC_NOISE_REDUCTION_DB` | `12` | Room noise removed from what the model hears (0 = off) |
+| `OVC_AMBIENT_DB` | `-6` | Level of the unconverted room around the voice (-60 = off) |
+| `OVC_MATCH_LOUDNESS` | `true` | Bring the converted voice to the speaker's own level |
 | `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See [Security](#security) |
 | `OVC_CORS_ORIGINS` | local origins | Extra origins allowed to use the API |
 

@@ -78,7 +78,7 @@ function pitchHint(voice, autoPitchAvailable, autoPitchShift, isRunning) {
 
 function VoiceLab({
   voice, onChange, onRestoreRecommended, hasModel, isRunning, autoPitchAvailable = false, autoPitchShift = null,
-  f0Methods = FALLBACK_F0_METHODS,
+  f0Pending = null, tooSlow = false, f0Methods = FALLBACK_F0_METHODS,
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const autoActive = voice.autoPitch && autoPitchAvailable && autoPitchShift !== null;
@@ -160,10 +160,61 @@ function VoiceLab({
           ))}
         </select>
         <div className="mt-2 flex items-start justify-between gap-3">
-          <p className="text-[11px] leading-4 text-fg-subtle">{selectedMethod.description}</p>
+          <p className="text-[11px] leading-4 text-fg-subtle">
+            {selectedMethod.description}
+            {tooSlow ? (
+              <span className="mt-1 block text-warn-fg">
+                Too slow for live audio on this device: the voice will stutter. RMVPE (or a larger buffer) keeps up.
+              </span>
+            ) : null}
+          </p>
           <span className={`shrink-0 text-[11px] font-medium ${selectedMethod.available ? 'text-ok-fg' : 'text-warn-fg'}`}>
-            {selectedMethod.available ? 'Ready' : selectedMethod.reason}
+            {!selectedMethod.available ? selectedMethod.reason
+              : f0Pending === selectedMethod.id ? 'Loading… (the previous one keeps working)' : 'Ready'}
           </span>
+        </div>
+      </div>
+
+      <div className="mt-6 border-t border-line pt-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium text-fg-muted">Convert speech only</p>
+            <p className="mt-1 text-[11px] leading-4 text-fg-subtle">
+              Noise, breaths and clicks are not converted; the room stays audible as it is.
+            </p>
+          </div>
+          <Toggle checked={voice.isolateVoice} onChange={(isolateVoice) => onChange({ isolateVoice })}
+            label="Convert speech only" />
+        </div>
+        <div className={`mt-4 space-y-4 ${voice.isolateVoice ? '' : 'opacity-60'}`}>
+          <MiniSlider
+            label="Room ambience"
+            value={voice.ambientDb}
+            min={-60}
+            max={0}
+            step={1}
+            onChange={(value) => onChange({ ambientDb: value })}
+            format={(v) => (v <= -60 ? 'Off' : `${Math.round(v)} dB`)}
+          />
+        </div>
+        <div className="mt-4">
+          <MiniSlider
+            label="Noise reduction (what the model hears)"
+            value={voice.noiseReductionDb}
+            min={0}
+            max={24}
+            step={1}
+            onChange={(value) => onChange({ noiseReductionDb: value })}
+            format={(v) => (v <= 0 ? 'Off' : `${Math.round(v)} dB`)}
+          />
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium text-fg-muted">Match my volume</p>
+            <p className="mt-1 text-[11px] leading-4 text-fg-subtle">The converted voice is as loud as you speak.</p>
+          </div>
+          <Toggle checked={voice.matchLoudness} onChange={(matchLoudness) => onChange({ matchLoudness })}
+            label="Match my volume" />
         </div>
       </div>
 

@@ -29,6 +29,12 @@ const DEFAULT_SERVER_STATS = {
   autoPitchAvailable: false,
   autoPitchShift: null,
   inputLevelDb: null,
+  voiceDetector: null,
+  speechProbability: 0,
+  noiseReducedDb: 0,
+  loudnessGainDb: 0,
+  loadingModel: null,
+  f0Pending: null,
 };
 
 function transmitFrame(ws, buffer, seqNum) {
@@ -192,6 +198,12 @@ export default function useWebSocket() {
               autoPitchAvailable: Boolean(msg.auto_pitch_available),
               autoPitchShift: typeof msg.auto_pitch_shift === 'number' ? msg.auto_pitch_shift : null,
               inputLevelDb: typeof msg.input_level_db === 'number' ? msg.input_level_db : null,
+              voiceDetector: msg.voice_detector ?? null,
+              speechProbability: msg.speech_probability ?? 0,
+              noiseReducedDb: msg.noise_reduced_db ?? 0,
+              loudnessGainDb: msg.loudness_gain_db ?? 0,
+              loadingModel: msg.loading_model ?? null,
+              f0Pending: msg.f0_pending ?? null,
             });
           }
           onSettingsResponseRef.current?.(msg);

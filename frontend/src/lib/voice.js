@@ -15,6 +15,12 @@ export const DEFAULT_VOICE = {
   rmsMixRate: 0.25,
   protect: 0.33,
   crepeHopLength: 160,
+  // Around the model (live): convert speech only, clean the room noise out of
+  // what the model hears, keep the room audible unconverted, match your volume.
+  isolateVoice: true,
+  noiseReductionDb: 12,
+  ambientDb: -6,
+  matchLoudness: true,
   customized: [],
 };
 
@@ -119,6 +125,10 @@ export function streamSettingsPayload(voice, effects, bypass, runtimeConfig) {
     rms_mix_rate: voice.rmsMixRate,
     protect: voice.protect,
     crepe_hop_length: voice.crepeHopLength,
+    isolate_voice: voice.isolateVoice,
+    noise_reduction_db: voice.noiseReductionDb,
+    ambient_db: voice.ambientDb,
+    match_loudness: voice.matchLoudness,
     effects,
     bypass,
     silence_saver: runtimeConfig.silenceSaver,

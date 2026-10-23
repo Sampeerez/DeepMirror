@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     # of each chunk, so a single quiet word still wakes it.
     SILENCE_THRESHOLD_DB: float = -60.0
     SILENCE_HOLD_SECONDS: float = 0.3
+    # Around the model (live): convert speech only (Silero VAD), clean the
+    # model's input of room noise, mix the room back unconverted at
+    # AMBIENT_DB (-60 = off), and match the converted voice to the speaker's level.
+    VOICE_ISOLATION: bool = True
+    NOISE_REDUCTION_DB: float = 12.0
+    AMBIENT_DB: float = -6.0
+    MATCH_LOUDNESS: bool = True
 
     # --- File conversion ----------------------------------------------------
     MAX_CONVERT_SECONDS: int = 600

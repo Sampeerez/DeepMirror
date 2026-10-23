@@ -12,6 +12,7 @@ import importlib
 import importlib.util
 import logging
 import math
+import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import cache
@@ -158,10 +159,32 @@ class PitchExtractor:
         self.rmvpe_path = rmvpe_path
         self._rmvpe = None
         self._fcpe = None
+        self._ready: set[str] = {"pm", "harvest", "dio"}   # no model to load
+        self._load_lock = threading.Lock()
 
     def close(self) -> None:
         self._rmvpe = None
         self._fcpe = None
+        self._ready = {"pm", "harvest", "dio"}
+
+    def ready(self, method: str) -> bool:
+        """Whether ``method`` runs without first loading a model (and its first-call setup)."""
+        info = PITCH_METHOD_BY_ID.get(method)
+        if info is None:
+            return False
+        if info.components:
+            return all(self.ready(component) for component in info.components)
+        return method in self._ready
+
+    def prepare(self, method: str) -> None:
+        """Load ``method``'s model and run it once, so its first live use is not slow."""
+        if self.ready(method):
+            return
+        with self._load_lock:
+            if not self.ready(method):
+                t = np.arange(8000) / SAMPLE_RATE
+                probe = (0.1 * np.sin(2 * np.pi * 150 * t)).astype(np.float32)
+                self.estimate(method, probe, len(probe) // HOP)
 
     def estimate(self, method: str, audio: np.ndarray, frames: int, *, filter_radius: int = 3,
                  crepe_hop_length: int = 160, rmvpe_threshold: float = 0.03) -> np.ndarray:
@@ -185,6 +208,7 @@ class PitchExtractor:
             f0 = trackers[method]()
         else:
             f0 = self._crepe(audio, frames, method, crepe_hop_length)
+        self._ready.add(method)
         return suppress_octave_spikes(fit_frames(f0, frames))
 
     @staticmethod
