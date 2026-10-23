@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
@@ -50,6 +51,9 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         if settings.HOST not in {"127.0.0.1", "localhost", "::1"}:
             logger.warning("Listening on %s: anyone who can reach it can upload and run models.", settings.HOST)
         logger.info("OpenVoiceChanger %s ready on http://%s:%d", app.version, settings.HOST, settings.PORT)
+        if settings.RESTORE_LAST_VOICE:
+            threading.Thread(target=app.state.model_manager.restore_last_voice, name="restore-voice",
+                             daemon=True).start()
         if on_ready is not None:
             on_ready()
         try:

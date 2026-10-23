@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-export default function StreamDiagnostics({ streamInfo, playbackStats, transport = {}, serverMs = 0 }) {
+export default function StreamDiagnostics({ streamInfo, playbackStats, transport = {}, serverMs = 0, serverStats = {} }) {
   const previous = useRef(0);
   const [recentIssue, setRecentIssue] = useState(false);
   const running = Boolean(streamInfo);
@@ -27,6 +27,8 @@ export default function StreamDiagnostics({ streamInfo, playbackStats, transport
     ['Dropped / timed out frames', rate ? `${transport.dropped || 0} / ${transport.timedOut || 0}` : '--'],
     ['Playback underruns', rate && playbackStats ? playbackStats.underruns : '--'],
     ['Playback trimmed', ms(playbackStats == null ? null : playbackStats.droppedSamples / rate * 1000)],
+    ['Mic level / sleep threshold', serverStats.inputLevelDb == null ? '--'
+      : `${Math.round(serverStats.inputLevelDb)} / ${Math.round(serverStats.silenceThresholdDb ?? -60)} dB`],
   ];
   return (
     <details className="mt-4 border-t border-line pt-3">

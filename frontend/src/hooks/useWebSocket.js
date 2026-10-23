@@ -22,10 +22,13 @@ const DEFAULT_SERVER_STATS = {
   effectsActive: 0,
   bypass: false,
   silenceSaver: true,
-  silenceThresholdDb: -52,
+  silenceThresholdDb: -60,
   inferenceSleeping: false,
   inferenceDutyPercent: 0,
   processingError: null,
+  autoPitchAvailable: false,
+  autoPitchShift: null,
+  inputLevelDb: null,
 };
 
 function transmitFrame(ws, buffer, seqNum) {
@@ -183,9 +186,12 @@ export default function useWebSocket() {
               // Older backends omit this; absence means "not bypassed".
               bypass: Boolean(msg.bypass),
               silenceSaver: msg.silence_saver !== false,
-              silenceThresholdDb: msg.silence_threshold_db ?? -52,
+              silenceThresholdDb: msg.silence_threshold_db ?? -60,
               inferenceSleeping: Boolean(msg.inference_sleeping),
               inferenceDutyPercent: msg.inference_duty_percent ?? 0,
+              autoPitchAvailable: Boolean(msg.auto_pitch_available),
+              autoPitchShift: typeof msg.auto_pitch_shift === 'number' ? msg.auto_pitch_shift : null,
+              inputLevelDb: typeof msg.input_level_db === 'number' ? msg.input_level_db : null,
             });
           }
           onSettingsResponseRef.current?.(msg);

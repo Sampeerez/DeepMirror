@@ -5,7 +5,7 @@ const SERVER = {
   sample_rate: 48000,
   chunk_size: 8192,
   silence_saver: true,
-  silence_threshold_db: -52,
+  silence_threshold_db: -60,
   default_f0_method: 'rmvpe',
   device: { name: 'GPU', device: 'cuda:0' },
   assets: [{ id: 'hubert', state: 'ready' }],
@@ -25,12 +25,20 @@ describe('runtime config', () => {
   it('prefers stored choices but drops stale oversized buffers', () => {
     expect(mergeRuntimeConfig(SERVER, { chunkSize: 4096 }).chunkSize).toBe(4096);
     expect(mergeRuntimeConfig(SERVER, { chunkSize: 48000 }).chunkSize).toBe(8192);
-    expect(mergeRuntimeConfig(SERVER, { silenceThresholdDb: -200 }).silenceThresholdDb).toBe(-52);
+    expect(mergeRuntimeConfig(SERVER, { silenceThresholdDb: -200 }).silenceThresholdDb).toBe(-60);
   });
 
-  it('persists user choices only', () => {
-    expect(Object.keys(persistedRuntimeConfig(mergeRuntimeConfig(SERVER))).sort())
-      .toEqual(['chunkSize', 'sampleRate', 'silenceSaver', 'silenceThresholdDb']);
+  it('persists only the settings the user changed', () => {
+    const current = mergeRuntimeConfig(SERVER);
+    const next = updateRuntimeConfig(current, { silenceThresholdDb: -55 });
+    expect(persistedRuntimeConfig(null, { silenceThresholdDb: -55 }, next)).toEqual({ silenceThresholdDb: -55 });
+    const later = updateRuntimeConfig(next, { chunkSize: 4096 });
+    expect(persistedRuntimeConfig({ silenceThresholdDb: -55 }, { chunkSize: 4096 }, later))
+      .toEqual({ silenceThresholdDb: -55, chunkSize: 4096 });
+  });
+
+  it('follows the server chunk size for hardware when the user never chose one', () => {
+    expect(mergeRuntimeConfig({ ...SERVER, chunk_size: 16384 }, { silenceThresholdDb: -55 }).chunkSize).toBe(16384);
   });
 
   it('ignores invalid partial updates', () => {

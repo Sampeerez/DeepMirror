@@ -1,8 +1,11 @@
 // localStorage helpers that never throw (private mode, quota, disabled storage).
 
 export const STORAGE_KEYS = {
-  globalSettings: 'ovc_global_settings',
-  voice: 'ovc_voice_v2',
+  // v2 stores only explicit choices; v1 saved every field and pinned stale defaults.
+  globalSettings: 'ovc_global_settings_v2',
+  // v3 records which settings the user changed; untouched ones follow the recommended defaults.
+  voice: 'ovc_voice_v3',
+  legacyVoice: 'ovc_voice_v2',
   effects: 'ovc_effects_v2',
 };
 

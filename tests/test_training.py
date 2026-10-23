@@ -183,3 +183,103 @@ def test_heartbeat_marks_detached_workers_alive_or_interrupted(settings):
     assert jobs.describe("aaaaaaaaaaaa")["state"] == "running"
     assert jobs.describe("bbbbbbbbbbbb")["state"] == "interrupted"
     assert jobs._running_id() == "aaaaaaaaaaaa"
+
+
+# --------------------------------------------------------------------------
+# Automatic plan, validation and best-epoch selection
+# --------------------------------------------------------------------------
+
+
+class TestTrainingPlan:
+    def test_five_minutes_gets_a_full_plan_with_validation(self):
+        from backend.training.plan import plan_training
+
+        plan = plan_training(windows=85, dataset_seconds=300, vram_batch=5)
+        assert plan.validation_windows == 7 and plan.crops_per_example == 2
+        assert plan.batch_size == 5
+        assert 150 <= plan.epochs <= 1000 and plan.patience_epochs >= 40
+
+    def test_epochs_follow_a_step_budget(self):
+        from backend.training.plan import plan_training
+
+        short = plan_training(windows=85, dataset_seconds=300, vram_batch=8)
+        long = plan_training(windows=500, dataset_seconds=1800, vram_batch=8)
+        assert short.epochs > long.epochs and long.crops_per_example == 1
+
+    def test_explicit_choices_win(self):
+        from backend.training.plan import plan_training
+
+        plan = plan_training(windows=85, dataset_seconds=300, vram_batch=8, batch_size=3, epochs=42)
+        assert (plan.batch_size, plan.epochs, plan.eval_every) == (3, 42, 2)
+
+    def test_tiny_datasets_skip_validation(self):
+        from backend.training.plan import plan_training
+
+        assert plan_training(windows=12, dataset_seconds=60, vram_batch=4).validation_windows == 0
+
+
+class TestValidationTracker:
+    def test_keeps_the_best_epoch_when_the_voice_gets_worse(self):
+        from backend.training.plan import ValidationTracker
+
+        tracker = ValidationTracker(patience_epochs=20)
+        improved = [tracker.add(epoch, score) for epoch, score in [(5, 3.0), (10, 2.5), (15, 2.7), (20, 2.9)]]
+        assert improved == [True, True, False, False] and tracker.best_epoch == 10
+
+    def test_stops_after_patience_without_gain(self):
+        from backend.training.plan import ValidationTracker
+
+        tracker = ValidationTracker(patience_epochs=10)
+        for epoch, score in [(5, 2.0), (10, 2.1), (15, 2.1)]:
+            tracker.add(epoch, score)
+        assert not tracker.should_stop(10) and tracker.should_stop(15)
+
+    def test_restores_from_status(self):
+        from backend.training.plan import ValidationTracker
+
+        tracker = ValidationTracker.restore({"validation": [[5, 3.0, 3.0], [10, 2.0, 2.6]]}, 40)
+        assert tracker.best_epoch == 10 and not tracker.stopped
+
+
+def test_validation_scores_the_inference_path(tmp_path):
+    config = CONFIGS[RATE]
+    frames = config.segment_frames + 20
+    rng = np.random.default_rng(4)
+    segments = [Segment(speech_like(frames * config.hop / RATE), rng.standard_normal((frames // 2, 768)).astype(np.float16),
+                        rng.integers(1, 255, frames), rng.uniform(80, 300, frames).astype(np.float32))
+                for _ in range(3)]
+    cpu = ComputeDevice(torch.device("cpu"), False, "CPU", None, 1, 6, 38, 41)
+    examples = build_examples(segments, config)
+    trainer = Trainer(config, cpu, examples[:2], tmp_path / "ckpt", batch_size=2, crops_per_example=2,
+                      validation=examples[2:])
+    first, second = trainer.evaluate(), trainer.evaluate()
+    assert first is not None and math.isfinite(first) and first == pytest.approx(second)  # fixed seed
+    assert trainer.generator.training
+
+
+def test_exported_voice_carries_pitch_stats(tmp_path):
+    from backend.inference.auto_pitch import compute_f0_stats
+
+    stats = compute_f0_stats([np.r_[np.zeros(50), np.full(200, 220.0)]])
+    assert stats is not None and stats.median_hz == pytest.approx(220.0)
+    torch.save(export_voice(TrainableSynthesizer(CONFIGS[RATE]), 7, stats.to_dict()), tmp_path / "voice.pth")
+    voice = VoiceModel.load(tmp_path / "voice.pth", torch.device("cpu"), False)
+    assert voice.f0_stats is not None and voice.f0_stats.median_hz == pytest.approx(220.0)
+    assert voice.describe()["f0_stats"]["median_hz"] == 220.0
+
+
+class TestRecordingQuality:
+    def test_quiet_recordings_are_brought_to_speech_level(self):
+        from backend.training.dataset import normalise_loudness
+
+        quiet = 0.01 * speech_like(3.0)
+        louder = normalise_loudness(quiet, RATE)
+        assert np.abs(louder).max() / np.abs(quiet).max() > 5 and np.abs(louder).max() <= 0.95 + 1e-6
+
+    def test_warnings_explain_weak_material(self):
+        from backend.training.dataset import quality_warnings
+
+        warnings = quality_warnings({"speech_seconds": 90, "clipped_percent": 1.0, "snr_db": 12, "voiced_percent": 20})
+        assert len(warnings) == 4
+        assert quality_warnings({"speech_seconds": 400, "clipped_percent": 0.0, "snr_db": 45,
+                                 "voiced_percent": 70}) == []

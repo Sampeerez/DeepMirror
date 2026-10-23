@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import math
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -157,17 +158,29 @@ class VoiceConverter:
 
     def convert(self, audio: np.ndarray, settings: ConversionSettings, *, pad_seconds: float | None = None,
                 split_long_input: bool = True, rms_frame_seconds: float | None = None,
-                tail_seconds: float | None = None) -> np.ndarray:
+                tail_seconds: float | None = None,
+                on_f0: Callable[[np.ndarray], None] | None = None) -> np.ndarray:
         """Convert 16 kHz mono ``audio``; returns ``len(audio) * sr / 16000`` samples (± one frame).
 
-        Thread-safe: concurrent streams and file renders take turns on the device.
+        ``on_f0`` receives the unshifted pitch track (Hz, 100 frames/s, aligned
+        with ``audio``) before synthesis. Thread-safe: concurrent streams and
+        file renders take turns on the device.
         """
         with self._lock:
-            return self._convert(audio, settings, pad_seconds, split_long_input, rms_frame_seconds, tail_seconds)
+            return self._convert(audio, settings, pad_seconds, split_long_input, rms_frame_seconds, tail_seconds,
+                                 on_f0)
+
+    def estimate_f0(self, audio: np.ndarray, settings: ConversionSettings) -> np.ndarray:
+        """Unshifted pitch track (Hz, 100 frames/s) of 16 kHz ``audio``."""
+        with self._lock:
+            return self.pitch.estimate(settings.f0_method, audio, len(audio) // HOP,
+                                       filter_radius=settings.filter_radius,
+                                       crepe_hop_length=settings.crepe_hop_length,
+                                       rmvpe_threshold=settings.rmvpe_threshold)
 
     def _convert(self, audio: np.ndarray, settings: ConversionSettings, pad_seconds: float | None,
                  split_long_input: bool, rms_frame_seconds: float | None,
-                 tail_seconds: float | None) -> np.ndarray:
+                 tail_seconds: float | None, on_f0: Callable[[np.ndarray], None] | None) -> np.ndarray:
         voice = self.voice
         pad_seconds = self.compute.offline_pad_seconds if pad_seconds is None else pad_seconds
         t_pad = round(SAMPLE_RATE * pad_seconds / HOP) * HOP
@@ -183,6 +196,9 @@ class VoiceConverter:
             f0 = self.pitch.estimate(settings.f0_method, padded, frames, filter_radius=settings.filter_radius,
                                      crepe_hop_length=settings.crepe_hop_length,
                                      rmvpe_threshold=settings.rmvpe_threshold)
+            if on_f0 is not None:
+                pad_frames = t_pad // HOP
+                on_f0(f0[pad_frames:frames - pad_frames])
             coarse, shifted = to_rvc_pitch(f0, settings.pitch_shift)
             pitch = torch.from_numpy(coarse[:frames]).to(self.compute.device)[None]
             pitchf = torch.from_numpy(shifted[:frames]).to(self.compute.device)[None]

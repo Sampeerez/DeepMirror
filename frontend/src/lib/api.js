@@ -146,7 +146,8 @@ export function createTrainingJob({ name, files, sampleRate, epochs, batchSize, 
   formData.append('name', name);
   for (const audio of files) formData.append('files', audio);
   formData.append('sample_rate', String(sampleRate));
-  formData.append('epochs', String(epochs));
+  // No epochs: the server plans them (and the batch) from the audio and the GPU.
+  if (epochs) formData.append('epochs', String(epochs));
   if (batchSize) formData.append('batch_size', String(batchSize));
   if (saveEvery) formData.append('save_every', String(saveEvery));
   if (overwrite) formData.append('overwrite', 'true');
@@ -220,6 +221,7 @@ export async function convertFile(file, {
   f0Method = DEFAULT_F0_METHOD,
   effects = {},
   useModel = true,
+  autoPitch = false,
   indexRate,
   filterRadius,
   rmsMixRate,
@@ -230,6 +232,7 @@ export async function convertFile(file, {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('pitch_shift', String(pitchShift));
+  formData.append('pitch_mode', autoPitch ? 'auto' : 'manual');
   formData.append('formant_shift', String(formantShift));
   formData.append('f0_method', f0Method);
   formData.append('effects', JSON.stringify(effects));

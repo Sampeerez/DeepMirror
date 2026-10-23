@@ -68,10 +68,12 @@ PRETRAINED = {
     ),
 }
 
-# Dataset limits. RVC voices are good from ~10 minutes of clean speech;
-# below a couple of minutes timbre and pitch range are under-sampled.
+# Dataset limits. Five minutes of clean speech trains a good voice with the
+# automatic plan (validation picks the best epoch); 10-30 minutes covers more
+# of the speaker's pitch range and phonemes. Below a couple of minutes timbre
+# and pitch range are under-sampled.
 MIN_AUDIO_SECONDS = 60
-RECOMMENDED_AUDIO_SECONDS = (600, 1800)
+RECOMMENDED_AUDIO_SECONDS = (300, 1800)
 MAX_AUDIO_SECONDS = 3600
 DEFAULT_EPOCHS = 300
 MAX_EPOCHS = 2000

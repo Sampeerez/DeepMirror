@@ -30,6 +30,7 @@ def anyio_backend() -> str:
 @dataclass
 class FakeVoice:
     name: str = "voice.pth"
+    f0_stats = None  # set to an F0Stats to emulate a voice trained in the studio
 
 
 class FakeConverter:
@@ -42,12 +43,18 @@ class FakeConverter:
         self.index = None
         self.calls = 0
         self.last_settings = None
+        self.f0_hz = 0.0  # pitch the fake tracker "hears" in every frame
 
-    def convert(self, audio: np.ndarray, settings, **_options) -> np.ndarray:
+    def estimate_f0(self, audio: np.ndarray, settings) -> np.ndarray:
+        return np.full(len(audio) // 160, self.f0_hz, dtype=np.float32)
+
+    def convert(self, audio: np.ndarray, settings, *, on_f0=None, **_options) -> np.ndarray:
         from backend.audio.resampling import resample
 
         self.calls += 1
         self.last_settings = settings
+        if on_f0 is not None:
+            on_f0(self.estimate_f0(audio, settings))
         return -resample(audio, 16000, self.output_rate)
 
 

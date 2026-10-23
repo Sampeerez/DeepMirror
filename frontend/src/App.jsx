@@ -26,7 +26,7 @@ import { buildTabUrl, readTabFromSearch } from './lib/navigation';
 import { shouldTriggerShortcut } from './lib/shortcuts';
 import { STORAGE_KEYS, readStored } from './lib/storage';
 import { applyTheme, readAppliedTheme, storeTheme } from './lib/theme';
-import { hasStoredF0Method, loadInitialVoice } from './lib/voice';
+import { hasStoredF0Method, loadInitialVoice, recommendedVoice, withChanges } from './lib/voice';
 
 const ACTIVE_MODEL_POLL_MS = 5000;
 
@@ -194,8 +194,13 @@ export default function App() {
 
   const handleVoiceChange = useCallback((partial) => {
     setActivePresetId(null);
-    setVoice((prev) => ({ ...prev, ...partial }));
+    setVoice((prev) => withChanges(prev, partial));
   }, []);
+
+  const handleRestoreRecommended = useCallback(() => {
+    setActivePresetId(null);
+    setVoice(recommendedVoice(runtimeConfig.defaultF0Method));
+  }, [runtimeConfig.defaultF0Method]);
 
   // Accepts a rack or an updater over the previous rack (see EffectsRack).
   const handleEffectsChange = useCallback((nextEffects) => {
@@ -206,7 +211,11 @@ export default function App() {
   const applyPreset = useCallback((preset) => {
     // Advanced RVC values are only overwritten when the preset carries them,
     // so built-ins and pre-existing presets leave the current tuning intact.
-    setVoice((prev) => voiceFromPreset(preset, prev));
+    setVoice((prev) => {
+      const next = voiceFromPreset(preset, prev);
+      const changed = Object.fromEntries(Object.entries(next).filter(([key, value]) => prev[key] !== value));
+      return withChanges(prev, changed);
+    });
     setEffects(effectsFromPresetSettings(preset));
     setActivePresetId(preset.id);
   }, []);
@@ -320,6 +329,9 @@ export default function App() {
             <VoiceLab
               voice={voice}
               onChange={handleVoiceChange}
+              onRestoreRecommended={handleRestoreRecommended}
+              autoPitchAvailable={serverStats.autoPitchAvailable}
+              autoPitchShift={serverStats.autoPitchShift}
               hasModel={Boolean(activeModel)}
               isRunning={pipeline.isRunning}
               f0Methods={runtimeConfig.f0Methods}

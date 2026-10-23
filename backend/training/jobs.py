@@ -133,14 +133,14 @@ class TrainingJobs:
 
     # --- Lifecycle ----------------------------------------------------------
 
-    async def create(self, name: str, files: list[UploadFile], sample_rate: int, epochs: int,
+    async def create(self, name: str, files: list[UploadFile], sample_rate: int, epochs: int | None,
                      batch_size: int | None, save_every: int, overwrite: bool) -> dict:
         model_name = Path(sanitize_filename(name)).stem
         if not model_name:
             raise TrainingError("Give the voice a name.")
         if sample_rate not in CONFIGS:
             raise TrainingError(f"Sample rate must be one of {sorted(CONFIGS)}.")
-        if not 1 <= epochs <= MAX_EPOCHS:
+        if epochs is not None and not 1 <= epochs <= MAX_EPOCHS:  # None: planned from the audio and GPU
             raise TrainingError(f"Epochs must be between 1 and {MAX_EPOCHS}.")
         existing = [self.settings.MODELS_DIR / f"{model_name}{ext}" for ext in (*MODEL_EXTENSIONS, ".index")]
         if not overwrite and any(path.exists() for path in existing):
@@ -175,7 +175,7 @@ class TrainingJobs:
                     raise TrainingError(f"Could not read '{upload.filename}': {exc}") from exc
             if total_seconds < MIN_AUDIO_SECONDS:
                 raise TrainingError(f"Upload at least {MIN_AUDIO_SECONDS // 60} minute of speech "
-                                    f"(got {total_seconds:.0f} s); 10-30 minutes gives the best voices.")
+                                    f"(got {total_seconds:.0f} s); 5 minutes trains well, 10-30 is ideal.")
             if total_seconds > MAX_AUDIO_SECONDS:
                 raise TrainingError(f"Use at most {MAX_AUDIO_SECONDS // 60} minutes of audio.")
         except Exception:

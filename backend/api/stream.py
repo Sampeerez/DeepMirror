@@ -20,7 +20,7 @@ import json
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -30,7 +30,8 @@ from backend.audio.effects import EffectsChain
 from backend.audio.protocol import decode_frame, encode_frame
 from backend.audio.streaming import RealtimeVoiceStream, StreamTiming
 from backend.config import Settings
-from backend.inference.pipeline import VoiceConverter
+from backend.inference.auto_pitch import AutoPitch
+from backend.inference.pipeline import ConversionSettings, VoiceConverter
 from backend.model_manager import ModelManager
 from backend.security import is_origin_allowed
 
@@ -58,11 +59,24 @@ def bounded_number(value: Any, cast: type, low: float, high: float) -> Any:
     return number if low <= number <= high else None
 
 
-def chunk_rms_db(audio: np.ndarray) -> float:
+# Falling asleep needs the level this far below the wake threshold.
+SILENCE_HYSTERESIS_DB = 3.0
+LEVEL_FRAME_SECONDS = 0.01
+
+
+def chunk_level_db(audio: np.ndarray, sample_rate: int) -> float:
+    """Loudest 10 ms RMS in the chunk, in dBFS.
+
+    A whole-chunk RMS dilutes a short, quiet syllable with the silence around
+    it; the loudest short frame does not.
+    """
     if audio.size == 0:
         return -math.inf
-    rms = math.sqrt(float(np.mean(np.square(audio, dtype=np.float64))))
-    return 20.0 * math.log10(rms) if rms > 0 else -math.inf
+    frame = max(1, int(sample_rate * LEVEL_FRAME_SECONDS))
+    count = max(1, len(audio) // frame)
+    frames = np.square(audio[: count * frame] if len(audio) >= frame else audio, dtype=np.float64)
+    power = float(frames.reshape(count, -1).mean(axis=1).max())
+    return 10.0 * math.log10(power) if power > 0 else -math.inf
 
 
 @dataclass(slots=True)
@@ -84,6 +98,10 @@ class StreamSession:
         self.chunk_size = chunk_size
         self.conversion = manager.default_conversion()
         self.formant_shift = 0.0
+        # "auto": follow the speaker's register onto the voice's (needs voice F0 stats).
+        self.pitch_mode = "auto"
+        self._auto_pitch: AutoPitch | None = None
+        self._auto_pitch_voice: str | None = None
         self.effects: dict = {}
         self.bypass = False
         self.silence_saver = settings.SILENCE_SAVER
@@ -103,6 +121,7 @@ class StreamSession:
         self._logged_failure: str | None = None
         # Stats surfaced in status messages.
         self.latency_ms = self.model_ms = self.dsp_ms = 0.0
+        self.input_level_db = -math.inf
         self.mode = "dsp"
         self.eligible_frames = self.inference_frames = 0
 
@@ -116,6 +135,8 @@ class StreamSession:
             self.formant_shift = formant
         if isinstance(payload.get("effects"), dict):
             self.effects = payload["effects"]
+        if payload.get("pitch_mode") in ("auto", "manual"):
+            self.pitch_mode = payload["pitch_mode"]
         if isinstance(payload.get("bypass"), bool):
             self.bypass = payload["bypass"]
         if isinstance(payload.get("silence_saver"), bool):
@@ -156,6 +177,28 @@ class StreamSession:
 
     # --- Processing (runs in a worker thread) -------------------------------
 
+    def _auto_pitch_for(self, converter: VoiceConverter) -> AutoPitch | None:
+        """The register tracker for the active voice, when automatic pitch applies."""
+        stats = converter.voice.f0_stats
+        if self.pitch_mode != "auto" or stats is None:
+            return None
+        if self._auto_pitch is None or self._auto_pitch_voice != converter.voice.name:
+            self._auto_pitch = AutoPitch(stats, self.manager.remembered_pitch_shift(converter.voice.name))
+            self._auto_pitch_voice = converter.voice.name
+        return self._auto_pitch
+
+    def _render_settings(self, converter: VoiceConverter) -> ConversionSettings:
+        auto = self._auto_pitch_for(converter)
+        if auto is None or auto.shift is None:
+            return self.conversion
+        return replace(self.conversion, pitch_shift=auto.shift)
+
+    @property
+    def auto_pitch_shift(self) -> float | None:
+        converter = self.manager.converter
+        auto = self._auto_pitch_for(converter) if converter is not None else None
+        return auto.shift if auto is not None else None
+
     def _realtime_stream(self, converter: VoiceConverter) -> RealtimeVoiceStream:
         if self._stream is None or self._stream_converter is not converter:
             config = self.config
@@ -164,26 +207,52 @@ class StreamSession:
             emitted = (self.chunk_size / self.sample_rate + timing.lookahead_seconds
                        + timing.crossfade_seconds + timing.search_seconds)
 
+            # F0 frames of the newest chunk: the window ends ``lookahead`` after them.
+            new_frames = max(1, round(self.chunk_size / self.sample_rate * 100))
+            ahead_frames = round(timing.lookahead_seconds * 100)
+
+            def observe_f0(f0: np.ndarray) -> None:
+                auto = self._auto_pitch_for(converter)
+                if auto is None:
+                    return
+                end = len(f0) - ahead_frames
+                auto.observe(f0[max(0, end - new_frames):max(0, end)])
+                if auto.shift is not None:
+                    self.manager.remember_pitch_shift(converter.voice.name, auto.shift)
+
             def render(window: np.ndarray) -> tuple[np.ndarray, int]:
-                audio = converter.convert(window, self.conversion, pad_seconds=config.STREAM_PAD_SECONDS,
-                                          split_long_input=False,
+                audio = converter.convert(window, self._render_settings(converter),
+                                          pad_seconds=config.STREAM_PAD_SECONDS, split_long_input=False,
                                           rms_frame_seconds=config.STREAM_RMS_FRAME_SECONDS,
-                                          tail_seconds=emitted + config.STREAM_DECODE_MARGIN_SECONDS)
+                                          tail_seconds=emitted + config.STREAM_DECODE_MARGIN_SECONDS,
+                                          on_f0=observe_f0)
                 return audio, converter.output_rate
 
             self._stream = RealtimeVoiceStream(self.sample_rate, render, self.timing)
             self._stream_converter = converter
         return self._stream
 
+    def _sleep_after_seconds(self) -> float:
+        """Silence needed before sleeping: the hold plus everything still in flight.
+
+        Output lags input by the lookahead, the SOLA tail and one chunk, so
+        sleeping any earlier would cut the end of the last word.
+        """
+        return (self.config.SILENCE_HOLD_SECONDS + self.timing.algorithmic_delay()
+                + self.chunk_size / self.sample_rate)
+
     def _update_silence(self, audio: np.ndarray) -> bool:
         if not self.silence_saver:
             self._silence_seconds = 0.0
             return False
-        if chunk_rms_db(audio) <= self.silence_threshold_db:
-            self._silence_seconds += len(audio) / self.sample_rate
-        else:
+        threshold = self.silence_threshold_db
+        if not self.sleeping:
+            threshold -= SILENCE_HYSTERESIS_DB
+        if self.input_level_db >= threshold:
             self._silence_seconds = 0.0
-        return self._silence_seconds >= self.config.SILENCE_HOLD_SECONDS
+            return False
+        self._silence_seconds += len(audio) / self.sample_rate
+        return self._silence_seconds >= self._sleep_after_seconds()
 
     def process(self, audio: np.ndarray) -> FrameResult:
         """Convert one chunk. With ``bypass`` the input is returned untouched (true A/B)."""
@@ -194,6 +263,7 @@ class StreamSession:
 
         started = time.perf_counter()
         processed = self.chain.pre_process(audio, self.effects)
+        self.input_level_db = chunk_level_db(processed, self.sample_rate)
         converter = self.manager.converter
         model_ms = 0.0
         mode = "dsp"
@@ -204,18 +274,22 @@ class StreamSession:
         else:
             mode = "rvc"
             self.eligible_frames += 1
-            if self._update_silence(processed):
-                if not self.sleeping and self._stream is not None:
-                    self._stream.reset()  # resume from fresh context after the pause
-                self.sleeping = True
-                processed = np.zeros_like(processed)
+            asleep = self._update_silence(processed)
+            if asleep and self.sleeping:
+                # Keep listening so the next onset is rendered with real context.
+                processed = self._realtime_stream(converter).idle(processed)
             else:
-                self.sleeping = False
                 model_started = time.perf_counter()
                 try:
-                    processed = self._realtime_stream(converter).process(processed)
+                    rendered = self._realtime_stream(converter).process(processed)
                 except Exception as exc:
                     return self._failure(exc, audio, model_started)
+                if asleep:  # last render before sleeping: fade out instead of a step to zero
+                    rendered = rendered * np.linspace(1.0, 0.0, len(rendered), dtype=np.float32)
+                    if self._auto_pitch is not None:
+                        self._auto_pitch.on_pause()
+                processed = rendered
+                self.sleeping = asleep
                 model_ms = (time.perf_counter() - model_started) * 1000.0
                 self.inference_frames += 1
                 self._logged_failure = None
@@ -240,6 +314,7 @@ class StreamSession:
     # --- Status -------------------------------------------------------------
 
     def status(self) -> dict:
+        converter = self.manager.converter
         active = self.manager.active_model_name
         mode = "bypass" if self.bypass else (self.mode if active else "dsp")
         duty = round(self.inference_frames * 100.0 / self.eligible_frames, 1) if self.eligible_frames else 0.0
@@ -258,6 +333,10 @@ class StreamSession:
             "inference_duty_percent": duty if active and not self.bypass else 0.0,
             "effects_active": 0 if self.bypass else EffectsChain.count_active(self.effects, self.formant_shift),
             "algorithmic_delay_ms": round(self.timing.algorithmic_delay() * 1000.0, 1),
+            "pitch_mode": self.pitch_mode,
+            "auto_pitch_available": bool(converter is not None and converter.voice.f0_stats is not None),
+            "auto_pitch_shift": self.auto_pitch_shift,
+            "input_level_db": None if math.isinf(self.input_level_db) else round(self.input_level_db, 1),
         }
         self.eligible_frames = self.inference_frames = 0
         return message

@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     RMVPE_THRESHOLD: float = 0.03
     # Run the vocoder with ONNX Runtime when inferring on CPU (~1.5x faster).
     CPU_ONNX_DECODER: bool = True
+    # Load the voice that was active when the studio last closed.
+    RESTORE_LAST_VOICE: bool = True
 
     # --- Realtime streaming -------------------------------------------------
     # Rate suggested to the browser; the AudioContext's actual rate is used.
@@ -83,8 +85,10 @@ class Settings(BaseSettings):
     CPU_STREAM_LOOKBACK_SECONDS: float = 0.5
     CPU_STREAM_LOOKAHEAD_SECONDS: float = 0.1
     SILENCE_SAVER: bool = True
-    SILENCE_THRESHOLD_DB: float = -52.0
-    SILENCE_HOLD_SECONDS: float = 0.18
+    # Sleep inference after this much silence. The level is the loudest 10 ms
+    # of each chunk, so a single quiet word still wakes it.
+    SILENCE_THRESHOLD_DB: float = -60.0
+    SILENCE_HOLD_SECONDS: float = 0.3
 
     # --- File conversion ----------------------------------------------------
     MAX_CONVERT_SECONDS: int = 600

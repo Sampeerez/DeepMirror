@@ -30,6 +30,10 @@ MIN_SEGMENT_SECONDS = 0.6
 SILENCE_DB = -42.0
 MIN_PAUSE_SECONDS = 0.4
 KEPT_PAUSE_SECONDS = 0.25
+# Speech is brought to this level before slicing, so the pause detector
+# behaves the same for quiet and loud recordings.
+TARGET_SPEECH_DB = -20.0
+MAX_PEAK = 0.95
 
 Progress = Callable[[float], None]
 
@@ -52,6 +56,55 @@ def audio_duration(path: Path) -> float:
 def load_mono(path: Path) -> tuple[np.ndarray, int]:
     audio, rate = sf.read(str(path), dtype="float32", always_2d=True)
     return audio.mean(axis=1).astype(np.float32), int(rate)
+
+
+def _frame_rms_db(audio: np.ndarray, rate: int, seconds: float = 0.05) -> np.ndarray:
+    frame = max(1, int(rate * seconds))
+    count = len(audio) // frame
+    if count == 0:
+        return np.zeros(0)
+    power = np.mean(np.square(audio[: count * frame].astype(np.float64)).reshape(count, frame), axis=1)
+    return 10.0 * np.log10(np.maximum(power, 1e-12))
+
+
+def normalise_loudness(audio: np.ndarray, rate: int) -> np.ndarray:
+    """Scale so the louder half of the frames (the speech) sits near ``TARGET_SPEECH_DB``."""
+    levels = _frame_rms_db(audio, rate)
+    peak = float(np.abs(audio).max()) if audio.size else 0.0
+    if len(levels) == 0 or peak < 1e-5:
+        return audio
+    speech_db = float(np.median(levels[levels >= np.median(levels)]))
+    gain = min(10 ** ((TARGET_SPEECH_DB - speech_db) / 20), MAX_PEAK / peak)
+    return (audio * gain).astype(np.float32)
+
+
+def assess_recording(audio: np.ndarray, rate: int) -> dict:
+    """Facts about a source recording that predict training quality."""
+    levels = _frame_rms_db(audio, rate)
+    clipped = float(np.mean(np.abs(audio) >= 0.999)) * 100 if audio.size else 0.0
+    if len(levels) == 0:
+        return {"clipped_percent": round(clipped, 3), "noise_floor_db": None, "snr_db": None}
+    floor = float(np.percentile(levels, 10))
+    speech = float(np.percentile(levels, 90))
+    return {"clipped_percent": round(clipped, 3), "noise_floor_db": round(floor, 1), "snr_db": round(speech - floor, 1)}
+
+
+def quality_warnings(report: dict) -> list[str]:
+    """Plain-language advice for recordings that will train a weaker voice."""
+    warnings = []
+    speech = report.get("speech_seconds") or 0.0
+    if speech < 180:
+        warnings.append(f"Only {speech / 60:.1f} min of speech after removing pauses: 5 min or more gives a "
+                        "much steadier voice.")
+    if (report.get("clipped_percent") or 0.0) > 0.1:
+        warnings.append("Some of the audio is clipped (distorted peaks). Record a little quieter if you can.")
+    snr = report.get("snr_db")
+    if snr is not None and snr < 25:
+        warnings.append("There is noticeable background noise. A quieter room gives a cleaner voice.")
+    voiced = report.get("voiced_percent")
+    if voiced is not None and voiced < 35:
+        warnings.append("Little voiced speech was found. Use spoken or sung voice, without music.")
+    return warnings
 
 
 def split_on_pauses(audio: np.ndarray, rate: int) -> list[np.ndarray]:
@@ -96,12 +149,17 @@ def normalise(piece: np.ndarray) -> np.ndarray | None:
     return (piece / peak * (0.9 * 0.75) + 0.25 * piece).astype(np.float32)
 
 
-def prepare_segments(sources: list[Path], rate: int, progress: Progress | None = None) -> list[Segment]:
+def prepare_segments(sources: list[Path], rate: int, progress: Progress | None = None,
+                     report: dict | None = None) -> list[Segment]:
+    """Clean, slice and normalise ``sources``; ``report`` (if given) receives recording facts."""
     high_pass = signal.butter(N=5, Wn=48, btype="high", fs=rate, output="sos")
     segments: list[Segment] = []
+    assessments = []
     for number, path in enumerate(sources):
         audio, source_rate = load_mono(path)
+        assessments.append((len(audio) / source_rate, assess_recording(audio, source_rate)))
         audio = np.asarray(signal.sosfilt(high_pass, resample(audio, source_rate, rate)), dtype=np.float32)
+        audio = normalise_loudness(audio, rate)
         for chunk in split_on_pauses(audio, rate):
             for piece in windows(chunk, rate):
                 normalised = normalise(piece)
@@ -109,9 +167,32 @@ def prepare_segments(sources: list[Path], rate: int, progress: Progress | None =
                     segments.append(Segment(normalised))
         if progress:
             progress((number + 1) / len(sources))
+    if report is not None:
+        total = sum(seconds for seconds, _ in assessments) or 1.0
+
+        def weighted(key: str) -> float | None:
+            values = [(seconds, facts[key]) for seconds, facts in assessments if facts.get(key) is not None]
+            return round(sum(s * v for s, v in values) / sum(s for s, _ in values), 2) if values else None
+
+        report.update(source_seconds=round(total, 1), clipped_percent=weighted("clipped_percent"),
+                      noise_floor_db=weighted("noise_floor_db"), snr_db=weighted("snr_db"),
+                      speech_seconds=round(_unique_seconds(segments, rate), 1))
     logger.info("Prepared %d segments (%.1f min) from %d file(s)", len(segments),
                 sum(len(s.audio) for s in segments) / rate / 60, len(sources))
     return segments
+
+
+def _unique_seconds(segments: list[Segment], rate: int) -> float:
+    """Speech duration without counting the overlap between consecutive windows twice."""
+    return sum(max(0.0, len(s.audio) / rate - OVERLAP_SECONDS) for s in segments) + (OVERLAP_SECONDS if segments else 0)
+
+
+def voiced_percent(segments: list[Segment]) -> float | None:
+    tracks = [s.pitchf for s in segments if s.pitchf is not None]
+    if not tracks:
+        return None
+    frames = np.concatenate(tracks)
+    return round(float(np.mean(frames > 0)) * 100, 1)
 
 
 @torch.no_grad()

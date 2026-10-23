@@ -84,6 +84,7 @@ class RealtimeVoiceStream:
         self.timing = timing or StreamTiming()
         self._crossfade = max(1, round(self.timing.crossfade_seconds * self.client_rate))
         self._search = max(0, round(self.timing.search_seconds * self.client_rate))
+        self._fade = max(1, round(0.01 * self.client_rate))
         self.reset()
 
     def reset(self) -> None:
@@ -93,6 +94,7 @@ class RealtimeVoiceStream:
         # end (and therefore the output timing) jitter by tens of ms.
         self._history = np.zeros(0, dtype=np.float32)
         self._tail: np.ndarray | None = None
+        self._resuming = False
 
     def _history_length(self, chunk_length: int) -> int:
         t = self.timing
@@ -100,15 +102,31 @@ class RealtimeVoiceStream:
                    + chunk_length / self.client_rate)
         return math.ceil(seconds * self.client_rate)
 
+    def _push(self, chunk: np.ndarray) -> int:
+        length = self._history_length(len(chunk))
+        if len(self._history) < length:
+            self._history = np.concatenate([np.zeros(length - len(self._history), np.float32), self._history])
+        self._history = np.concatenate([self._history, np.asarray(chunk, dtype=np.float32)])[-length:]
+        return length
+
+    def idle(self, chunk: np.ndarray) -> np.ndarray:
+        """Keep listening without rendering (silence saver asleep); return silence.
+
+        The history keeps advancing, so the first render after waking has the
+        real audio before the onset as context and the attack is not lost.
+        """
+        if len(chunk):
+            self._push(chunk)
+        self._tail = None
+        self._resuming = True
+        return np.zeros(len(chunk), dtype=np.float32)
+
     def process(self, chunk: np.ndarray) -> np.ndarray:
         """Feed ``len(chunk)`` new samples; return exactly as many converted samples."""
         n = len(chunk)
         if n == 0:
             return np.zeros(0, dtype=np.float32)
-        length = self._history_length(n)
-        if len(self._history) < length:
-            self._history = np.concatenate([np.zeros(length - len(self._history), np.float32), self._history])
-        self._history = np.concatenate([self._history, np.asarray(chunk, dtype=np.float32)])[-length:]
+        length = self._push(chunk)
 
         model_input = resample(self._history, self.client_rate, MODEL_RATE)
         dropped = len(model_input) % FRAME  # whole model frames; trim the oldest samples
@@ -129,6 +147,9 @@ class RealtimeVoiceStream:
         if self._tail is None or len(self._tail) != crossfade:
             offset = self._search // 2
             output = region[offset:offset + n].copy()
+            if self._resuming:  # fade in from the silence emitted while asleep
+                ramp = min(self._fade, n)
+                output[:ramp] *= np.linspace(0.0, 1.0, ramp, dtype=np.float32)
         else:
             offset = _sola_offset(self._tail, region, self._search)
             output = region[offset:offset + n].copy()
@@ -136,4 +157,5 @@ class RealtimeVoiceStream:
             fade_in = np.sin(phase) ** 2
             output[:crossfade] = self._tail * (1.0 - fade_in) + output[:crossfade] * fade_in
         self._tail = region[offset + n:offset + n + crossfade].copy()
+        self._resuming = False
         return output.astype(np.float32, copy=False)

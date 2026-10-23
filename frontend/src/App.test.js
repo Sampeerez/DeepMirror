@@ -38,7 +38,7 @@ it('recovers capabilities and presets after reconnect without overwriting voice 
   const stored = new Map();
   vi.stubGlobal('localStorage', { getItem: (key) => stored.get(key) ?? null,
     setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) });
-  localStorage.setItem('ovc_global_settings', JSON.stringify({ sampleRate: 48000, chunkSize: 2048 }));
+  localStorage.setItem('ovc_global_settings_v2', JSON.stringify({ sampleRate: 48000, chunkSize: 2048 }));
   localStorage.setItem('ovc_voice_v2', JSON.stringify({ pitch: 7, crepeHopLength: 512 }));
   fetchConfig.mockRejectedValue(new Error('offline'));
   fetchPresets.mockRejectedValue(new Error('offline'));

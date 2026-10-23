@@ -19,17 +19,27 @@ import time
 import traceback
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from backend.assets import ASSETS, download_verified
 from backend.config import settings
+from backend.inference.auto_pitch import compute_f0_stats
 from backend.inference.device import select_device
 from backend.inference.hubert import load_hubert
 from backend.inference.rmvpe import Rmvpe
-from backend.training.dataset import extract_features, load_segments, prepare_segments, save_segments
+from backend.training.dataset import (
+    extract_features,
+    load_segments,
+    prepare_segments,
+    quality_warnings,
+    save_segments,
+    voiced_percent,
+)
 from backend.training.hparams import CONFIGS, PRETRAINED
 from backend.training.index_builder import build_index
-from backend.training.trainer import Trainer, TrainingProgress, build_examples
+from backend.training.plan import ValidationTracker, plan_training, validation_count
+from backend.training.trainer import Trainer, TrainingProgress, auto_batch_size, build_examples
 
 logger = logging.getLogger("backend.training.worker")
 
@@ -115,10 +125,12 @@ def run(job: Job) -> None:
     if not segments:
         job.report(force=True, stage="prepare", stage_progress=0.0, message="Cleaning and slicing audio")
         sources = sorted((job.directory / "uploads").iterdir())
-        segments = prepare_segments(sources, rate, lambda p: job.report(stage="prepare", stage_progress=p))
+        report: dict = {}
+        segments = prepare_segments(sources, rate, lambda p: job.report(stage="prepare", stage_progress=p), report)
         if not segments:
             raise ValueError("No usable speech found in the uploaded audio.")
         save_segments(segments, dataset_path)
+        job.report(force=True, quality=report, warnings=quality_warnings(report))
     job.check_stop()
     job.report(force=True, segments=len(segments),
                dataset_seconds=round(sum(len(s.audio) for s in segments) / rate, 1))
@@ -133,6 +145,8 @@ def run(job: Job) -> None:
         if compute.device.type == "cuda":
             torch.cuda.empty_cache()
         save_segments(segments, dataset_path)
+        quality = {**(job.status.get("quality") or {}), "voiced_percent": voiced_percent(segments)}
+        job.report(force=True, quality=quality, warnings=quality_warnings(quality))
     job.check_stop()
 
     if not index_path.is_file():
@@ -140,15 +154,29 @@ def run(job: Job) -> None:
         models_dir.mkdir(parents=True, exist_ok=True)
         build_index([s.phone for s in segments if s.phone is not None], index_path, compute.device)
 
-    trainer = Trainer(config, compute, build_examples(segments, config), job.directory / "checkpoints",
-                      spec.get("batch_size"))
+    examples = build_examples(segments, config)
+    held_out = validation_count(len(examples))
+    # Spread the held-out windows over the whole recording.
+    picks = set(np.linspace(0, len(examples) - 1, held_out).round().astype(int).tolist()) if held_out else set()
+    validation = [e for i, e in enumerate(examples) if i in picks]
+    training = [e for i, e in enumerate(examples) if i not in picks]
+    dataset_seconds = float(job.status.get("dataset_seconds") or 0.0)
+    plan = plan_training(len(examples), dataset_seconds, auto_batch_size(compute),
+                         batch_size=spec.get("batch_size"), epochs=spec.get("epochs"))
+    f0_stats = compute_f0_stats([s.pitchf for s in segments if s.pitchf is not None])
+    f0_payload = f0_stats.to_dict() if f0_stats else None
+
+    trainer = Trainer(config, compute, training, job.directory / "checkpoints", plan.batch_size,
+                      crops_per_example=plan.crops_per_example, validation=validation)
     if not trainer.resume():
         trainer.load_pretrained(paths[PRETRAINED[rate][0].name], paths[PRETRAINED[rate][1].name])
-    total = int(spec["epochs"])
+    total = plan.epochs
     save_every = max(1, int(spec.get("save_every", 25)))
+    tracker = ValidationTracker.restore(job.status, plan.patience_epochs)
+    tracker.last_gain_epoch = max(tracker.last_gain_epoch, trainer.epoch)  # a resume gets a fresh patience
     job.report(force=True, stage="train", stage_progress=trainer.epoch / total, epoch=trainer.epoch,
                total_epochs=total, batch_size=trainer.batch_size, precision=trainer.precision_label,
-               message="Training")
+               plan=plan.describe(), f0_stats=f0_payload, message="Training")
     epoch_times: list[float] = []
 
     def on_progress(progress: TrainingProgress) -> None:
@@ -160,23 +188,57 @@ def run(job: Job) -> None:
         if progress.epoch_seconds:
             done = progress.epoch / progress.total_epochs
         job.report(stage="train", stage_progress=min(done, 1.0), epoch=progress.epoch, step=progress.step,
-                   steps_per_epoch=progress.steps_per_epoch, losses={k: round(v, 4) for k, v in progress.losses.items()},
+                   steps_per_epoch=progress.steps_per_epoch,
+                   losses={k: round(v, 4) for k, v in progress.losses.items()},
                    eta_seconds=round(eta) if eta is not None else None, batch_size=progress.batch_size)
+
+    def export_voice_file(epoch: int, score: float | None) -> None:
+        trainer.export(model_path, f0_payload)
+        job.report(force=True, exported_epoch=epoch, best_epoch=epoch,
+                   best_score=None if score is None else round(score, 4),
+                   message=f"Best voice so far: epoch {epoch}")
 
     def on_epoch_end(epoch: int) -> None:
         if epoch % save_every == 0 or epoch == total:
             trainer.save_checkpoint()
-            trainer.export(model_path)
-            job.report(force=True, exported_epoch=epoch, message=f"Saved epoch {epoch}")
+            job.report(force=True, checkpoint_epoch=epoch)
+        if not trainer.validation:
+            if epoch % save_every == 0 or epoch == total:
+                export_voice_file(epoch, None)  # nothing to validate against: keep the latest
+            return
+        if epoch % plan.eval_every and epoch != total:
+            return
+        score = trainer.evaluate()
+        assert score is not None
+        if tracker.add(epoch, score):
+            export_voice_file(epoch, score)
+        job.report(force=True, validation=tracker.history[-400:], validation_score=round(score, 4))
+        if tracker.should_stop(epoch):
+            logger.info("No validation gain for %d epochs; stopping at epoch %d (best %d)",
+                        epoch - tracker.last_gain_epoch, epoch, tracker.best_epoch)
 
-    outcome = trainer.train(total, on_progress, lambda: job.stop_requested, on_epoch_end)
-    if trainer.epoch > int(job.status.get("exported_epoch") or 0) and trainer.epoch > 0:
+    def should_stop() -> bool:
+        return job.stop_requested or tracker.stopped
+
+    outcome = trainer.train(total, on_progress, should_stop, on_epoch_end)
+    if trainer.epoch > int(job.status.get("checkpoint_epoch") or 0) and trainer.epoch > 0:
         trainer.save_checkpoint()
-        trainer.export(model_path)
-    job.report(force=True, state="stopped" if outcome == "stopped" else "done", stage="done" if outcome == "done"
-               else job.status.get("stage"), progress=1.0 if outcome == "done" else job.status.get("progress"),
-               exported_epoch=trainer.epoch, model=model_path.name, index=index_path.name,
-               message="Finished" if outcome == "done" else f"Stopped at epoch {trainer.epoch}")
+        job.report(force=True, checkpoint_epoch=trainer.epoch)
+    if not job.status.get("exported_epoch") and trainer.epoch > 0:
+        export_voice_file(trainer.epoch, None)  # stopped before the first validation
+    finished = outcome == "done" or tracker.stopped
+    exported = int(job.status.get("exported_epoch") or 0)
+    if tracker.stopped:
+        message = (f"Finished at epoch {trainer.epoch}: the voice stopped improving. "
+                   f"Saved the best one, epoch {exported}.")
+    elif finished:
+        message = f"Finished. Saved the best epoch, {exported}."
+    else:
+        message = f"Stopped at epoch {trainer.epoch}. Saved the best epoch, {exported}."
+    job.report(force=True, state="done" if finished else "stopped",
+               stage="done" if finished else job.status.get("stage"),
+               progress=1.0 if finished else job.status.get("progress"), model=model_path.name,
+               index=index_path.name, message=message)
 
 
 def main() -> None:

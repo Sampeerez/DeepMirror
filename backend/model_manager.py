@@ -9,6 +9,7 @@ model.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
@@ -60,6 +61,9 @@ class ModelManager:
         self._pitch: PitchExtractor | None = None
         self._converter: VoiceConverter | None = None
         self._details: dict[str, dict] = {}
+        # Last automatic pitch shift per voice, so a new stream starts in the right register.
+        self._pitch_memory: dict[str, float] = {}
+        self._state_path = Path(settings.DATA_DIR) / "state.json"
 
     # --- Shared engine ------------------------------------------------------
 
@@ -101,6 +105,47 @@ class ModelManager:
             filter_radius=s.DEFAULT_FILTER_RADIUS, rms_mix_rate=s.DEFAULT_RMS_MIX_RATE,
             protect=s.DEFAULT_PROTECT, crepe_hop_length=s.DEFAULT_CREPE_HOP_LENGTH,
             rmvpe_threshold=s.RMVPE_THRESHOLD)
+
+    # --- Last active voice (restored on the next start) ----------------------
+
+    def _remember_active(self, name: str | None) -> None:
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            partial = self._state_path.with_suffix(".part")
+            partial.write_text(json.dumps({"active_voice": name}), encoding="utf-8")
+            partial.replace(self._state_path)
+        except OSError:
+            logger.warning("Could not save the active voice", exc_info=True)
+
+    def last_active_voice(self) -> str | None:
+        try:
+            name = json.loads(self._state_path.read_text(encoding="utf-8")).get("active_voice")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return name if isinstance(name, str) and (self.models_dir / Path(name).name).is_file() else None
+
+    def restore_last_voice(self, wait_seconds: float = 900.0) -> None:
+        """Re-activate the voice used last time once HuBERT is available (runs in a thread)."""
+        name = self.last_active_voice()
+        if name is None or self._converter is not None:
+            return
+        deadline = time.monotonic() + wait_seconds
+        while not self.assets.ready("hubert"):
+            if time.monotonic() > deadline:
+                return
+            time.sleep(1.0)
+        if self._converter is not None:  # the user picked a voice meanwhile
+            return
+        try:
+            self.activate(name)
+        except Exception:
+            logger.exception("Could not restore the last voice %s", name)
+
+    def remembered_pitch_shift(self, voice_name: str) -> float | None:
+        return self._pitch_memory.get(voice_name)
+
+    def remember_pitch_shift(self, voice_name: str, semitones: float) -> None:
+        self._pitch_memory[voice_name] = semitones
 
     # --- Library ------------------------------------------------------------
 
@@ -161,6 +206,7 @@ class ModelManager:
         with self._lock:
             if self._converter is not None and self._converter.voice.name == path.name:
                 self._release_locked()
+                self._remember_active(None)
             path.unlink()
             self._details.pop(path.name, None)
         logger.info("Deleted model %s", path.name)
@@ -195,6 +241,7 @@ class ModelManager:
             }
             self._converter = converter
             self._details[path.name] = details
+            self._remember_active(path.name)
         logger.info("Activated %s", path.name)
         return {"name": path.name, "type": "rvc", "status": "active", "details": details}
 
@@ -221,8 +268,10 @@ class ModelManager:
         return round(elapsed, 1)
 
     def deactivate(self) -> None:
+        """Unload the voice at the user's request (it is not restored on the next start)."""
         with self._lock:
             self._release_locked()
+            self._remember_active(None)
 
     def _release_locked(self) -> None:
         if self._converter is None:
@@ -233,7 +282,8 @@ class ModelManager:
             torch.cuda.empty_cache()
 
     def close(self) -> None:
-        self.deactivate()
+        with self._lock:
+            self._release_locked()
         if self._pitch is not None:
             self._pitch.close()
 

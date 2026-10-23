@@ -52,7 +52,8 @@ async def create_job(
     name: Annotated[str, Form()],
     files: Annotated[list[UploadFile], File()],
     sample_rate: Annotated[int, Form()] = 40000,
-    epochs: Annotated[int, Form()] = DEFAULT_EPOCHS,
+    # Omitted (or 0): planned automatically from the audio length and the GPU.
+    epochs: Annotated[int | None, Form()] = None,
     batch_size: Annotated[int | None, Form()] = None,
     save_every: Annotated[int, Form()] = 25,
     overwrite: Annotated[str | None, Form()] = None,
@@ -60,7 +61,7 @@ async def create_job(
     if batch_size is not None and not 1 <= batch_size <= 32:
         raise HTTPException(status_code=400, detail="Batch size must be between 1 and 32.")
     try:
-        return await _jobs(request).create(name, files, sample_rate, epochs, batch_size,
+        return await _jobs(request).create(name, files, sample_rate, epochs or None, batch_size,
                                            max(1, min(save_every, MAX_EPOCHS)),
                                            (overwrite or "").lower() in {"true", "1", "on", "yes"})
     except TrainingError as exc:

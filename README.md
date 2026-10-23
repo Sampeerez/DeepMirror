@@ -64,7 +64,8 @@ OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OV
 - Pitch and formant shifting, RVC controls (index rate, filter radius, RMS mix, protect, Crepe hop) and **13 pitch trackers**: PM, Harvest, DIO, Crepe/Mangio-Crepe (full and tiny), RMVPE, FCPE and offline hybrids. RMVPE is chosen automatically on a GPU
 - **13-effect DSP rack**: noise gate, robot, whisper, telephone, distortion, bitcrush, chorus, echo, reverb, EQ, compressor, output gain, limiter
 - **16 built-in presets** plus your own, saving the whole Voice Lab state
-- **Silence Saver** pauses inference during silence and resumes on the first audible chunk
+- **Silence Saver** pauses inference during silence without cutting the end of the last word, wakes on a single quiet syllable and keeps listening while asleep, so the next word starts with real context
+- **Auto pitch**: voices trained in the studio store their pitch range, and the live stream moves your register onto the voice's (for example about +12 semitones from a low voice to a high one) while keeping your intonation. Pitch and formant start at 0, and every RVC control starts at its recommended value until you change it
 - Spectrum, meters, latency history, server timing (model/DSP/network) and stream diagnostics
 - Output recorder (<kbd>R</kbd>) with a take library stored in the browser; <kbd>B</kbd> toggles an A/B bypass
 - Model-free DSP mode: pitch shifting and effects with no voice loaded
@@ -102,16 +103,18 @@ Open the **Train** tab, drop recordings of one speaker, name the voice and press
 training**. Everything else is automatic:
 
 1. **Base models.** The official RVC v2 pretrained generator and discriminator (40 or 48 kHz) are downloaded once and verified by SHA-256. Fine-tuning from them is what makes a few minutes of audio enough.
-2. **Data preparation.** Audio is converted to mono and high-pass filtered, cut at pauses, split into overlapping 3.7 s segments and softly peak-normalised. Clipped segments are dropped.
+2. **Data preparation.** Audio is converted to mono, high-pass filtered and brought to a consistent speech level, then cut at pauses, split into overlapping 3.7 s segments and softly peak-normalised. Clipped segments are dropped. The job reports how much speech it found, clipping, background noise and the share of voiced speech, with advice when the material is weak.
 3. **Features.** HuBERT content features and RMVPE pitch are extracted on the GPU.
 4. **Index.** The retrieval index is built straight away, in the standard faiss format, so it also works in other RVC tools.
-5. **Training.** The GAN (generator, multi-period discriminator, mel + KL + feature-matching losses) trains for the epochs you chose. The batch size follows free GPU memory and halves automatically if memory runs out. Precision is chosen per GPU: bf16 on RTX 30 and newer, FP16 where it is reliable, FP32 on GTX 16xx and older, where FP16 is slower and unstable.
-6. **Saving.** The voice is saved to **Models** every N epochs and at the end. **Stop and save** keeps the work done, and **Continue training** adds more epochs later, even after a restart.
+5. **Automatic plan.** Epochs and batch size come from the amount of speech and the free GPU memory: the batch fits the GPU but stays small enough for about a dozen steps per epoch, and the epoch budget targets about 7,000 optimiser steps (150–1,000 epochs). Under 10 minutes of audio every segment gives two random crops per epoch. Precision is chosen per GPU: bf16 on RTX 30 and newer, FP16 where it is reliable, FP32 on GTX 16xx and older, where FP16 is slower and unstable.
+6. **Best epoch, not last epoch.** About 8% of the segments are held out. Every few epochs they are rendered through the same path live conversion uses and compared with the real voice. The voice in **Models** is always the best-scoring epoch, so it never gets worse if training starts to over-fit, and training stops by itself once the score stops improving. **Stop and save** keeps the best voice, and **Continue training** resumes later, even after a restart.
+7. **Pitch range.** The voice's median pitch is saved in the `.pth` (other RVC tools ignore it) and drives **Auto pitch**.
 
-**Recordings:** 10–30 minutes of clean, dry speech from one person is ideal; 1 minute
-is the minimum. Avoid music, reverb, noise and other voices. Vary intonation: questions,
-calm and lively speech. **Epochs:** 200–500 suits 10–30 minutes of audio; more epochs
-capture finer detail but can over-fit tiny datasets.
+**Recordings:** 5 minutes of clean, dry speech from one person trains a good voice; 10–30
+minutes captures more of the pitch range and sounds, and 1 minute is the minimum. Avoid
+music, reverb, noise and other voices. Vary intonation: questions, calm and lively speech.
+Leave **Epochs** on *Automatic*; a manual value is an upper limit and the best epoch is still
+the one kept.
 
 Training runs in its own process, so the studio keeps working. Live conversion is slower
 while the GPU trains. On a GTX 1660 SUPER one epoch over 6 minutes of speech takes about
@@ -158,7 +161,8 @@ project folder. Common ones:
 | `OVC_STREAM_PAD_SECONDS` | `0.1` | Edge padding of each streaming window |
 | `OVC_INDEX_EXACT_SEARCH` | `true` | `false` reproduces classic RVC's approximate index search |
 | `OVC_DEFAULT_INDEX_RATE` / `OVC_DEFAULT_PROTECT` / ... | RVC defaults | Starting values of the Voice Lab controls |
-| `OVC_SILENCE_THRESHOLD_DB` | `-52` | Level below which Silence Saver pauses inference |
+| `OVC_SILENCE_THRESHOLD_DB` | `-60` | Level (loudest 10 ms of a chunk) below which Silence Saver pauses inference |
+| `OVC_RESTORE_LAST_VOICE` | `true` | Load the voice that was active when the studio last closed |
 | `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See [Security](#security) |
 | `OVC_CORS_ORIGINS` | local origins | Extra origins allowed to use the API |
 

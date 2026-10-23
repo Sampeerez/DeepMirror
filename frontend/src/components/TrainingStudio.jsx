@@ -8,8 +8,8 @@ import {
 } from '../lib/api';
 import { formatBytes } from '../lib/format';
 import {
-  STAGE_LABELS, STATE_LABELS, canResume, datasetQuality, formatDuration, isActiveJob, jobModelFile,
-  readAudioDuration,
+  STAGE_LABELS, STATE_LABELS, bestEpochSummary, canResume, datasetQuality, formatDuration, isActiveJob, jobModelFile,
+  plannedEpochs, readAudioDuration,
 } from '../lib/training';
 
 const ACCEPTED = '.wav,.flac,.ogg,.mp3,.m4a,.aiff';
@@ -58,7 +58,8 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold text-fg">{job.name}</h3>
           <p className="mt-1 font-mono text-[11px] text-fg-faint">
-            {formatDuration(job.audio_seconds)} audio · {job.sample_rate / 1000} kHz · {job.epochs} epochs
+            {formatDuration(job.audio_seconds)} audio · {job.sample_rate / 1000} kHz
+            · {plannedEpochs(job) ? `${plannedEpochs(job)} epochs max` : 'automatic plan'}
             {job.segments ? ` · ${job.segments} segments` : ''}
           </p>
         </div>
@@ -71,7 +72,7 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
         <div className="flex items-center justify-between gap-3 text-xs">
           <span className="text-fg-secondary">
             {active ? (STAGE_LABELS[job.stage] || job.message) : (job.message || STAGE_LABELS[job.stage])}
-            {job.stage === 'train' && job.epoch ? ` · epoch ${job.epoch}/${job.total_epochs || job.epochs}` : ''}
+            {job.stage === 'train' && job.epoch ? ` · epoch ${job.epoch}/${plannedEpochs(job)}` : ''}
           </span>
           <span className="font-mono tabular-nums text-fg-muted">
             {progress}%{active && job.eta_seconds ? ` · ${formatDuration(job.eta_seconds)} left` : ''}
@@ -99,11 +100,17 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
         </dl>
       ) : null}
 
+      {job.warnings?.length ? (
+        <ul className="mt-3 space-y-1 text-xs text-warn-fg">
+          {job.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : null}
       {job.error ? <p className="mt-3 break-words text-xs text-danger-fg">{job.error}</p> : null}
       {job.exported_epoch ? (
         <p className="mt-3 text-xs text-fg-subtle">
-          Voice saved at epoch {job.exported_epoch} as <span className="font-mono text-fg-secondary">{jobModelFile(job)}</span>
-          {job.index ? ' with its index' : ''}.
+          {bestEpochSummary(job)} File: <span className="font-mono text-fg-secondary">{jobModelFile(job)}</span>
+          {job.index ? ' with its index' : ''}
+          {job.f0_stats?.median_hz ? ` · voice pitch ${Math.round(job.f0_stats.median_hz)} Hz (used by Auto pitch)` : ''}.
         </p>
       ) : null}
 
@@ -121,7 +128,7 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
         ) : null}
         {canResume(job) ? (
           <>
-            <input type="number" min={(job.epoch || 0) + 1} max={2000} placeholder={String(Math.max(job.epochs, (job.epoch || 0) + 100))}
+            <input type="number" min={(job.epoch || 0) + 1} max={2000} placeholder={String(Math.max(plannedEpochs(job) || 0, (job.epoch || 0) + 100))}
               value={moreEpochs} onChange={(event) => setMoreEpochs(event.target.value)}
               className="w-24 rounded-md border border-line-strong bg-input px-2 py-1 text-xs text-fg"
               aria-label="Total epochs when continuing" />
@@ -149,6 +156,8 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
   const [name, setName] = useState('');
   const [sampleRate, setSampleRate] = useState(40000);
   const [epochs, setEpochs] = useState(300);
+  // Automatic plan: epochs and batch from the audio and the GPU, early stopping, best epoch kept.
+  const [autoPlan, setAutoPlan] = useState(true);
   const [batchSize, setBatchSize] = useState('');
   const [saveEvery, setSaveEvery] = useState(25);
   const [uploadProgress, setUploadProgress] = useState(null);
@@ -201,8 +210,8 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
     setUploadProgress(0);
     try {
       await createTrainingJob({
-        name, files: files.map((item) => item.file), sampleRate, epochs,
-        batchSize: batchSize ? Number(batchSize) : null, saveEvery,
+        name, files: files.map((item) => item.file), sampleRate, epochs: autoPlan ? null : epochs,
+        batchSize: !autoPlan && batchSize ? Number(batchSize) : null, saveEvery,
       }, setUploadProgress);
       setFiles([]);
       setNotice('Training started. You can keep using the studio; it will be slower while the GPU trains.');
@@ -285,7 +294,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           <Upload className="mx-auto mb-3 h-8 w-8 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
           <p className="text-sm font-medium text-fg-secondary">Drop recordings or click to choose</p>
           <p className="mt-1 text-xs text-fg-faint">
-            One speaker, dry and clean: no music, no reverb, no other voices. 10–30 minutes is ideal.
+            One speaker, dry and clean: no music, no reverb, no other voices. 5 minutes trains well; 10–30 minutes is ideal.
           </p>
         </div>
 
@@ -322,14 +331,23 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
               ))}
             </select>
           </Field>
-          <Field label={`Epochs: ${epochs}`} htmlFor="training-epochs"
-            hint="More epochs capture finer detail; 200–500 suits 10–30 min of audio. Stop any time: it saves.">
-            <input id="training-epochs" type="range" min={20} max={info?.max_epochs || 2000} step={10} value={epochs}
-              onChange={(event) => setEpochs(Number(event.target.value))} className="fx-slider w-full" />
+          <Field label={autoPlan ? 'Epochs: automatic' : `Epochs: ${epochs}`} htmlFor="training-epochs"
+            hint={autoPlan
+              ? 'Planned from your audio and GPU. Training stops when the voice stops improving and keeps the best epoch.'
+              : 'Upper limit; the best epoch is still the one kept. Stop any time: it saves.'}>
+            <label className="mb-2 flex items-center gap-2 text-xs text-fg-secondary">
+              <input type="checkbox" checked={autoPlan} onChange={(event) => setAutoPlan(event.target.checked)} />
+              Automatic (recommended)
+            </label>
+            {!autoPlan ? (
+              <input id="training-epochs" type="range" min={20} max={info?.max_epochs || 2000} step={10} value={epochs}
+                onChange={(event) => setEpochs(Number(event.target.value))} className="fx-slider w-full" />
+            ) : null}
           </Field>
-          <Field label="Batch size" htmlFor="training-batch" hint="Empty = automatic from free GPU memory.">
-            <input id="training-batch" type="number" min={1} max={32} className={inputClass} value={batchSize}
-              onChange={(event) => setBatchSize(event.target.value)} placeholder="Auto" />
+          <Field label="Batch size" htmlFor="training-batch"
+            hint={autoPlan ? 'Automatic: fits your GPU memory and the amount of audio.' : 'Empty = automatic from free GPU memory.'}>
+            <input id="training-batch" type="number" min={1} max={32} className={inputClass} value={autoPlan ? '' : batchSize}
+              disabled={autoPlan} onChange={(event) => setBatchSize(event.target.value)} placeholder="Auto" />
           </Field>
         </div>
         <details className="mt-4">

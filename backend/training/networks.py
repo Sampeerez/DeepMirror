@@ -237,10 +237,14 @@ def to_rvc_state(state: dict[str, torch.Tensor], *, generator: bool) -> dict[str
     return converted
 
 
-def export_voice(generator: TrainableSynthesizer, epoch: int) -> dict:
-    """Inference checkpoint in the standard RVC format (fp16 weights, no posterior encoder)."""
+def export_voice(generator: TrainableSynthesizer, epoch: int, f0_stats: dict | None = None) -> dict:
+    """Inference checkpoint in the standard RVC format (fp16 weights, no posterior encoder).
+
+    ``f0_stats`` (the training data's pitch distribution) is an extra key other
+    RVC tools ignore; the studio uses it for automatic pitch.
+    """
     state = to_rvc_state(generator.state_dict(), generator=True)
     weights = {k: v.detach().half().cpu() for k, v in state.items() if not k.startswith("enc_q.")}
     config = generator.config
     return {"weight": weights, "config": config.synthesizer_config(), "info": f"{epoch}epoch",
-            "sr": config.tag, "f0": 1, "version": "v2"}
+            "sr": config.tag, "f0": 1, "version": "v2", **({"f0_stats": f0_stats} if f0_stats else {})}

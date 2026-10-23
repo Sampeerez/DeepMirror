@@ -105,13 +105,16 @@ def build_examples(segments: list[Segment], config: TrainingConfig) -> list[Exam
 
 class Trainer:
     def __init__(self, config: TrainingConfig, compute: ComputeDevice, examples: list[Example],
-                 checkpoint_dir: Path, batch_size: int | None = None) -> None:
+                 checkpoint_dir: Path, batch_size: int | None = None, *, crops_per_example: int = 1,
+                 validation: list[Example] | None = None) -> None:
         if not examples:
             raise ValueError("No usable training audio after preprocessing.")
         self.config = config
         self.compute = compute
         self.device = compute.device
         self.examples = examples
+        self.crops_per_example = max(1, crops_per_example)
+        self.validation = validation or []
         self.checkpoint_dir = checkpoint_dir
         self.batch_size = min(batch_size or auto_batch_size(compute), len(examples))
         self.generator = TrainableSynthesizer(config).to(self.device)
@@ -175,10 +178,47 @@ class Trainer:
         self.epoch = int(state["epoch"])
         return True
 
-    def export(self, path: Path) -> None:
+    def export(self, path: Path, f0_stats: dict | None = None) -> None:
         partial = path.with_suffix(path.suffix + ".part")
-        torch.save(export_voice(self.generator, self.epoch), partial)
+        torch.save(export_voice(self.generator, self.epoch, f0_stats), partial)
         partial.replace(path)
+
+    # --- Validation ---------------------------------------------------------
+
+    @torch.no_grad()
+    def evaluate(self) -> float | None:
+        """Mel distance (L1, log-mel) of held-out windows rendered through the inference path.
+
+        This is what live conversion plays: content features and pitch through
+        the prior, the inverse flow and the vocoder, with no access to the
+        target spectrogram. Lower is closer to the real voice. The noise of the
+        prior uses a fixed seed, so scores are comparable between epochs.
+        """
+        if not self.validation:
+            return None
+        config = self.config
+        synth = self.generator.synth
+        self.generator.eval()
+        total = 0.0
+        try:
+            with torch.random.fork_rng(devices=[self.device] if self.device.type == "cuda" else []):
+                torch.manual_seed(1234)
+                for item in self.validation:
+                    frames = len(item.pitch)
+                    rendered = synth.infer(
+                        item.phone[None].to(self.device), torch.tensor([frames], device=self.device),
+                        item.pitch[None].to(self.device), item.pitchf[None].to(self.device),
+                        torch.zeros(1, dtype=torch.long, device=self.device))[0].float()
+                    real = item.wave[None].to(self.device)
+                    length = min(rendered.shape[-1], real.shape[-1])
+                    fake_mel = log_mel(linear_spectrogram(rendered[:, :length], config.n_fft, config.hop,
+                                                          config.win), self.mel_basis)
+                    real_mel = log_mel(linear_spectrogram(real[:, :length], config.n_fft, config.hop, config.win),
+                                       self.mel_basis)
+                    total += float(F.l1_loss(fake_mel, real_mel))
+        finally:
+            self.generator.train()
+        return total / len(self.validation)
 
     # --- Training -----------------------------------------------------------
 
@@ -249,7 +289,7 @@ class Trainer:
         self.discriminator.train()
         while self.epoch < total_epochs:
             started = time.perf_counter()
-            order = list(self.examples)
+            order = list(self.examples) * self.crops_per_example  # each pass draws a fresh random crop
             random.shuffle(order)
             steps = math.ceil(len(order) / self.batch_size)
             totals: dict[str, float] = {}

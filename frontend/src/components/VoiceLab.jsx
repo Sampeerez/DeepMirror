@@ -1,19 +1,24 @@
 import React, { memo, useState } from 'react';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 import { FALLBACK_F0_METHODS, findF0Method, groupedMethods } from '../lib/f0Methods';
+import { isRecommendedVoice } from '../lib/voice';
+import Toggle from './Toggle';
 
-function BigSlider({ label, value, min, max, step, unit, onChange, onReset }) {
+function BigSlider({ label, value, min, max, step, unit, onChange, onReset, resetDisabled, accessory, hint }) {
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-medium text-fg-muted">{label}</p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs font-medium text-fg-muted">{label}</p>
+          {accessory}
+        </div>
         <div className="flex items-center gap-2">
           <span className={`font-mono text-xl font-semibold tabular-nums tracking-normal ${value === 0 ? 'text-fg-subtle' : 'text-fg'}`}>
             {value > 0 ? '+' : ''}{Number(value).toFixed(1)}{unit}
           </span>
           <button
             onClick={onReset}
-            disabled={value === 0}
+            disabled={resetDisabled ?? value === 0}
             className="chip-button inline-flex h-8 w-8 items-center justify-center !p-0"
             aria-label={`Reset ${label}`}
             title={`Reset ${label}`}
@@ -37,6 +42,7 @@ function BigSlider({ label, value, min, max, step, unit, onChange, onReset }) {
         <span>0</span>
         <span>+{max}</span>
       </div>
+      {hint ? <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">{hint}</p> : null}
     </div>
   );
 }
@@ -62,8 +68,21 @@ function MiniSlider({ label, value, min, max, step, onChange, format = (v) => v.
   );
 }
 
-function VoiceLab({ voice, onChange, hasModel, isRunning, f0Methods = FALLBACK_F0_METHODS }) {
+function pitchHint(voice, autoPitchAvailable, autoPitchShift, isRunning) {
+  if (!voice.autoPitch) return 'Manual shift. Turn Auto on to match the voice register.';
+  if (!isRunning) return 'Auto: matches your register to the voice once you speak (voices trained here).';
+  if (!autoPitchAvailable) return 'Auto needs a voice trained in this studio; this voice keeps your pitch (0).';
+  if (autoPitchShift === null) return 'Auto: listening to your voice…';
+  return 'Auto: your register is matched to the voice. Move the slider to choose a shift yourself.';
+}
+
+function VoiceLab({
+  voice, onChange, onRestoreRecommended, hasModel, isRunning, autoPitchAvailable = false, autoPitchShift = null,
+  f0Methods = FALLBACK_F0_METHODS,
+}) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const autoActive = voice.autoPitch && autoPitchAvailable && autoPitchShift !== null;
+  const shownPitch = autoActive ? autoPitchShift : voice.pitch;
   const selectedMethod = findF0Method(f0Methods, voice.f0Method);
   const liveGroups = groupedMethods(f0Methods, 'realtime');
 
@@ -87,13 +106,25 @@ function VoiceLab({ voice, onChange, hasModel, isRunning, f0Methods = FALLBACK_F
       <div className="mt-5 space-y-6">
         <BigSlider
           label="Pitch Shift"
-          value={voice.pitch}
+          value={shownPitch}
           min={-12}
           max={12}
           step={0.5}
           unit=" st"
           onChange={(value) => onChange({ pitch: value })}
-          onReset={() => onChange({ pitch: 0 })}
+          onReset={() => onChange({ pitch: 0, autoPitch: true })}
+          resetDisabled={voice.autoPitch && voice.pitch === 0}
+          accessory={(
+            <span className="inline-flex items-center gap-2 text-[11px] font-medium text-fg-subtle">
+              <Toggle
+                checked={voice.autoPitch}
+                onChange={(autoPitch) => onChange({ autoPitch })}
+                label="Automatic pitch"
+              />
+              Auto
+            </span>
+          )}
+          hint={pitchHint(voice, autoPitchAvailable, autoPitchShift, isRunning)}
         />
 
         <BigSlider
@@ -201,6 +232,15 @@ function VoiceLab({ voice, onChange, hasModel, isRunning, f0Methods = FALLBACK_F
               protect preserves breaths and consonants. Filter radius median-smooths
               the Harvest and DIO pitch tracks — values below 3 disable it.
             </p>
+            <button
+              type="button"
+              onClick={onRestoreRecommended}
+              disabled={isRecommendedVoice(voice)}
+              className="chip-button inline-flex items-center gap-2"
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+              {isRecommendedVoice(voice) ? 'Using recommended settings' : 'Restore recommended settings'}
+            </button>
           </div>
         )}
       </div>

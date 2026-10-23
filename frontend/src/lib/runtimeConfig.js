@@ -10,7 +10,7 @@ export const DEFAULT_RUNTIME_CONFIG = {
   sampleRate: 48000,
   chunkSize: PERFORMANCE_PROFILES[0].chunkSize,
   silenceSaver: true,
-  silenceThresholdDb: -52,
+  silenceThresholdDb: -60,
   f0Methods: FALLBACK_F0_METHODS,
   defaultF0Method: null,
   device: null,
@@ -57,14 +57,20 @@ export function mergeRuntimeConfig(config, stored = null) {
   };
 }
 
-/** The persisted slice: user choices only, never hardware facts. */
-export function persistedRuntimeConfig(config) {
-  return {
-    sampleRate: config.sampleRate,
-    chunkSize: config.chunkSize,
-    silenceSaver: config.silenceSaver,
-    silenceThresholdDb: config.silenceThresholdDb,
-  };
+const USER_KEYS = ['sampleRate', 'chunkSize', 'silenceSaver', 'silenceThresholdDb'];
+
+/**
+ * The persisted slice: only the settings the user actually changed. Anything
+ * never touched keeps following the server, whose defaults fit the hardware
+ * (a larger chunk on CPU-only machines, for instance).
+ */
+export function persistedRuntimeConfig(previous, partial, next) {
+  const saved = {};
+  for (const key of USER_KEYS) {
+    if (previous && key in previous) saved[key] = previous[key];
+    if (partial && key in partial) saved[key] = next[key];
+  }
+  return saved;
 }
 
 /** Apply a partial settings change, keeping invalid fields at their current value. */

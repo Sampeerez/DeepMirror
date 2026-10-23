@@ -83,7 +83,8 @@ export default function useRuntimeConfig({ wsHook, isRunning, onRecommendedF0 })
   const changeSettings = useCallback((partial) => {
     const next = updateRuntimeConfig(runtimeConfig, partial);
     setRuntimeConfig(next);
-    writeStored(STORAGE_KEYS.globalSettings, persistedRuntimeConfig(next));
+    writeStored(STORAGE_KEYS.globalSettings,
+      persistedRuntimeConfig(readStored(STORAGE_KEYS.globalSettings), partial, next));
     applyConfig({ sample_rate: next.sampleRate, chunk_size: next.chunkSize });
     if (wsStatus !== 'connected') return;
     const live = { silence_saver: next.silenceSaver, silence_threshold_db: next.silenceThresholdDb };

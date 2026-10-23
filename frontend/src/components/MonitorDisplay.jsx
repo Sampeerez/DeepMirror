@@ -202,7 +202,7 @@ function MonitorDisplay({
           value={serverStats?.activeModel ? `${Math.round(serverStats.inferenceDutyPercent || 0)}%` : '--'}
         />
       </div>
-      <StreamDiagnostics streamInfo={streamInfo} playbackStats={playbackStats} transport={transport} serverMs={serverMs} />
+      <StreamDiagnostics streamInfo={streamInfo} playbackStats={playbackStats} transport={transport} serverMs={serverMs} serverStats={serverStats || {}} />
     </section>
   );
 }

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import torch
 
+from backend.inference.auto_pitch import F0Stats
 from backend.inference.checkpoints import CheckpointError, fold_weight_norm, load_rvc_checkpoint
 from backend.inference.synthesizer import Synthesizer
 
@@ -22,6 +23,8 @@ class VoiceModel:
     sample_rate: int      # synthesizer output rate
     speaker_count: int
     synthesizer: Synthesizer
+    # Pitch distribution of the training data (voices trained in the studio).
+    f0_stats: F0Stats | None = None
 
     @classmethod
     def load(cls, path: Path, device: torch.device, half: bool, *, allow_unsafe: bool = False) -> VoiceModel:
@@ -45,8 +48,10 @@ class VoiceModel:
         synthesizer = synthesizer.half() if half else synthesizer.float()
         logger.info("Loaded voice %s (RVC %s, %s, %d Hz, %d speakers)", path.name, version,
                     "pitch" if use_pitch else "no pitch", synthesizer.sample_rate, synthesizer.speaker_count)
-        return cls(path.name, version, use_pitch, synthesizer.sample_rate, synthesizer.speaker_count, synthesizer)
+        return cls(path.name, version, use_pitch, synthesizer.sample_rate, synthesizer.speaker_count, synthesizer,
+                   F0Stats.from_dict(checkpoint.get("f0_stats")) if use_pitch else None)
 
     def describe(self) -> dict:
         return {"engine": "rvc", "version": self.version, "f0": self.use_pitch,
-                "target_sample_rate": self.sample_rate, "speakers": self.speaker_count}
+                "target_sample_rate": self.sample_rate, "speakers": self.speaker_count,
+                "f0_stats": self.f0_stats.to_dict() if self.f0_stats else None}
