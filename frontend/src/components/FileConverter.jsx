@@ -60,6 +60,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
       const blob = await convertFile(file, {
         pitchShift: voice.pitch,
         autoPitch: voice.autoPitch,
+        expressiveness: voice.expressiveness,
         formantShift: voice.formant,
         f0Method: selectedF0.id,
         effects,

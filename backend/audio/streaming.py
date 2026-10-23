@@ -90,6 +90,42 @@ def _sola_offset(reference: np.ndarray, candidate: np.ndarray, search: int) -> i
     return int(np.argmax(scores))
 
 
+# The converted voice may not be louder than the speaker's own voice (at the
+# matched level) by more than this, frame by frame. Where the input is almost
+# silent (the end of a quiet word, the gap in "no... no") a model can invent
+# vowels out of noise; this keeps them as quiet as what was actually said.
+# While the detector hears speech the margin allows the model's own dynamics;
+# in the pre-roll and hang-over around it, nothing louder than the input.
+CEILING_MARGIN_DB = 8.0
+EDGE_MARGIN_DB = 0.0
+CEILING_FRAME_SECONDS = 0.02
+
+
+def envelope_ceiling(converted: np.ndarray, reference: np.ndarray, rate: int,
+                     heard: np.ndarray | None = None) -> np.ndarray:
+    """``converted`` attenuated wherever its 20 ms envelope exceeds ``reference``'s by the margin."""
+    frame = max(1, round(CEILING_FRAME_SECONDS * rate))
+    count = min(len(converted), len(reference)) // frame
+    if count < 3:
+        return converted
+    shape = (count, frame)
+    have = np.sqrt(np.mean(np.square(converted[: count * frame].reshape(shape), dtype=np.float64), axis=1))
+    want = np.sqrt(np.mean(np.square(reference[: count * frame].reshape(shape), dtype=np.float64), axis=1))
+    # Neighbouring frames count too: the model's timing differs from the input by a few ms.
+    padded = np.pad(want, 1, mode="edge")
+    want = np.maximum(want, np.maximum(padded[:-2], padded[2:]))
+    margin = np.full(count, CEILING_MARGIN_DB)
+    if heard is not None and len(heard) >= count * frame:
+        margin = np.where(heard[: count * frame].reshape(shape).any(axis=1), CEILING_MARGIN_DB, EDGE_MARGIN_DB)
+    limit = want * 10 ** (margin / 20) + 1e-7
+    gains = np.minimum(1.0, limit / np.maximum(have, 1e-12))
+    if gains.min() >= 0.999:
+        return converted
+    centres = (np.arange(count) + 0.5) * frame
+    curve = np.interp(np.arange(len(converted)), centres, gains).astype(np.float32)
+    return (converted * curve).astype(np.float32)
+
+
 @dataclass(slots=True)
 class StreamCleanup:
     """What happens around the model (all adjustable live)."""
@@ -276,11 +312,17 @@ class RealtimeVoiceStream:
         dry = input_span(self._history)
         clean = input_span(clean_history) if clean_history is not None else None
         speech = input_span(self._speech_gain) if cleanup.isolate_voice else np.ones(span, np.float32)
+        heard = (self.speech.core(self._total - len(self._history) + max(0, h_start), span, self.client_rate)
+                 if self.speech is not None and cleanup.isolate_voice else None)
         self.stats.noise_reduction_db = self.denoiser.reduction_now_db(dry, clean) if clean is not None else 0.0
+        reference = clean if clean is not None else dry
+        level = self.loudness.update(reference, region, speech)   # learnt even when not applied
         if cleanup.match_loudness:
-            reference = clean if clean is not None else dry
-            region = region * self.loudness.update(reference, region, speech)
+            region = region * level
             self.stats.loudness_gain_db = round(self.loudness.gain_db, 1)
+            region = envelope_ceiling(region, reference, self.client_rate, heard)
+        else:
+            region = envelope_ceiling(region, reference / max(level, 1e-6), self.client_rate, heard)
         voice = (region * speech).astype(np.float32)
 
         if self._tail is None or len(self._tail) != crossfade:

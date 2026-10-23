@@ -222,6 +222,7 @@ export async function convertFile(file, {
   effects = {},
   useModel = true,
   autoPitch = false,
+  expressiveness,
   indexRate,
   filterRadius,
   rmsMixRate,
@@ -247,6 +248,7 @@ export async function convertFile(file, {
     ['rms_mix_rate', rmsMixRate],
     ['protect', protect],
     ['crepe_hop_length', crepeHopLength],
+    ['pitch_expressiveness', expressiveness],
   ]) {
     if (Number.isFinite(Number(value)) && value !== null && value !== '') {
       formData.append(field, String(value));

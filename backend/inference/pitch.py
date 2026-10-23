@@ -140,6 +140,131 @@ def suppress_octave_spikes(f0: np.ndarray) -> np.ndarray:
     return fixed
 
 
+# --- Voicing clean-up -------------------------------------------------------
+# Quiet speech near the noise floor makes every tracker call noise and soft
+# consonants "voiced" now and then (measured with RMVPE: 1.3% of frames at a
+# normal level, 3.4% at -55 dBFS, 5.9% at -60 dBFS). Those frames skip the
+# consonant protection and the model sings over them ("ieeaa"), so voicing
+# also has to be audible, sustained and in a plausible octave.
+VOICED_MIN_DB = -80.0          # absolute floor for a voiced frame (dBFS, 10 ms): only digital near-silence
+VOICED_ABOVE_FLOOR_DB = 6.0    # and this far above the window's noise floor
+FLOOR_BELOW_PEAK_DB = 40.0     # the floor estimate never sits closer than this to the loudest frame
+MIN_VOICED_FRAMES = 3          # shorter voiced islands (< 30 ms) are noise
+MAX_GAP_FRAMES = 2             # shorter unvoiced gaps (<= 20 ms) inside voice are tracker dropouts
+# A voiced frame repeats itself every pitch period; noise and fricatives (s, f,
+# sh) do not. Below this normalised autocorrelation at the detected period the
+# tracker's "voiced" is a guess (measured: speech near 0.8-1, fricatives < 0.2).
+# Judged per voiced segment (median), so the few aperiodic frames at every
+# real onset and offset stay voiced; aperiodic frames are only trimmed off the
+# ends of a segment (a vowel running into an "s").
+MIN_PERIODICITY = 0.3
+EDGE_PERIODICITY = 0.1
+SPLIT_PERIODICITY = 0.2        # this many aperiodic frames in a row (MIN_VOICED_FRAMES) end a segment
+PERIODICITY_WINDOW = 320       # 20 ms at 16 kHz, centred on the frame
+PERIOD_SEARCH = 4              # +- samples around the detected period
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """``(start, end)`` of every run of True."""
+    padded = np.concatenate([[False], mask, [False]])
+    edges = np.flatnonzero(np.diff(padded.astype(np.int8)))
+    return list(zip(edges[::2].tolist(), edges[1::2].tolist(), strict=True))
+
+
+def periodicity(audio: np.ndarray, f0: np.ndarray) -> np.ndarray:
+    """Normalised autocorrelation of each frame at its own pitch period (0 where unvoiced)."""
+    f0 = np.asarray(f0, dtype=np.float64)
+    out = np.zeros(len(f0), np.float32)
+    source = np.asarray(audio, dtype=np.float64)
+    half = PERIODICITY_WINDOW // 2
+    for k in np.flatnonzero(f0 > 0):
+        period = round(float(SAMPLE_RATE / f0[k]))
+        start = k * HOP + HOP // 2 - half
+        if start < 0 or start + PERIODICITY_WINDOW + period + PERIOD_SEARCH > len(source):
+            out[k] = 1.0          # too close to the edge to judge: keep the tracker's word
+            continue
+        a = source[start:start + PERIODICITY_WINDOW]
+        energy_a = float(a @ a)
+        best = 0.0
+        for lag in range(max(1, period - PERIOD_SEARCH), period + PERIOD_SEARCH + 1):
+            b = source[start + lag:start + lag + PERIODICITY_WINDOW]
+            denominator = math.sqrt(energy_a * float(b @ b))
+            if denominator > 1e-12:
+                best = max(best, float(a @ b) / denominator)
+        out[k] = best
+    return out
+
+
+def clean_voicing(f0: np.ndarray, audio: np.ndarray, noise_floor_db: float | None = None) -> np.ndarray:
+    """Drop voiced frames that are inaudible, too short or an octave off; bridge tiny gaps."""
+    f0 = np.asarray(f0, dtype=np.float32).copy()
+    frames = len(f0)
+    if frames == 0:
+        return f0
+    samples = np.zeros(frames * HOP, np.float64)
+    usable = min(len(audio), len(samples))
+    samples[:usable] = audio[:usable]
+    level = 10 * np.log10(np.maximum(np.mean(samples.reshape(frames, HOP) ** 2, axis=1), 1e-12))
+    peak = float(level.max())
+    floor = float(np.percentile(level, 20)) if noise_floor_db is None else noise_floor_db
+    floor = min(floor, peak - FLOOR_BELOW_PEAK_DB)
+    audible = level >= max(floor + VOICED_ABOVE_FLOOR_DB, VOICED_MIN_DB)
+    voiced = (f0 > 0) & audible
+
+    for start, end in _runs(~voiced):          # bridge dropouts inside voice
+        if start > 0 and end < frames and end - start <= MAX_GAP_FRAMES and audible[start:end].all():
+            f0[start:end] = np.exp(np.linspace(np.log(f0[start - 1]), np.log(f0[end]), end - start + 2)[1:-1])
+            voiced[start:end] = True
+    if voiced.sum() >= 8:                       # octave errors against the local median
+        log_f0 = np.log2(np.where(voiced, f0, np.nan))
+        filled = np.interp(np.arange(frames), np.flatnonzero(voiced), log_f0[voiced])
+        from scipy import ndimage
+
+        local = ndimage.median_filter(filled, size=31, mode="nearest")
+        jump = np.where(voiced, log_f0 - local, 0.0)
+        octave = voiced & (np.abs(jump) > 0.75)
+        f0[octave] = f0[octave] * 2.0 ** (-np.round(jump[octave]))
+    periodic = periodicity(samples, np.where(voiced, f0, 0.0))
+    for start, end in _runs(voiced & (periodic < SPLIT_PERIODICITY)):   # split at sustained noise
+        if end - start >= MIN_VOICED_FRAMES:
+            voiced[start:end] = False
+    for start, end in _runs(voiced):           # aperiodic ends, aperiodic segments, blips
+        while start < end and periodic[start] < EDGE_PERIODICITY:
+            voiced[start] = False
+            start += 1
+        while end > start and periodic[end - 1] < EDGE_PERIODICITY:
+            voiced[end - 1] = False
+            end -= 1
+        if end - start < MIN_VOICED_FRAMES or float(np.median(periodic[start:end])) < MIN_PERIODICITY:
+            voiced[start:end] = False
+    f0[~voiced] = 0.0
+    return f0
+
+
+def expand_intonation(f0: np.ndarray, factor: float, centre_hz: float | None = None) -> np.ndarray:
+    """Widen (factor > 1) or narrow the pitch movement around ``centre_hz``.
+
+    Only the smoothed melody of log-F0 is scaled; the fast
+    frame-to-frame detail is kept as it is, so a livelier intonation does not
+    turn into a wobbly or robotic one.
+    """
+    f0 = np.asarray(f0, dtype=np.float32)
+    voiced = f0 > 0
+    if abs(factor - 1.0) < 1e-3 or voiced.sum() < 3:
+        return f0
+    log_f0 = np.log(np.where(voiced, f0, 1.0))
+    indices = np.flatnonzero(voiced)
+    filled = np.interp(np.arange(len(f0)), indices, log_f0[indices])
+    from scipy import ndimage
+
+    # Melody: a 5-frame median (drops single-frame errors) then a ~30 ms Gaussian.
+    smooth = ndimage.gaussian_filter1d(ndimage.median_filter(filled, size=5, mode="nearest"), 3.0, mode="nearest")
+    centre = math.log(centre_hz) if centre_hz and centre_hz > 0 else float(np.median(log_f0[voiced]))
+    shaped = centre + factor * (smooth - centre) + (log_f0 - smooth)
+    out = np.where(voiced, np.exp(np.clip(shaped, math.log(F0_MIN), math.log(F0_MAX))), 0.0)
+    return out.astype(np.float32)
+
+
 def to_rvc_pitch(f0_hz: np.ndarray, semitones: float) -> tuple[np.ndarray, np.ndarray]:
     """Shift by ``semitones`` and return ``(coarse_bins int64, f0_hz float32)``."""
     f0 = np.asarray(f0_hz, dtype=np.float64) * 2.0 ** (float(semitones) / 12.0)
@@ -187,12 +312,17 @@ class PitchExtractor:
                 self.estimate(method, probe, len(probe) // HOP)
 
     def estimate(self, method: str, audio: np.ndarray, frames: int, *, filter_radius: int = 3,
-                 crepe_hop_length: int = 160, rmvpe_threshold: float = 0.03) -> np.ndarray:
-        """F0 in Hz, exactly ``frames`` long."""
+                 crepe_hop_length: int = 160, rmvpe_threshold: float = 0.03,
+                 noise_floor_db: float | None = None) -> np.ndarray:
+        """F0 in Hz, exactly ``frames`` long, with inaudible or spurious voicing removed."""
+        return clean_voicing(self._estimate(method, audio, frames, filter_radius, crepe_hop_length,
+                                            rmvpe_threshold), audio, noise_floor_db)
+
+    def _estimate(self, method: str, audio: np.ndarray, frames: int, filter_radius: int, crepe_hop_length: int,
+                  rmvpe_threshold: float) -> np.ndarray:
         info = PITCH_METHOD_BY_ID[method]
         if info.components:
-            tracks = [self.estimate(c, audio, frames, filter_radius=filter_radius,
-                                    crepe_hop_length=crepe_hop_length, rmvpe_threshold=rmvpe_threshold)
+            tracks = [self._estimate(c, audio, frames, filter_radius, crepe_hop_length, rmvpe_threshold)
                       for c in info.components]
             stack = np.stack([np.where(t > 0, t, np.nan) for t in tracks])
             with np.errstate(all="ignore"):

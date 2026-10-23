@@ -109,7 +109,7 @@ class ModelManager:
             f0_method=self.default_f0_method(), index_rate=s.DEFAULT_INDEX_RATE,
             filter_radius=s.DEFAULT_FILTER_RADIUS, rms_mix_rate=s.DEFAULT_RMS_MIX_RATE,
             protect=s.DEFAULT_PROTECT, crepe_hop_length=s.DEFAULT_CREPE_HOP_LENGTH,
-            rmvpe_threshold=s.RMVPE_THRESHOLD)
+            rmvpe_threshold=s.RMVPE_THRESHOLD, pitch_expressiveness=s.DEFAULT_EXPRESSIVENESS)
 
     # --- Last active voice (restored on the next start) ----------------------
 

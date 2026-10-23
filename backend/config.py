@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     DEFAULT_PROTECT: float = 0.33
     DEFAULT_CREPE_HOP_LENGTH: int = 160
     RMVPE_THRESHOLD: float = 0.03
+    # Melody: > 1 widens the speaker's pitch movement (a livelier, less monotone
+    # voice); voices trained in the studio use their own range instead (auto pitch).
+    DEFAULT_EXPRESSIVENESS: float = 1.25
     # Run the vocoder with ONNX Runtime when inferring on CPU (~1.5x faster).
     CPU_ONNX_DECODER: bool = True
     # Load the voice that was active when the studio last closed.

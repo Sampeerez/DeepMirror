@@ -32,7 +32,7 @@ from backend.audio.protocol import decode_frame, encode_frame
 from backend.audio.streaming import RealtimeVoiceStream, StreamCleanup, StreamTiming
 from backend.audio.voice_activity import load_vad
 from backend.config import Settings
-from backend.inference.auto_pitch import AutoPitch
+from backend.inference.auto_pitch import AutoPitch, F0Stats, SpeakerProfile, auto_expressiveness
 from backend.inference.pipeline import ConversionSettings, VoiceConverter
 from backend.model_manager import ModelManager
 from backend.security import is_origin_allowed
@@ -104,6 +104,8 @@ class StreamSession:
         # "auto": follow the speaker's register onto the voice's (needs voice F0 stats).
         self.pitch_mode = "auto"
         self._auto_pitch: AutoPitch | None = None
+        # The speaker's own pitch, learnt from the first seconds of speech (or a saved profile).
+        self.profile = SpeakerProfile()
         self._auto_pitch_voice: str | None = None
         self.effects: dict = {}
         self.bypass = False
@@ -145,6 +147,12 @@ class StreamSession:
             self.effects = payload["effects"]
         if payload.get("pitch_mode") in ("auto", "manual"):
             self.pitch_mode = payload["pitch_mode"]
+        if payload.get("recalibrate") is True:
+            self.profile = SpeakerProfile()
+            self._auto_pitch = None
+        elif isinstance(payload.get("speaker_profile"), dict) and self.profile.voiced_frames == 0:
+            self.profile = SpeakerProfile(F0Stats.from_dict(payload["speaker_profile"]))
+            self._auto_pitch = None
         if isinstance(payload.get("bypass"), bool):
             self.bypass = payload["bypass"]
         if isinstance(payload.get("silence_saver"), bool):
@@ -241,15 +249,29 @@ class StreamSession:
         if self.pitch_mode != "auto" or stats is None:
             return None
         if self._auto_pitch is None or self._auto_pitch_voice != converter.voice.name:
-            self._auto_pitch = AutoPitch(stats, self.manager.remembered_pitch_shift(converter.voice.name))
+            self._auto_pitch = AutoPitch(stats, self.profile, self.manager.remembered_pitch_shift(converter.voice.name))
             self._auto_pitch_voice = converter.voice.name
         return self._auto_pitch
 
     def _render_settings(self, converter: VoiceConverter) -> ConversionSettings:
+        settings = self.conversion
+        speaker = self.profile.stats
+        if speaker is not None:
+            settings = replace(settings, pitch_center_hz=speaker.median_hz)
         auto = self._auto_pitch_for(converter)
-        if auto is None or auto.shift is None:
-            return self.conversion
-        return replace(self.conversion, pitch_shift=auto.shift)
+        if auto is not None:
+            if auto.shift is not None:
+                settings = replace(settings, pitch_shift=auto.shift)
+            if speaker is not None:   # the target voice's own melodic range
+                settings = replace(settings, pitch_expressiveness=auto_expressiveness(auto.target, speaker))
+        return settings
+
+    @property
+    def expressiveness_applied(self) -> float:
+        converter = self.manager.converter
+        if converter is None:
+            return self.conversion.pitch_expressiveness
+        return round(self._render_settings(converter).pitch_expressiveness, 2)
 
     @property
     def auto_pitch_shift(self) -> float | None:
@@ -270,11 +292,12 @@ class StreamSession:
             ahead_frames = round(timing.lookahead_seconds * 100)
 
             def observe_f0(f0: np.ndarray) -> None:
+                end = len(f0) - ahead_frames
+                pause = self.profile.observe(f0[max(0, end - new_frames):max(0, end)])
                 auto = self._auto_pitch_for(converter)
                 if auto is None:
                     return
-                end = len(f0) - ahead_frames
-                auto.observe(f0[max(0, end - new_frames):max(0, end)])
+                auto.update(pause)
                 if auto.shift is not None:
                     self.manager.remember_pitch_shift(converter.voice.name, auto.shift)
 
@@ -414,6 +437,8 @@ class StreamSession:
             "pitch_mode": self.pitch_mode,
             "auto_pitch_available": bool(converter is not None and converter.voice.f0_stats is not None),
             "auto_pitch_shift": self.auto_pitch_shift,
+            "speaker_profile": self.profile.describe(),
+            "expressiveness": self.expressiveness_applied,
             "input_level_db": None if math.isinf(self.input_level_db) else round(self.input_level_db, 1),
             **self._cleanup_status(),
         }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WS_URL, SAMPLE_RATE, CHUNK_SIZE } from '../lib/constants';
 import { streamTimingForChunkSize } from '../lib/performance';
 import { createFrameScheduler } from '../lib/frameQueue';
+import { STORAGE_KEYS, writeStored } from '../lib/storage';
 
 // Round-trip samples kept for the sparkline and the profile recommendation.
 const MAX_LATENCY_SAMPLES = 60;
@@ -29,6 +30,8 @@ const DEFAULT_SERVER_STATS = {
   autoPitchAvailable: false,
   autoPitchShift: null,
   inputLevelDb: null,
+  speakerProfile: null,
+  expressiveness: null,
   voiceDetector: null,
   speechProbability: 0,
   noiseReducedDb: 0,
@@ -182,6 +185,14 @@ export default function useWebSocket() {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'status') {
+            // A calibrated profile is kept, so the next session sounds right from the first word.
+            if (msg.speaker_profile?.calibration >= 1) {
+              writeStored(STORAGE_KEYS.speakerProfile, {
+                median_hz: msg.speaker_profile.median_hz,
+                p10_hz: msg.speaker_profile.p10_hz,
+                p90_hz: msg.speaker_profile.p90_hz,
+              });
+            }
             setServerStats({
               modelMs: msg.model_ms ?? 0,
               dspMs: msg.dsp_ms ?? 0,
@@ -197,6 +208,8 @@ export default function useWebSocket() {
               inferenceDutyPercent: msg.inference_duty_percent ?? 0,
               autoPitchAvailable: Boolean(msg.auto_pitch_available),
               autoPitchShift: typeof msg.auto_pitch_shift === 'number' ? msg.auto_pitch_shift : null,
+              speakerProfile: msg.speaker_profile ?? null,
+              expressiveness: typeof msg.expressiveness === 'number' ? msg.expressiveness : null,
               inputLevelDb: typeof msg.input_level_db === 'number' ? msg.input_level_db : null,
               voiceDetector: msg.voice_detector ?? null,
               speechProbability: msg.speech_probability ?? 0,

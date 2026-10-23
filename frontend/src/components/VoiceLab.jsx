@@ -78,7 +78,8 @@ function pitchHint(voice, autoPitchAvailable, autoPitchShift, isRunning) {
 
 function VoiceLab({
   voice, onChange, onRestoreRecommended, hasModel, isRunning, autoPitchAvailable = false, autoPitchShift = null,
-  f0Pending = null, tooSlow = false, f0Methods = FALLBACK_F0_METHODS,
+  f0Pending = null, tooSlow = false, speakerProfile = null, expressivenessApplied = null, onRecalibrate,
+  f0Methods = FALLBACK_F0_METHODS,
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const autoActive = voice.autoPitch && autoPitchAvailable && autoPitchShift !== null;
@@ -126,6 +127,35 @@ function VoiceLab({
           )}
           hint={pitchHint(voice, autoPitchAvailable, autoPitchShift, isRunning)}
         />
+
+        <div>
+          <MiniSlider
+            label="Expressiveness (melody)"
+            value={voice.expressiveness}
+            min={0.5}
+            max={2}
+            step={0.05}
+            onChange={(value) => onChange({ expressiveness: value })}
+            format={(v) => `×${v.toFixed(2)}`}
+          />
+          <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">
+            {voice.autoPitch && autoPitchAvailable && expressivenessApplied != null
+              ? `Auto: ×${expressivenessApplied.toFixed(2)}, the trained voice's own melodic range.`
+              : 'Above 1 widens your rises and falls in pitch for a livelier, less monotone voice.'}
+          </p>
+          <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-fg-subtle">
+            <span>
+              {!isRunning ? 'Your voice is calibrated in the first seconds you speak.'
+                : !speakerProfile ? 'Learning your voice: keep talking…'
+                  : speakerProfile.calibration < 1
+                    ? `Learning your voice… ${Math.round(speakerProfile.calibration * 100)}%`
+                    : `Calibrated to your voice: ${Math.round(speakerProfile.median_hz)} Hz, range ±${speakerProfile.range_semitones} st`}
+            </span>
+            {isRunning && onRecalibrate ? (
+              <button type="button" className="chip-button" onClick={onRecalibrate}>Recalibrate</button>
+            ) : null}
+          </div>
+        </div>
 
         <BigSlider
           label="Formant Shift"

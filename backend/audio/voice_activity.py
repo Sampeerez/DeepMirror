@@ -43,6 +43,24 @@ PRE_ROLL_SECONDS = 0.08
 HANG_OVER_SECONDS = 0.3
 RAMP_SECONDS = 0.02
 HISTORY_SECONDS = 8.0       # decisions kept (more than any stream window)
+# Laughs, humming and "mmm" are voice too, but a speech detector may not call
+# them speech. A frame that is clearly periodic (pitched) and well above the
+# room counts as voice; breaths and mouth clicks are not periodic and stay out.
+VOCAL_PERIODICITY = 0.6
+VOCAL_ABOVE_NOISE_DB = 12.0
+VOCAL_PROBABILITY = 0.8
+MIN_LAG, MAX_LAG = RATE // 600, RATE // 70
+
+
+def vocal_frames(frames: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per 512-sample frame: (normalised autocorrelation peak in the voice pitch range, level dB)."""
+    x = frames - frames.mean(axis=1, keepdims=True)
+    energy = np.sum(x * x, axis=1)
+    level = 10 * np.log10(np.maximum(energy / frames.shape[1], 1e-12))
+    spectrum = np.fft.rfft(x, n=2 * frames.shape[1], axis=1)
+    autocorrelation = np.fft.irfft(np.abs(spectrum) ** 2, axis=1)[:, : MAX_LAG + 1]
+    peak = autocorrelation[:, MIN_LAG:MAX_LAG + 1].max(axis=1) / np.maximum(energy, 1e-12)
+    return peak, level
 
 
 @cache
@@ -136,6 +154,8 @@ class SpeechTimeline:
         self._probabilities = np.zeros(0, np.float32)
         self._first_frame = 0          # absolute index of _probabilities[0]
         self._fed = 0                  # 16 kHz samples fed so far
+        self._pending = np.zeros(0, np.float32)
+        self._noise_db = -70.0         # room level, learnt from non-speech frames
 
     @property
     def frames_known(self) -> int:
@@ -145,6 +165,16 @@ class SpeechTimeline:
         """Add newly heard 16 kHz audio; returns the probabilities of the frames it completed."""
         fresh = self.detector.feed(audio16)
         self._fed += len(audio16)
+        audio = np.concatenate([self._pending, np.asarray(audio16, np.float32)])
+        count = len(fresh)
+        if count and len(audio) >= count * FRAME:
+            periodic, level = vocal_frames(audio[: count * FRAME].reshape(count, FRAME).astype(np.float64))
+            quiet = fresh < 0.2
+            if quiet.any():   # follow the room slowly
+                self._noise_db = 0.9 * self._noise_db + 0.1 * float(np.median(level[quiet]))
+            vocal = (periodic >= VOCAL_PERIODICITY) & (level >= self._noise_db + VOCAL_ABOVE_NOISE_DB)
+            fresh = np.where(vocal, np.maximum(fresh, VOCAL_PROBABILITY), fresh).astype(np.float32)
+        self._pending = audio[count * FRAME:]
         self._probabilities = np.concatenate([self._probabilities, fresh])
         keep = int(HISTORY_SECONDS * RATE / FRAME)
         if len(self._probabilities) > keep:
@@ -205,6 +235,14 @@ class SpeechTimeline:
             padded = np.pad(hard, (ramp, ramp), mode="edge")
             hard = (np.convolve(padded, window / window.sum(), mode="same")[ramp:-ramp]).astype(np.float32)
         return np.clip(hard, 0.0, 1.0)
+
+    def core(self, start: int, length: int, rate: int) -> np.ndarray:
+        """Samples where the detector itself hears speech (no pre-roll or hang-over widening)."""
+        if length <= 0 or len(self._probabilities) == 0:
+            return np.zeros(max(length, 0), bool)
+        heard = self._probabilities >= LEAVE
+        frames = np.floor((start + np.arange(length)) * (RATE / rate) / FRAME).astype(np.int64) - self._first_frame
+        return heard[np.clip(frames, 0, len(heard) - 1)]
 
     def noise_only(self, start: int, length: int, rate: int) -> np.ndarray:
         """Samples that are certainly not speech (bool): safe to learn the room noise from.

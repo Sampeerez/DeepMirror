@@ -22,7 +22,6 @@ import numpy as np
 
 FRAMES_PER_SECOND = 100
 MIN_VOICED_SECONDS = 1.0          # speech needed before the first estimate
-TRACK_SECONDS = 8.0               # how much recent voiced speech the median covers
 STEP = 0.5                        # applied shifts are multiples of half a semitone
 HYSTERESIS = 1.0                  # semitones of drift needed to move an applied shift
 MAX_SHIFT = 24.0
@@ -69,35 +68,95 @@ def _quantise(semitones: float) -> float:
     return float(np.clip(round(semitones / STEP) * STEP, -MAX_SHIFT, MAX_SHIFT))
 
 
-class AutoPitch:
-    """Tracks the speaker's register and decides the shift towards ``target``."""
+# --- The speaker -------------------------------------------------------------
+PROFILE_SECONDS = 30.0            # voiced speech the profile keeps (a moving picture of the speaker)
+CALIBRATED_SECONDS = 10.0         # voiced speech after which the profile counts as calibrated
+DEFAULT_EXPRESSIVENESS = 1.25
+EXPRESSIVENESS_RANGE = (0.5, 2.0)
+AUTO_EXPRESSIVENESS_RANGE = (0.8, 1.8)
 
-    def __init__(self, target: F0Stats, initial_shift: float | None = None) -> None:
+
+class SpeakerProfile:
+    """The speaker's pitch, learnt from the first seconds of speech and kept current.
+
+    It can start from a profile saved by the browser (``seed``), so a new
+    session sounds right from the first word; the speaker's own speech takes
+    over as soon as there is a second of it.
+    """
+
+    def __init__(self, seed: F0Stats | None = None) -> None:
+        self.seed = seed
+        self._log_f0: deque[float] = deque(maxlen=int(PROFILE_SECONDS * FRAMES_PER_SECOND))
+        self.voiced_frames = 0
+
+    def observe(self, f0_hz: np.ndarray) -> bool:
+        """Add newly heard F0 frames (Hz, 0 = unvoiced); True if they contain no voice (a pause)."""
+        f0 = np.asarray(f0_hz, dtype=np.float64)
+        voiced = f0[f0 > 0]
+        self._log_f0.extend(np.log(voiced).tolist())
+        self.voiced_frames += len(voiced)
+        return len(voiced) == 0
+
+    @property
+    def stats(self) -> F0Stats | None:
+        if len(self._log_f0) < MIN_VOICED_SECONDS * FRAMES_PER_SECOND:
+            return self.seed
+        values = np.exp(np.fromiter(self._log_f0, dtype=np.float64))
+        return compute_f0_stats([values])
+
+    @property
+    def calibration(self) -> float:
+        """0..1: how much of the calibration speech has been heard (1 with a saved profile)."""
+        if self.seed is not None and self.voiced_frames == 0:
+            return 1.0
+        return min(1.0, self.voiced_frames / (CALIBRATED_SECONDS * FRAMES_PER_SECOND))
+
+    def describe(self) -> dict | None:
+        stats = self.stats
+        if stats is None:
+            return None
+        return {**stats.to_dict(), "calibration": round(self.calibration, 2),
+                "range_semitones": round(semitones_between(stats.p10_hz, stats.p90_hz) / 2, 1)}
+
+
+def auto_expressiveness(target: F0Stats, speaker: F0Stats) -> float:
+    """Pitch-movement scale that gives the speaker's melody the target voice's range."""
+    speaker_range = math.log(speaker.p90_hz / speaker.p10_hz)
+    if speaker_range < 1e-3:
+        return 1.0
+    ratio = math.log(target.p90_hz / target.p10_hz) / speaker_range
+    return float(np.clip(ratio, *AUTO_EXPRESSIVENESS_RANGE))
+
+
+class AutoPitch:
+    """Decides the shift that moves the speaker's register onto ``target``'s."""
+
+    def __init__(self, target: F0Stats, profile: SpeakerProfile, initial_shift: float | None = None) -> None:
         self.target = target
-        self._log_f0: deque[float] = deque(maxlen=int(TRACK_SECONDS * FRAMES_PER_SECOND))
+        self.profile = profile
         self.shift: float | None = initial_shift
 
     @property
     def speaker_median_hz(self) -> float | None:
-        if len(self._log_f0) < MIN_VOICED_SECONDS * FRAMES_PER_SECOND:
-            return None
-        return float(math.exp(float(np.median(np.fromiter(self._log_f0, dtype=np.float64)))))
+        stats = self.profile.stats
+        return stats.median_hz if stats is not None else None
 
     def _ideal_shift(self) -> float | None:
         median = self.speaker_median_hz
         return None if median is None else semitones_between(median, self.target.median_hz)
 
-    def observe(self, f0_hz: np.ndarray) -> None:
-        """Feed newly heard F0 frames (Hz, 0 = unvoiced) at 100 frames/s."""
-        f0 = np.asarray(f0_hz, dtype=np.float64)
-        voiced = f0[f0 > 0]
-        self._log_f0.extend(np.log(voiced).tolist())
-        if len(voiced) == 0:
+    def update(self, pause: bool) -> None:
+        """Call after the profile heard new frames; ``pause`` when they held no voice."""
+        if pause:
             self.on_pause()
         elif self.shift is None:
             ideal = self._ideal_shift()
             if ideal is not None:  # first estimate as soon as there is enough speech
                 self.shift = _quantise(ideal)
+
+    def observe(self, f0_hz: np.ndarray) -> None:
+        """Feed newly heard F0 frames to the profile and update (standalone use)."""
+        self.update(self.profile.observe(f0_hz))
 
     def on_pause(self) -> None:
         """Between words: re-centre the shift if the speaker's register clearly moved."""

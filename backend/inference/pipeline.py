@@ -31,7 +31,14 @@ from torch.nn import functional as F
 
 from backend.inference.device import ComputeDevice
 from backend.inference.hubert import HubertModel
-from backend.inference.pitch import HOP, SAMPLE_RATE, PitchExtractor, normalize_method, to_rvc_pitch
+from backend.inference.pitch import (
+    HOP,
+    SAMPLE_RATE,
+    PitchExtractor,
+    expand_intonation,
+    normalize_method,
+    to_rvc_pitch,
+)
 from backend.inference.retrieval import FeatureIndex
 from backend.inference.voice_model import VoiceModel
 
@@ -51,6 +58,9 @@ class ConversionSettings:
     crepe_hop_length: int = 160
     rmvpe_threshold: float = 0.03
     speaker_id: int = 0
+    # Melody: 1 keeps the speaker's pitch movement, > 1 widens it around the centre.
+    pitch_expressiveness: float = 1.0
+    pitch_center_hz: float | None = None   # the speaker's typical pitch (None: the clip's median)
 
     def with_payload(self, payload: dict[str, Any]) -> ConversionSettings:
         """Apply the valid, clamped fields of a client payload; ignore the rest.
@@ -80,6 +90,7 @@ CONTROL_RANGES: dict[str, tuple[type, float, float]] = {
     "protect": (float, 0.0, 0.5),
     "crepe_hop_length": (int, 64, 512),
     "speaker_id": (int, 0, 10_000),
+    "pitch_expressiveness": (float, 0.5, 2.0),
 }
 
 
@@ -199,6 +210,7 @@ class VoiceConverter:
             if on_f0 is not None:
                 pad_frames = t_pad // HOP
                 on_f0(f0[pad_frames:frames - pad_frames])
+            f0 = expand_intonation(f0, settings.pitch_expressiveness, settings.pitch_center_hz)
             coarse, shifted = to_rvc_pitch(f0, settings.pitch_shift)
             pitch = torch.from_numpy(coarse[:frames]).to(self.compute.device)[None]
             pitchf = torch.from_numpy(shifted[:frames]).to(self.compute.device)[None]

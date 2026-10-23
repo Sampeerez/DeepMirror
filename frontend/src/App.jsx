@@ -24,7 +24,7 @@ import { defaultEffects, effectsFromPreset } from './lib/effects';
 import { effectsFromPresetSettings, presetSettingsFromVoice, voiceFromPreset } from './lib/presets';
 import { buildTabUrl, readTabFromSearch } from './lib/navigation';
 import { shouldTriggerShortcut } from './lib/shortcuts';
-import { STORAGE_KEYS, readStored } from './lib/storage';
+import { STORAGE_KEYS, readStored, removeStored } from './lib/storage';
 import { applyTheme, readAppliedTheme, storeTheme } from './lib/theme';
 import { hasStoredF0Method, loadInitialVoice, recommendedVoice, withChanges } from './lib/voice';
 
@@ -339,6 +339,12 @@ export default function App() {
               autoPitchAvailable={serverStats.autoPitchAvailable}
               autoPitchShift={serverStats.autoPitchShift}
               f0Pending={serverStats.f0Pending}
+              speakerProfile={serverStats.speakerProfile}
+              expressivenessApplied={serverStats.expressiveness}
+              onRecalibrate={() => {
+                removeStored(STORAGE_KEYS.speakerProfile);
+                wsHook.sendSettings({ recalibrate: true });
+              }}
               tooSlow={pipeline.isRunning && !serverStats.inferenceSleeping && serverStats.modelMs > 0
                 && serverStats.modelMs > (runtimeConfig.chunkSize / runtimeConfig.sampleRate) * 1000 * 0.95}
               hasModel={Boolean(activeModel)}

@@ -92,6 +92,7 @@ async def convert_file(
     rms_mix_rate: float | None = Form(None),
     protect: float | None = Form(None),
     crepe_hop_length: int | None = Form(None),
+    pitch_expressiveness: float | None = Form(None),
 ) -> Response:
     """Convert an uploaded file and return the rendered WAV (omitted controls use the server defaults)."""
     settings: Settings = request.app.state.settings
@@ -122,7 +123,7 @@ async def convert_file(
     conversion = manager.default_conversion().with_payload({
         "pitch_shift": pitch_shift, "f0_method": f0_method, "index_rate": index_rate,
         "filter_radius": filter_radius, "rms_mix_rate": rms_mix_rate, "protect": protect,
-        "crepe_hop_length": crepe_hop_length,
+        "crepe_hop_length": crepe_hop_length, "pitch_expressiveness": pitch_expressiveness,
     })
     formant = float(np.clip(formant_shift, -24.0, 24.0))
     apply_model = use_model is None or use_model.strip().lower() not in {"false", "0", "off", "no"}

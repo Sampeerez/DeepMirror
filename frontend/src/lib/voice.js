@@ -8,6 +8,8 @@ import { STORAGE_KEYS, readStored } from './storage';
 export const DEFAULT_VOICE = {
   pitch: 0,
   autoPitch: true,
+  // > 1 widens your melody (livelier, less monotone); voices trained here use their own range.
+  expressiveness: 1.25,
   formant: 0,
   f0Method: DEFAULT_F0_METHOD,
   indexRate: 0.75,
@@ -118,6 +120,7 @@ export function streamSettingsPayload(voice, effects, bypass, runtimeConfig) {
   return {
     pitch_shift: voice.pitch,
     pitch_mode: voice.autoPitch ? 'auto' : 'manual',
+    pitch_expressiveness: voice.expressiveness,
     formant_shift: voice.formant,
     f0_method: voice.f0Method,
     index_rate: voice.indexRate,
@@ -131,6 +134,7 @@ export function streamSettingsPayload(voice, effects, bypass, runtimeConfig) {
     match_loudness: voice.matchLoudness,
     effects,
     bypass,
+    speaker_profile: readStored(STORAGE_KEYS.speakerProfile) || undefined,
     silence_saver: runtimeConfig.silenceSaver,
     silence_threshold_db: runtimeConfig.silenceThresholdDb,
   };
