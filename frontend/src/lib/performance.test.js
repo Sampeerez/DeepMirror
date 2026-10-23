@@ -23,15 +23,20 @@ describe('performance profile recommendation', () => {
     expect(recommendation().profile.id).toBe('quality');
   });
 
-  it('steps down when the quality budget is too tight for the network', () => {
-    expect(recommendation({ latencyHistory: Array(12).fill(400) }).profile.id).toBe('quality');
-    expect(recommendation({ latencyHistory: Array(12).fill(400) }).constrained).toBe(true);
+  it('moves to a longer chunk when network jitter exceeds the quality budget', () => {
+    expect(recommendation({ latencyHistory: Array(12).fill(400) }).profile.id).toBe('light');
   });
 
-  it('marks overload when nothing fits', () => {
+  it('falls back to the roomiest profile and marks overload when nothing fits', () => {
     const result = recommendation({ serverMs: 400, serverStats: { modelMs: 395, dspMs: 5 } });
-    expect(result.profile.id).toBe('quality');
+    expect(result.profile.id).toBe('light');
     expect(result.constrained).toBe(true);
+  });
+
+  it('recommends the CPU profile when only it has the budget', () => {
+    const result = recommendation({ serverMs: 200, serverStats: { modelMs: 195, dspMs: 5 } });
+    expect(result.profile.id).toBe('light');
+    expect(result.constrained).toBe(false);
   });
 
   it('waits for enough live samples and ignores sleeping inference', () => {

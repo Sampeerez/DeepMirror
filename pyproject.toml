@@ -18,6 +18,9 @@ dependencies = [
     "praat-parselmouth>=0.4.7",
     # Node.js for building the web UI from a source checkout (no system Node needed).
     "nodejs-wheel-binaries>=24.19",
+    # Faster CPU vocoder (backend.inference.onnx_decoder).
+    "onnxruntime>=1.23",
+    "onnxscript>=0.5",
     # Harvest/DIO pitch trackers. pyworld only publishes wheels for Windows;
     # elsewhere install the `classic-f0` extra (needs a C compiler).
     "pyworld>=0.3.5; sys_platform == 'win32' and python_version < '3.14'",

@@ -232,3 +232,21 @@ class TestLegacyEquivalence:
         torch.manual_seed(0)
         audio = voice.synthesizer.infer(phone, torch.tensor([phone.shape[1]]), pitch, pitchf, torch.tensor([3]))
         assert np.abs(audio.numpy() - golden["audio"]).max() < 1e-5
+
+
+def test_onnx_decoder_matches_torch_output_shape_and_level(tmp_path):
+    from backend.inference.onnx_decoder import onnx_decoder
+    from backend.inference.synthesizer import Synthesizer
+
+    torch.manual_seed(0)
+    config = [1025, 32, 192, 192, 768, 2, 6, 3, 0, "1", [3, 7, 11], [[1, 3, 5]] * 3, [10, 10, 2, 2], 512,
+              [16, 16, 4, 4], 4, 256, 40000]
+    synthesizer = Synthesizer(config, version="v2", use_pitch=True).eval()
+    decode = onnx_decoder(synthesizer, tmp_path / "decoder.onnx")
+    assert decode is not None and (tmp_path / "decoder.onnx").is_file()
+    z, f0, g = torch.randn(1, 192, 33), torch.full((1, 33), 140.0), torch.randn(1, 256, 1)
+    with torch.inference_mode():
+        reference = synthesizer.dec(z, f0, g)
+    fast = decode(z, f0, g)
+    assert fast.shape == reference.shape == (1, 1, 33 * 400)
+    assert abs(float(fast.std()) - float(reference.std())) < 0.1 * float(reference.std()) + 1e-4

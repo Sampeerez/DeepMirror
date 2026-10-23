@@ -6,6 +6,8 @@ export const PERFORMANCE_PROFILES = [
   { id: 'quality', label: 'Quality', chunkSize: 8192, lookbackSeconds: 1.0, lookaheadSeconds: 0.15 },
   { id: 'balanced', label: 'Balanced', chunkSize: 4096, lookbackSeconds: 1.0, lookaheadSeconds: 0.1 },
   { id: 'responsive', label: 'Responsive', chunkSize: 2048, lookbackSeconds: 0.5, lookaheadSeconds: 0.05 },
+  // For CPU-only machines: a long chunk with lighter context still renders in realtime.
+  { id: 'light', label: 'Light (CPU)', chunkSize: 16384, lookbackSeconds: 0.5, lookaheadSeconds: 0.1 },
 ];
 
 function finitePositive(values) {
@@ -73,7 +75,9 @@ export function recommendPerformanceProfile({
     const budgetMs = bufferDurationMs(candidate.chunkSize, sampleRate);
     return processingMs <= budgetMs * 0.7 && p95Ms <= budgetMs * 1.65;
   };
-  const profile = PERFORMANCE_PROFILES.find(fits) || PERFORMANCE_PROFILES[0];
+  // Nothing fits: the longest chunk leaves the most room per render.
+  const roomiest = PERFORMANCE_PROFILES.reduce((best, p) => (p.chunkSize > best.chunkSize ? p : best));
+  const profile = PERFORMANCE_PROFILES.find(fits) || roomiest;
 
   return {
     ready: true,

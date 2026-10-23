@@ -28,8 +28,9 @@ class TestSystem:
 
     def test_config_describes_stream_device_and_assets(self, client):
         config = client.get("/api/config").json()
-        assert config["sample_rate"] == 48000 and config["chunk_size"] == 8192
-        assert config["stream"]["lookahead_seconds"] == 0.15
+        # The test app runs on CPU, so it advertises the realtime-safe CPU stream.
+        assert config["sample_rate"] == 48000 and config["chunk_size"] == 16384
+        assert config["stream"]["lookahead_seconds"] == 0.1 and config["stream"]["lookback_seconds"] == 0.5
         assert config["device"]["device"] == "cpu"
         assert {asset["id"] for asset in config["assets"]} == {"hubert", "rmvpe"}
         assert config["default_f0_method"] == "pm"  # no accelerator and no RMVPE weights here

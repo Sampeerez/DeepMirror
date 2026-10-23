@@ -128,8 +128,11 @@ intonation at every chunk boundary and the seams click. For every chunk, the eng
 4. **Resamples with soxr.** soxr is a band-limited resampler, unlike FFT resampling, which wraps the end of each window into its start.
 5. **Applies a shift-invariant loudness envelope.** The RMS mix envelope is computed with a sliding window, so overlapping renders agree on the level they apply.
 
-On a GTX 1660 SUPER, the Quality profile renders a 171 ms chunk in about 115 ms with RMVPE
-and index retrieval enabled. Its output keeps about 95% of the spectral similarity of a
+Only the end of each window is vocoded (the content encoder and flow still see the whole
+window), and on CPU the vocoder runs on ONNX Runtime. On a GTX 1660 SUPER the Quality
+profile renders a 171 ms chunk in about 85 ms with RMVPE and index retrieval. On a
+12th-gen Core i7 without a GPU, the Light (CPU) profile renders a 341 ms chunk in about
+315 ms. Its output keeps about 95% of the spectral similarity of a
 full offline render; the ceiling for this metric is two offline renders with different
 random seeds.
 

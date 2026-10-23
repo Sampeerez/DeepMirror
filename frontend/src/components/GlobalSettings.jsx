@@ -4,6 +4,7 @@ import Toggle from './Toggle';
 import {
   Activity,
   AudioLines,
+  Cpu,
   Gauge,
   Moon,
   ShieldCheck,
@@ -30,6 +31,7 @@ const PROFILE_ICONS = {
   quality: ShieldCheck,
   balanced: Gauge,
   responsive: Zap,
+  light: Cpu,
 };
 
 // Rough end-to-end latency of a profile: about three chunks (capture,
@@ -219,7 +221,7 @@ export default function GlobalSettings({
               ) : null}
             </div>
 
-            <div role="group" aria-label="Performance profile" className="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1">
+            <div role="group" aria-label="Performance profile" className="mt-3 grid grid-cols-2 gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1 sm:grid-cols-4">
               {PERFORMANCE_PROFILES.map((profile) => {
                 const Icon = PROFILE_ICONS[profile.id];
                 const selected = activeProfile.id === profile.id;

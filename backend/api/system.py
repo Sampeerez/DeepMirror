@@ -22,15 +22,15 @@ async def runtime_config(request: Request) -> dict:
     manager: ModelManager = request.app.state.model_manager
     assets: AssetStore = request.app.state.assets
     defaults = manager.default_conversion()
-    lookahead = settings.STREAM_LOOKAHEAD_SECONDS
+    chunk_size, lookback, lookahead = manager.stream_defaults()
     return {
         "version": request.app.version,
         "sample_rate": settings.SAMPLE_RATE,
-        "chunk_size": settings.CHUNK_SIZE,
+        "chunk_size": chunk_size,
         "silence_saver": settings.SILENCE_SAVER,
         "silence_threshold_db": settings.SILENCE_THRESHOLD_DB,
         "stream": {
-            "lookback_seconds": settings.STREAM_LOOKBACK_SECONDS,
+            "lookback_seconds": lookback,
             "lookahead_seconds": lookahead,
             "crossfade_seconds": settings.STREAM_CROSSFADE_SECONDS,
             "algorithmic_delay_ms": round(

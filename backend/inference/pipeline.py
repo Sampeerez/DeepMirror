@@ -156,16 +156,18 @@ class VoiceConverter:
         return self.voice.sample_rate
 
     def convert(self, audio: np.ndarray, settings: ConversionSettings, *, pad_seconds: float | None = None,
-                split_long_input: bool = True, rms_frame_seconds: float | None = None) -> np.ndarray:
+                split_long_input: bool = True, rms_frame_seconds: float | None = None,
+                tail_seconds: float | None = None) -> np.ndarray:
         """Convert 16 kHz mono ``audio``; returns ``len(audio) * sr / 16000`` samples (± one frame).
 
         Thread-safe: concurrent streams and file renders take turns on the device.
         """
         with self._lock:
-            return self._convert(audio, settings, pad_seconds, split_long_input, rms_frame_seconds)
+            return self._convert(audio, settings, pad_seconds, split_long_input, rms_frame_seconds, tail_seconds)
 
     def _convert(self, audio: np.ndarray, settings: ConversionSettings, pad_seconds: float | None,
-                 split_long_input: bool, rms_frame_seconds: float | None) -> np.ndarray:
+                 split_long_input: bool, rms_frame_seconds: float | None,
+                 tail_seconds: float | None) -> np.ndarray:
         voice = self.voice
         pad_seconds = self.compute.offline_pad_seconds if pad_seconds is None else pad_seconds
         t_pad = round(SAMPLE_RATE * pad_seconds / HOP) * HOP
@@ -196,7 +198,8 @@ class VoiceConverter:
                 padded[start:end],
                 None if pitch is None else pitch[:, frame_slice],
                 None if pitchf is None else pitchf[:, frame_slice],
-                speaker, settings)
+                speaker, settings,
+                None if tail_seconds is None else int(tail_seconds * 100) + t_pad // HOP)
             segments.append(rendered[t_pad_target:len(rendered) - t_pad_target] if t_pad_target else rendered)
             if cut is not None:
                 start = cut // HOP * HOP
@@ -221,7 +224,13 @@ class VoiceConverter:
         return cuts
 
     def _synthesize(self, audio: np.ndarray, pitch: torch.Tensor | None, pitchf: torch.Tensor | None,
-                    speaker: torch.Tensor, settings: ConversionSettings) -> np.ndarray:
+                    speaker: torch.Tensor, settings: ConversionSettings,
+                    tail_frames: int | None = None) -> np.ndarray:
+        """Render one padded segment; with ``tail_frames`` only its end is vocoded.
+
+        The result always spans the whole segment (the skipped start is
+        silence), so callers keep the same sample alignment either way.
+        """
         waveform = torch.from_numpy(np.ascontiguousarray(audio)).to(self.compute.device, self._dtype)[None]
         features = self.hubert.content(waveform, self.voice.version)
         use_protect = settings.protect < 0.5 and pitchf is not None
@@ -246,5 +255,9 @@ class VoiceConverter:
             features = (features * mask + raw * (1 - mask)).to(raw.dtype)
 
         lengths = torch.tensor([frames], device=self.compute.device)
-        audio_out = self.voice.synthesizer.infer(features, lengths, pitch, pitchf, speaker)
-        return audio_out[0, 0].float().cpu().numpy()
+        audio_out = self.voice.synthesizer.infer(features, lengths, pitch, pitchf, speaker, tail_frames)
+        rendered = audio_out[0, 0].float().cpu().numpy()
+        full_length = features.shape[1] * self.voice.synthesizer.hop_length
+        if len(rendered) < full_length:
+            rendered = np.concatenate([np.zeros(full_length - len(rendered), np.float32), rendered])
+        return rendered

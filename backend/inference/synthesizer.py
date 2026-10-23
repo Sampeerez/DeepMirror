@@ -11,6 +11,7 @@ order, so a seeded run reproduces the reference implementation.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import torch
 from torch import nn
@@ -442,15 +443,30 @@ class Synthesizer(nn.Module):
         self.flow = ResidualCouplingFlow(inter_channels, hidden_channels, gin_channels)
         self.emb_g = nn.Embedding(self.speaker_count, gin_channels)
         self.hop_length = math.prod(upsample_rates)
+        # Optional faster implementation of ``dec`` (ONNX Runtime on CPU).
+        self.decoder_override: Callable[..., torch.Tensor] | None = None
 
     @torch.no_grad()
     def infer(self, phone: torch.Tensor, lengths: torch.Tensor, pitch: torch.Tensor | None,
-              pitchf: torch.Tensor | None, speaker: torch.Tensor) -> torch.Tensor:
-        """Render waveform ``[batch, 1, samples]`` from features at 100 frames/s."""
+              pitchf: torch.Tensor | None, speaker: torch.Tensor,
+              decode_last_frames: int | None = None) -> torch.Tensor:
+        """Render waveform ``[batch, 1, samples]`` from features at 100 frames/s.
+
+        ``decode_last_frames`` vocodes only the final frames. The content
+        encoder and flow still see the whole window (they need the context),
+        but the HiFi-GAN decoder is convolutional with a short receptive field,
+        so a streaming caller that only emits the end of each window can skip
+        most of the decoding, which dominates the cost.
+        """
         g = self.emb_g(speaker).unsqueeze(-1)
         mean, log_scale, mask = self.enc_p(phone, pitch if self.use_pitch else None, lengths)
         z_p = (mean + torch.exp(log_scale) * torch.randn_like(mean) * 0.66666) * mask
-        z = self.flow.inverse(z_p, mask, g)
+        z = self.flow.inverse(z_p, mask, g) * mask
+        if decode_last_frames is not None and decode_last_frames < z.shape[2]:
+            z = z[:, :, -decode_last_frames:]
+            if pitchf is not None:
+                pitchf = pitchf[:, -decode_last_frames:]
+        decode = self.decoder_override or self.dec
         if self.use_pitch:
-            return self.dec(z * mask, pitchf, g)
-        return self.dec(z * mask, g)
+            return decode(z, pitchf, g)
+        return decode(z, g)

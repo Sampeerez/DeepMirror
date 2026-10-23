@@ -23,6 +23,7 @@ from backend.assets import AssetStore
 from backend.config import Settings
 from backend.inference.device import ComputeDevice, select_device
 from backend.inference.hubert import HubertModel, load_hubert
+from backend.inference.onnx_decoder import onnx_decoder
 from backend.inference.pipeline import ConversionSettings, VoiceConverter
 from backend.inference.pitch import DEFAULT_F0_METHOD, PitchExtractor, method_capabilities
 from backend.inference.retrieval import FeatureIndex, IndexFormatError
@@ -85,6 +86,13 @@ class ModelManager:
         if self.assets.ready("rmvpe") and self.compute.is_accelerator:
             return "rmvpe"
         return DEFAULT_F0_METHOD
+
+    def stream_defaults(self) -> tuple[int, float, float]:
+        """``(chunk_size, lookback_seconds, lookahead_seconds)`` that fit this device in realtime."""
+        s = self.settings
+        if self.compute.is_accelerator:
+            return s.CHUNK_SIZE, s.STREAM_LOOKBACK_SECONDS, s.STREAM_LOOKAHEAD_SECONDS
+        return s.CPU_CHUNK_SIZE, s.CPU_STREAM_LOOKBACK_SECONDS, s.CPU_STREAM_LOOKAHEAD_SECONDS
 
     def default_conversion(self) -> ConversionSettings:
         s = self.settings
@@ -174,6 +182,10 @@ class ModelManager:
                     index = FeatureIndex.load(index_path, compute.device, exact=self.settings.INDEX_EXACT_SEARCH)
                 except (IndexFormatError, OSError) as exc:
                     logger.warning("Ignoring index %s: %s", index_path.name, exc)
+            if compute.device.type == "cpu" and self.settings.CPU_ONNX_DECODER:
+                stat = path.stat()
+                cache = self.settings.DATA_DIR / "cache" / f"{path.stem}-{stat.st_size}-{stat.st_mtime_ns}.onnx"
+                voice.synthesizer.decoder_override = onnx_decoder(voice.synthesizer, cache)
             converter = VoiceConverter(compute, hubert, pitch, voice, index)
             details = {
                 **voice.describe(), **compute.describe(),

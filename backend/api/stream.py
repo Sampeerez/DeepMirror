@@ -79,8 +79,9 @@ class StreamSession:
     def __init__(self, manager: ModelManager, settings: Settings) -> None:
         self.manager = manager
         self.config = settings
+        chunk_size, lookback, lookahead = manager.stream_defaults()
         self.sample_rate = settings.SAMPLE_RATE
-        self.chunk_size = settings.CHUNK_SIZE
+        self.chunk_size = chunk_size
         self.conversion = manager.default_conversion()
         self.formant_shift = 0.0
         self.effects: dict = {}
@@ -88,8 +89,8 @@ class StreamSession:
         self.silence_saver = settings.SILENCE_SAVER
         self.silence_threshold_db = settings.SILENCE_THRESHOLD_DB
         self.timing = StreamTiming(
-            lookback_seconds=settings.STREAM_LOOKBACK_SECONDS,
-            lookahead_seconds=settings.STREAM_LOOKAHEAD_SECONDS,
+            lookback_seconds=lookback,
+            lookahead_seconds=lookahead,
             crossfade_seconds=settings.STREAM_CROSSFADE_SECONDS,
             search_seconds=settings.STREAM_SEARCH_SECONDS,
         )
@@ -136,9 +137,9 @@ class StreamSession:
                 logger.warning("Ignoring invalid %s %r (expected %d-%d)", key, payload[key], low, high)
                 continue
             setattr(self, key, value)
+            self._stream = None  # window geometry depends on both
         if self.chain.sr != self.sample_rate:
             self.chain = EffectsChain(self.sample_rate)
-            self._stream = None
 
     def _apply_timing(self, payload: dict) -> None:
         lookback = bounded_number(payload.get("lookback_seconds"), float, *LOOKBACK_RANGE)
@@ -159,10 +160,15 @@ class StreamSession:
         if self._stream is None or self._stream_converter is not converter:
             config = self.config
 
+            timing = self.timing
+            emitted = (self.chunk_size / self.sample_rate + timing.lookahead_seconds
+                       + timing.crossfade_seconds + timing.search_seconds)
+
             def render(window: np.ndarray) -> tuple[np.ndarray, int]:
                 audio = converter.convert(window, self.conversion, pad_seconds=config.STREAM_PAD_SECONDS,
                                           split_long_input=False,
-                                          rms_frame_seconds=config.STREAM_RMS_FRAME_SECONDS)
+                                          rms_frame_seconds=config.STREAM_RMS_FRAME_SECONDS,
+                                          tail_seconds=emitted + config.STREAM_DECODE_MARGIN_SECONDS)
                 return audio, converter.output_rate
 
             self._stream = RealtimeVoiceStream(self.sample_rate, render, self.timing)

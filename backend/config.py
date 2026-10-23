@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     DEFAULT_PROTECT: float = 0.33
     DEFAULT_CREPE_HOP_LENGTH: int = 160
     RMVPE_THRESHOLD: float = 0.03
+    # Run the vocoder with ONNX Runtime when inferring on CPU (~1.5x faster).
+    CPU_ONNX_DECODER: bool = True
 
     # --- Realtime streaming -------------------------------------------------
     # Rate suggested to the browser; the AudioContext's actual rate is used.
@@ -71,6 +73,15 @@ class Settings(BaseSettings):
     STREAM_PAD_SECONDS: float = 0.1
     # Loudness envelope window for rms_mix_rate in streaming (shift-invariant).
     STREAM_RMS_FRAME_SECONDS: float = 0.2
+    # The vocoder only renders the emitted end of each window plus this margin
+    # (its receptive field is a few frames: spectra match within run-to-run
+    # noise for any margin); the content encoder still sees the full context.
+    STREAM_DECODE_MARGIN_SECONDS: float = 0.1
+    # CPU-only machines: the largest window that still renders in realtime
+    # (measured on a 12th-gen Core i7 with the ONNX decoder: ~290 ms per 341 ms chunk).
+    CPU_CHUNK_SIZE: int = 16384
+    CPU_STREAM_LOOKBACK_SECONDS: float = 0.5
+    CPU_STREAM_LOOKAHEAD_SECONDS: float = 0.1
     SILENCE_SAVER: bool = True
     SILENCE_THRESHOLD_DB: float = -52.0
     SILENCE_HOLD_SECONDS: float = 0.18
