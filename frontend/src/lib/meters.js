@@ -57,7 +57,7 @@ export function rms(data) {
 }
 
 // Meter geometry, shared by the store's producers and the bar that paints it.
-export const METER_GAIN = 3;
+const METER_GAIN = 3;
 export const PEAK_DECAY = 0.96;
 
 /** Map an RMS level (0..1) to bar width in percent. */

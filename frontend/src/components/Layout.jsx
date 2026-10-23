@@ -78,7 +78,7 @@ function TabList({ tab, onTabChange }) {
                 : 'border-transparent text-fg-muted transition-colors duration-150 ease-out hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]'
             }`}
           >
-            <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
             {item.label}
           </button>
         );
@@ -91,7 +91,7 @@ export default function Layout({ children, tab, onTabChange, statusSlot = null, 
   return (
     <div className="min-h-screen text-fg">
       <div className="flex min-h-screen flex-col">
-        <header className="sticky top-0 z-40 border-b border-line bg-header backdrop-blur-sm">
+        <header className="sticky top-0 z-40 border-b border-line bg-header backdrop-blur-xs">
           <div className="mx-auto flex w-full max-w-[1560px] flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-md border border-line-strong bg-control-hover">
@@ -124,7 +124,7 @@ export default function Layout({ children, tab, onTabChange, statusSlot = null, 
 
         <footer className="border-t border-line py-3">
           <p className="mx-auto w-full max-w-[1560px] px-4 text-[11px] text-fg-faint sm:px-6 lg:px-8">
-            Local realtime RVC · ONNX · DSP voice studio
+            Local realtime RVC · DSP voice studio
           </p>
         </footer>
       </div>

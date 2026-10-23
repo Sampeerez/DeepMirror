@@ -74,7 +74,7 @@ function VoiceLab({ voice, onChange, hasModel, isRunning, f0Methods = FALLBACK_F
           <p className="panel-kicker">Voice Lab</p>
           <h2 className="panel-title">Pitch & timbre</h2>
         </div>
-        <span className={`rounded border px-2 py-1 text-[11px] font-medium ${
+        <span className={`rounded-sm border px-2 py-1 text-[11px] font-medium ${
           isRunning
             ? 'border-ok-line bg-ok-bg text-ok-fg'
             : 'border-line-strong bg-control text-fg-subtle'
@@ -130,7 +130,7 @@ function VoiceLab({ voice, onChange, hasModel, isRunning, f0Methods = FALLBACK_F
         </select>
         <div className="mt-2 flex items-start justify-between gap-3">
           <p className="text-[11px] leading-4 text-fg-subtle">{selectedMethod.description}</p>
-          <span className={`flex-shrink-0 text-[11px] font-medium ${selectedMethod.available ? 'text-ok-fg' : 'text-warn-fg'}`}>
+          <span className={`shrink-0 text-[11px] font-medium ${selectedMethod.available ? 'text-ok-fg' : 'text-warn-fg'}`}>
             {selectedMethod.available ? 'Ready' : selectedMethod.reason}
           </span>
         </div>

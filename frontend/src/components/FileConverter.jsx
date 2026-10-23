@@ -9,7 +9,7 @@ const ACCEPTED = '.wav,.mp3,.flac,.ogg,.m4a,.aiff';
 
 // Offline conversion: renders an uploaded audio file through the active
 // model + current studio settings on the server, returns a WAV.
-function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_METHODS, updateBusy = false, onUpdateBlockChange }) {
+function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_METHODS }) {
   const [file, setFile] = useState(null);
   const [useModel, setUseModel] = useState(true);
   const [converting, setConverting] = useState(false);
@@ -31,24 +31,15 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
   const selectedF0 = findF0Method(f0Methods, f0Override === 'studio' ? voice.f0Method : f0Override);
   const offlineGroups = groupedMethods(f0Methods, 'offline');
 
-  useEffect(() => {
-    onUpdateBlockChange?.(converting
-      ? 'Wait for file conversion to finish before restarting the studio.'
-      : result && !result.downloaded
-        ? 'Download the converted audio before restarting the studio.'
-        : null);
-  }, [converting, result, onUpdateBlockChange]);
-
-  // Unmount: release the update block, abandon a running request and free the
-  // last blob URL — none of it is reachable once the panel is gone.
+  // Unmount: abandon a running request and free the last blob URL; neither
+  // is reachable once the panel is gone.
   useEffect(() => () => {
-    onUpdateBlockChange?.(null);
     abortRef.current?.abort();
     if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
-  }, [onUpdateBlockChange]);
+  }, []);
 
   const pickFile = (candidate) => {
-    if (!candidate || updateBusy || converting) return;
+    if (!candidate || converting) return;
     setFile(candidate);
     setError(null);
     setNotice(null);
@@ -59,7 +50,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
   };
 
   const handleConvert = async () => {
-    if (!file || converting || updateBusy) return;
+    if (!file || converting) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setConverting(true);
@@ -127,7 +118,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
         <select
           id="converter-f0-method"
           value={f0Override}
-          disabled={converting || updateBusy}
+          disabled={converting}
           onChange={(event) => setF0Override(event.target.value)}
           className="native-select-safe mt-2 w-full rounded-lg border border-line-strong bg-input px-3 py-2.5 text-sm text-fg focus:border-line-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -214,7 +205,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             checked={useModel && Boolean(activeModel)}
             disabled={!activeModel || converting}
             onChange={(event) => setUseModel(event.target.checked)}
-            className="h-4 w-4 flex-shrink-0 accent-primary"
+            className="h-4 w-4 shrink-0 accent-primary"
           />
           Run through active model
           <span className="break-all text-xs text-fg-faint">
@@ -236,7 +227,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
           <button
             type="button"
             onClick={handleConvert}
-            disabled={!file || updateBusy}
+            disabled={!file}
             data-tone="primary"
             className="frost-control inline-flex min-h-11 items-center justify-center gap-2 px-6 py-2.5 text-sm font-semibold"
           >
@@ -248,7 +239,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
 
       {converting && (
         <p className="mt-3 flex items-center gap-2 text-xs text-fg-subtle" role="status">
-          <LoaderCircle className="h-3.5 w-3.5 flex-shrink-0 animate-spin" aria-hidden="true" />
+          <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
           Converting… long files can take a while — the whole file runs through the pipeline server-side.
         </p>
       )}

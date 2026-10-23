@@ -90,7 +90,7 @@ function EffectsRack({ effects, formantShift = 0, onEffectsChange }) {
           <h2 className="panel-title">DSP chain</h2>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`rounded border px-2.5 py-1 text-[11px] font-medium ${
+          <span className={`rounded-sm border px-2.5 py-1 text-[11px] font-medium ${
             activeCount > 0
               ? 'border-ok-line bg-ok-bg text-ok-fg'
               : 'border-line-strong bg-control text-fg-subtle'

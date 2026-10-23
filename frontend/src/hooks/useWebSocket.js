@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WS_URL, SAMPLE_RATE, CHUNK_SIZE } from '../lib/constants';
+import { streamTimingForChunkSize } from '../lib/performance';
 import { createFrameScheduler } from '../lib/frameQueue';
 
 // Round-trip samples kept for the sparkline and the profile recommendation.
@@ -133,6 +134,8 @@ export default function useWebSocket() {
         ws.send(JSON.stringify({
           sample_rate: streamSampleRateRef.current ?? SAMPLE_RATE,
           chunk_size: CHUNK_SIZE,
+          // Past/future context of the selected quality profile.
+          ...streamTimingForChunkSize(CHUNK_SIZE),
         }));
 
         // Let the app push its full current settings (pitch, effects, ...).

@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import UpdatePanel from './UpdatePanel';
 import RuntimeReadiness from './RuntimeReadiness';
 import Toggle from './Toggle';
 import {
@@ -28,10 +27,18 @@ const THEME_OPTIONS = [
 ];
 
 const PROFILE_ICONS = {
-  responsive: Zap,
+  quality: ShieldCheck,
   balanced: Gauge,
-  stable: ShieldCheck,
+  responsive: Zap,
 };
+
+// Rough end-to-end latency of a profile: about three chunks (capture,
+// playback priming, server render) plus the server's context delays.
+function estimatedLatencyMs(profile, sampleRate) {
+  const crossfadeAndSearchMs = 56;
+  return Math.round(3 * bufferDurationMs(profile.chunkSize, sampleRate)
+    + profile.lookaheadSeconds * 1000 + crossfadeAndSearchMs);
+}
 
 /**
  * Light/Dark picker.
@@ -100,38 +107,6 @@ function uniqueSorted(values) {
   return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))].sort((a, b) => a - b);
 }
 
-function RuntimeBadge({ label, ready }) {
-  return (
-    <div className="flex min-w-0 items-center justify-between gap-3 py-3">
-      <p className="text-xs font-medium text-fg-muted">
-        {label}
-      </p>
-      <p className={`flex items-center gap-2 text-xs font-medium ${ready ? 'text-ok-fg' : 'text-fg-subtle'}`}>
-        <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${ready ? 'bg-ok-solid' : 'bg-fg-faint'}`} />
-        {ready ? 'Ready' : 'Unavailable'}
-      </p>
-    </div>
-  );
-}
-
-function RuntimeItem({ label, value, detail }) {
-  return (
-    <div className="min-w-0 py-4">
-      <p className="text-xs font-medium text-fg-subtle">
-        {label}
-      </p>
-      <p className="mt-1 break-words text-sm font-medium text-fg">
-        {value}
-      </p>
-      {detail ? (
-        <p className="mt-1 break-words text-xs leading-5 text-fg-subtle">
-          {detail}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 export default function GlobalSettings({
   config,
   onChange,
@@ -143,11 +118,9 @@ export default function GlobalSettings({
   serverMs = 0,
   serverStats = {},
   streamSampleRate = null,
-  updates,
   runtimeChecking,
   runtimeError,
   onRefreshRuntime,
-  runtimeSetup,
 }) {
   const dialogRef = useRef(null);
 
@@ -184,14 +157,6 @@ export default function GlobalSettings({
     () => uniqueSorted([config.chunkSize, ...CHUNK_SIZE_OPTIONS]),
     [config.chunkSize]
   );
-  const onnxSelectedProviders = config.runtime?.onnx?.selectedProviders || [];
-  const onnxProviders = config.runtime?.onnx?.availableProviders || [];
-  const onnxProvider = config.runtime?.onnx?.activeProvider || (config.runtime?.onnx?.available ? 'CPUExecutionProvider' : 'Unavailable');
-  const torchDevice = config.runtime?.torch?.device || 'unavailable';
-  const gpuName = config.runtime?.torch?.gpuName || (torchDevice === 'cpu' ? 'CPU only' : 'Not detected');
-  const cudaVersion = config.runtime?.torch?.cudaVersion || 'Not detected';
-  const onnxGpuReady = Boolean(config.runtime?.onnx?.gpuEnabled);
-  const torchGpuReady = Boolean(config.runtime?.torch?.cudaAvailable);
   const measuredSampleRate = streamSampleRate || config.sampleRate;
   const activeProfile = profileForChunkSize(config.chunkSize);
   const recommendation = useMemo(
@@ -228,8 +193,6 @@ export default function GlobalSettings({
           </button>
         ) : null}
       </div>
-
-      <UpdatePanel updates={updates} />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div className="min-w-0">
@@ -273,12 +236,12 @@ export default function GlobalSettings({
                         : 'border-transparent text-fg-muted hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]'
                     }`}
                   >
-                    <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                     <span className="max-w-full text-xs font-medium">
                       {profile.label}
                     </span>
                     <span className="font-mono text-[11px] tabular-nums text-fg-faint">
-                      {profile.chunkSize.toLocaleString()}
+                      ≈{estimatedLatencyMs(profile, measuredSampleRate)} ms
                     </span>
                   </button>
                 );
@@ -288,7 +251,7 @@ export default function GlobalSettings({
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 flex-shrink-0 text-fg-subtle" aria-hidden="true" />
+                  <Activity className="h-4 w-4 shrink-0 text-fg-subtle" aria-hidden="true" />
                   <p className="text-xs font-medium text-fg-muted">
                     Measured recommendation
                   </p>
@@ -311,7 +274,7 @@ export default function GlobalSettings({
                   type="button"
                   disabled={recommendationApplied}
                   onClick={() => onChange?.({ chunkSize: recommendation.profile.chunkSize })}
-                  className="chip-button flex-shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="chip-button shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {recommendationApplied ? 'Applied' : 'Apply'}
                 </button>
@@ -364,7 +327,7 @@ export default function GlobalSettings({
           <div className="mt-6 border-t border-line-strong pt-5">
             <div className="flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-3">
-                <AudioLines className="h-5 w-5 flex-shrink-0 text-fg-subtle" aria-hidden="true" />
+                <AudioLines className="h-5 w-5 shrink-0 text-fg-subtle" aria-hidden="true" />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-fg-secondary">
                     Silence Saver
@@ -429,49 +392,18 @@ export default function GlobalSettings({
         </div>
 
         <div className="min-w-0 border-t border-line pt-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-          <div className="border-b border-line">
-            <div>
-              <p className="text-sm font-semibold text-fg-secondary">
-                Hardware Runtime
-              </p>
-            </div>
-
-            <div className="mt-2 divide-y divide-line">
-              <RuntimeBadge label="ONNX Runtime" ready={config.runtime?.onnx?.available} />
-              <RuntimeBadge label="PyTorch" ready={config.runtime?.torch?.available} />
-            </div>
-          </div>
-
-          <div className="divide-y divide-line">
-            <RuntimeReadiness setup={runtimeSetup} readiness={config.runtime?.rvc} checking={runtimeChecking}
-              error={runtimeError} onRefresh={onRefreshRuntime} />
-            <RuntimeItem
-              label="ONNX Provider"
-              value={onnxProvider}
-              detail={
-                onnxSelectedProviders.length > 0
-                  ? `Selected: ${onnxSelectedProviders.join(', ')}. Available: ${onnxProviders.join(', ')}`
-                  : onnxProviders.length > 0
-                    ? `Available: ${onnxProviders.join(', ')}`
-                    : 'No providers detected'
-              }
-            />
-            <RuntimeItem
-              label="PyTorch Device"
-              value={torchDevice}
-              detail={torchGpuReady ? 'CUDA acceleration is available to PyTorch.' : 'PyTorch is running without CUDA acceleration.'}
-            />
-            <RuntimeItem
-              label="GPU"
-              value={gpuName}
-              detail={onnxGpuReady ? 'ONNX Runtime can use CUDAExecutionProvider.' : 'ONNX Runtime is currently on CPU provider only.'}
-            />
-            <RuntimeItem
-              label="CUDA"
-              value={cudaVersion}
-              detail={config.runtime?.torch?.cudaAvailable ? 'Reported by torch.version.cuda.' : 'CUDA was not reported by the current PyTorch runtime.'}
-            />
-          </div>
+          <p className="text-sm font-semibold text-fg-secondary">
+            Engine
+          </p>
+          <RuntimeReadiness config={config} checking={runtimeChecking} error={runtimeError}
+            onRefresh={onRefreshRuntime} />
+          {config.stream ? (
+            <p className="border-t border-line pt-4 text-xs leading-5 text-fg-subtle">
+              Each chunk is rendered with {config.stream.lookback_seconds} s of past and
+              {' '}{Math.round(config.stream.lookahead_seconds * 1000)} ms of future context, joined with
+              a phase-aligned crossfade. Server-side delay: {config.stream.algorithmic_delay_ms} ms.
+            </p>
+          ) : null}
         </div>
       </div>
     </section>

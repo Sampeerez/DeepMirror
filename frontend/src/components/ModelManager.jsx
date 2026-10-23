@@ -14,7 +14,6 @@ import { formatBytes } from '../lib/format';
 const DELETE_CONFIRM_MS = 4000;
 
 function getModelType(name) {
-  if (name.endsWith('.onnx')) return 'ONNX';
   if (name.endsWith('.pth') || name.endsWith('.pt')) return 'RVC';
   return 'Unknown';
 }
@@ -25,7 +24,7 @@ function MetaBadge({ children, tone = 'default' }) {
     emerald: 'border-ok-line bg-ok-bg text-ok-fg',
   };
   return (
-    <span className={`rounded border px-2 py-0.5 text-[11px] font-medium ${tones[tone] || tones.default}`}>
+    <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-medium ${tones[tone] || tones.default}`}>
       {children}
     </span>
   );
@@ -82,10 +81,10 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
   }, [onActiveModelChange]);
 
   const validateUploadFile = (file) => {
-    const validExtensions = ['.onnx', '.pth', '.pt', '.index'];
+    const validExtensions = ['.pth', '.pt', '.index'];
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     if (!validExtensions.includes(ext)) {
-      return 'Invalid file type. Please upload .onnx, .pth, .pt, or .index files.';
+      return 'Invalid file type. Upload an RVC .pth model and, optionally, its .index file.';
     }
     return null;
   };
@@ -240,7 +239,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
         <input
           ref={fileInputRef}
           type="file"
-          accept=".onnx,.pth,.pt,.index"
+          accept=".pth,.pt,.index"
           multiple
           onChange={handleFileSelect}
           className="hidden"
@@ -250,7 +249,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
           {dragActive ? 'Drop model files here' : 'Drop checkpoints or click to upload'}
         </p>
         <p className="mt-1 text-xs text-fg-faint">
-          .pth / .pt / .onnx + optional .index
+          .pth / .pt + optional .index
         </p>
 
         {uploading && (
@@ -270,7 +269,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
 
       {error && (
         <div className="mt-4 flex items-start gap-2 rounded-md border border-danger-line bg-danger-bg p-4">
-          <CircleX className="mt-0.5 h-4 w-4 flex-shrink-0 text-danger-fg" aria-hidden="true" />
+          <CircleX className="mt-0.5 h-4 w-4 shrink-0 text-danger-fg" aria-hidden="true" />
           <p className="text-sm text-danger-fg">{error}</p>
         </div>
       )}
@@ -307,7 +306,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       {isActive && (
-                        <div className="h-2 w-2 flex-shrink-0 rounded-full bg-ok-solid" />
+                        <div className="h-2 w-2 shrink-0 rounded-full bg-ok-solid" />
                       )}
                       <span className="truncate text-base font-medium text-fg" title={name}>
                         {name}
@@ -330,7 +329,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
                     </div>
                   </div>
 
-                  <div className="flex flex-shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                     {isActive ? (
                       <button
                         onClick={handleDeactivate}

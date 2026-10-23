@@ -1,6 +1,79 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Class-based dark mode: the studio sets `.dark` / [data-theme] itself. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Semantic colours backed by the custom properties below. Each name maps to
+ * one role and swaps value under [data-theme]. They hold complete colour
+ * values, so the opacity modifier (bg-panel/50) does not apply: add a token.
+ */
+@theme {
+  --color-surface: var(--surface-base);
+  --color-panel: var(--surface-panel);
+  --color-raised: var(--surface-raised);
+  --color-sunken: var(--surface-sunken);
+  --color-input: var(--surface-input);
+  --color-overlay: var(--surface-overlay);
+  --color-header: var(--surface-header);
+  --color-scrim: var(--scrim);
+  --color-control: var(--control-bg);
+  --color-control-hover: var(--control-bg-hover);
+  --color-fg: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-muted);
+  --color-fg-subtle: var(--text-subtle);
+  --color-fg-faint: var(--text-faint);
+  --color-primary: var(--primary-bg);
+  --color-primary-hover: var(--primary-bg-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-line: var(--border-subtle);
+  --color-line-strong: var(--border-default);
+  --color-line-hover: var(--border-hover);
+  --color-ok-fg: var(--ok-fg);
+  --color-ok-fg-soft: var(--ok-fg-soft);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-bg-strong: var(--ok-bg-strong);
+  --color-ok-line: var(--ok-line);
+  --color-ok-line-strong: var(--ok-line-strong);
+  --color-ok-solid: var(--ok-solid);
+  --color-warn-fg: var(--warn-fg);
+  --color-warn-fg-soft: var(--warn-fg-soft);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn-bg-strong: var(--warn-bg-strong);
+  --color-warn-line: var(--warn-line);
+  --color-warn-line-strong: var(--warn-line-strong);
+  --color-warn-solid: var(--warn-solid);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-bg-strong: var(--danger-bg-strong);
+  --color-danger-line: var(--danger-line);
+  --color-danger-line-strong: var(--danger-line-strong);
+  --color-danger-solid: var(--danger-solid);
+  --color-meter-track: var(--meter-track);
+  --color-meter-peak: var(--meter-peak);
+  --color-spark: var(--spark-stroke);
+
+  --animate-fade-in-up: fade-in-up 0.35s ease-out both;
+
+  @keyframes fade-in-up {
+    0% { opacity: 0; transform: translateY(8px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/*
+ * Tailwind 4 changed two defaults this design relies on: borders now default
+ * to currentColor and buttons to the default cursor. Keep the v3 behaviour.
+ */
+@layer base {
+  *, ::after, ::before, ::backdrop, ::file-selector-button {
+    border-color: var(--border-default, currentColor);
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
 
 @layer base {
   /*

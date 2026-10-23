@@ -76,16 +76,6 @@ export async function fetchModels() {
   return request('/models/');
 }
 
-export const fetchRuntimeSetup = (options = {}) => request('/runtime-setup', options);
-export const installRuntime = (options = {}) => request('/runtime-setup/install', {
-  ...options, method: 'POST', headers: { 'X-OpenVoiceChanger-Action': 'runtime-setup' },
-  body: JSON.stringify({ profile: 'windows-cpu-v1' }),
-});
-export const cancelRuntimeSetup = (jobId, options = {}) => request('/runtime-setup/cancel', {
-  ...options, method: 'POST', headers: { 'X-OpenVoiceChanger-Action': 'runtime-setup' },
-  body: JSON.stringify({ job_id: jobId }),
-});
-
 /**
  * Upload a model checkpoint, reporting real transport progress.
  *
@@ -172,40 +162,6 @@ export async function getActiveModel(options = {}) {
 // the WebSocket still gets connected.
 export async function fetchConfig() {
   return request('/config', { timeoutMs: 15000 });
-}
-
-export function fetchUpdateState(options = {}) {
-  return request('/updates', { ...options, cache: 'no-store' });
-}
-
-export function checkForUpdates(options = {}) {
-  return request('/updates/check', {
-    ...options,
-    method: 'POST',
-    headers: { 'X-OpenVoiceChanger-Action': 'update' },
-  });
-}
-
-export function installUpdate(version, options = {}) {
-  return request('/updates/install', {
-    ...options,
-    method: 'POST',
-    headers: { 'X-OpenVoiceChanger-Action': 'update' },
-    body: JSON.stringify({ version }),
-  });
-}
-
-export async function fetchGitHubStarState() {
-  return request('/github/star', { timeoutMs: 10000 });
-}
-
-export async function starGitHubRepository() {
-  return request('/github/star', {
-    method: 'POST',
-    headers: {
-      'X-OpenVoiceChanger-Action': 'star',
-    },
-  });
 }
 
 export async function fetchPresets() {

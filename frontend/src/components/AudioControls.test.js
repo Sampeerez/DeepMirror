@@ -46,9 +46,4 @@ describe('AudioControls connection state', () => {
     expect(html).not.toContain('Waiting for server connection');
     expect(html).toContain('Start Voice Changer');
   });
-
-  it('keeps Start disabled while an update is being installed', () => {
-    const html = render({ wsStatus: 'connected', updateBusy: true });
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>[\s\S]*?Start Voice Changer/);
-  });
 });

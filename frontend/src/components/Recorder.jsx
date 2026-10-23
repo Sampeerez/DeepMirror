@@ -45,7 +45,7 @@ function TakeRow({ take, library }) {
           <input autoFocus aria-label="Take name" maxLength={120} value={name} required
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Escape') finishEditing(); }}
-            className="min-w-0 flex-1 rounded border border-line bg-input px-2 py-1 text-sm text-fg" />
+            className="min-w-0 flex-1 rounded-sm border border-line bg-input px-2 py-1 text-sm text-fg" />
           <button className={iconButton} aria-label="Save name" title="Save name" disabled={!name.trim()}><Check className="h-4 w-4" /></button>
           <button type="button" className={iconButton} aria-label="Cancel rename" title="Cancel rename" onClick={finishEditing}><X className="h-4 w-4" /></button>
         </form>

@@ -6,7 +6,7 @@
 // string authoritative while preserving every other parameter and the hash.
 
 export const TAB_IDS = ['studio', 'models', 'converter'];
-export const DEFAULT_TAB = 'studio';
+const DEFAULT_TAB = 'studio';
 
 export function isValidTab(tab) {
   return TAB_IDS.includes(tab);

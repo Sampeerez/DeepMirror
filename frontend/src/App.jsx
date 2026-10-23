@@ -12,202 +12,25 @@ import EffectsRack from './components/EffectsRack';
 import PresetBar from './components/PresetBar';
 import Recorder from './components/Recorder';
 import FileConverter from './components/FileConverter';
-import GitHubStarButton from './components/GitHubStarButton';
-import UpdateButton from './components/UpdateButton';
 import RuntimeReadiness from './components/RuntimeReadiness';
 import useWebSocket from './hooks/useWebSocket';
 import useAudioPipeline from './hooks/useAudioPipeline';
 import useAudioDevices from './hooks/useAudioDevices';
-import useUpdates from './hooks/useUpdates';
-import useRuntimeSetup from './hooks/useRuntimeSetup';
-import { localUpdateBlock } from './lib/updates';
-import { getActiveModel, fetchConfig } from './lib/api';
-import { applyConfig, DEFAULT_F0_METHOD } from './lib/constants';
+import useRuntimeConfig from './hooks/useRuntimeConfig';
+import useSettingsSync from './hooks/useSettingsSync';
+import { getActiveModel } from './lib/api';
 import { defaultEffects, effectsFromPreset } from './lib/effects';
-import {
-  effectsFromPresetSettings,
-  presetSettingsFromVoice,
-  voiceFromPreset,
-} from './lib/presets';
+import { effectsFromPresetSettings, presetSettingsFromVoice, voiceFromPreset } from './lib/presets';
 import { buildTabUrl, readTabFromSearch } from './lib/navigation';
 import { shouldTriggerShortcut } from './lib/shortcuts';
+import { STORAGE_KEYS, readStored } from './lib/storage';
 import { applyTheme, readAppliedTheme, storeTheme } from './lib/theme';
-import { FALLBACK_F0_METHODS, normalizeF0Capabilities } from './lib/f0Methods';
+import { hasStoredF0Method, loadInitialVoice } from './lib/voice';
 
-const GLOBAL_SETTINGS_STORAGE_KEY = 'ovc_global_settings';
-const VOICE_STORAGE_KEY = 'ovc_voice_v2';
-const EFFECTS_STORAGE_KEY = 'ovc_effects_v2';
-
-// Slider drags produce many changes per second; the payload goes out (and to
-// storage) once the user pauses for this long.
-const SETTINGS_DEBOUNCE_MS = 140;
 const ACTIVE_MODEL_POLL_MS = 5000;
 
-const DEFAULT_VOICE = {
-  pitch: 0,
-  formant: 0,
-  f0Method: DEFAULT_F0_METHOD,
-  indexRate: 0.75,
-  // Matches backend OVC_RVC_FILTER_RADIUS.
-  filterRadius: 3,
-  rmsMixRate: 0.25,
-  protect: 0.33,
-  crepeHopLength: 160,
-};
-
-const DEFAULT_RUNTIME_INFO = {
-  onnx: {
-    available: false,
-    activeProvider: null,
-    availableProviders: [],
-    gpuEnabled: false,
-  },
-  torch: {
-    available: false,
-    device: 'unavailable',
-    gpuName: null,
-    cudaAvailable: false,
-    cudaVersion: null,
-  },
-};
-// Largest buffer GlobalSettings offers; see mergeRuntimeConfig.
-const MAX_STORED_CHUNK_SIZE = 16384;
-const DEFAULT_RUNTIME_CONFIG = {
-  sampleRate: 48000,
-  chunkSize: 4096,
-  silenceSaver: true,
-  silenceThresholdDb: -52,
-  runtime: DEFAULT_RUNTIME_INFO,
-  f0Methods: FALLBACK_F0_METHODS,
-};
-
-function normalizePositiveInt(value, fallback) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : fallback;
-}
-
-function normalizeSilenceThreshold(value, fallback) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric >= -80 && numeric <= -20 ? numeric : fallback;
-}
-
-function readStored(key) {
-  try {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStored(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Ignore storage failures.
-  }
-}
-
-function mergeRuntimeConfig(config, stored = null) {
-  const baseSampleRate = normalizePositiveInt(
-    config?.sample_rate ?? config?.sampleRate,
-    DEFAULT_RUNTIME_CONFIG.sampleRate
-  );
-  const baseChunkSize = normalizePositiveInt(
-    config?.chunk_size ?? config?.chunkSize,
-    DEFAULT_RUNTIME_CONFIG.chunkSize
-  );
-  const baseSilenceSaver = typeof config?.silence_saver === 'boolean'
-    ? config.silence_saver
-    : DEFAULT_RUNTIME_CONFIG.silenceSaver;
-  const baseSilenceThresholdDb = normalizeSilenceThreshold(
-    config?.silence_threshold_db,
-    DEFAULT_RUNTIME_CONFIG.silenceThresholdDb
-  );
-  const storedChunkSize = normalizePositiveInt(stored?.chunkSize, baseChunkSize);
-  // A short-lived build stored 0.5-1 s buffers, which delay output by seconds
-  // and starve playback. Anything above the largest offered buffer goes back
-  // to the server default.
-  const chunkSize = storedChunkSize > MAX_STORED_CHUNK_SIZE ? baseChunkSize : storedChunkSize;
-
-  return {
-    sampleRate: normalizePositiveInt(stored?.sampleRate, baseSampleRate),
-    chunkSize,
-    silenceSaver: typeof stored?.silenceSaver === 'boolean'
-      ? stored.silenceSaver
-      : baseSilenceSaver,
-    silenceThresholdDb: normalizeSilenceThreshold(
-      stored?.silenceThresholdDb,
-      baseSilenceThresholdDb
-    ),
-    f0Methods: normalizeF0Capabilities(config?.f0_methods),
-    defaultF0Method: typeof config?.default_f0_method === 'string' ? config.default_f0_method : null,
-    hardwareOptimization: config?.hardware_optimization || null,
-    runtime: {
-      rvc: config?.runtime?.rvc ?? null,
-      onnx: {
-        ...DEFAULT_RUNTIME_INFO.onnx,
-        available: Boolean(config?.runtime?.onnx?.available ?? config?.onnx_available),
-        activeProvider: config?.runtime?.onnx?.activeProvider ?? DEFAULT_RUNTIME_INFO.onnx.activeProvider,
-        selectedProviders: Array.isArray(config?.runtime?.onnx?.selectedProviders)
-          ? config.runtime.onnx.selectedProviders
-          : [],
-        availableProviders: Array.isArray(config?.runtime?.onnx?.availableProviders)
-          ? config.runtime.onnx.availableProviders
-          : DEFAULT_RUNTIME_INFO.onnx.availableProviders,
-        gpuEnabled: Boolean(config?.runtime?.onnx?.gpuEnabled),
-      },
-      torch: {
-        ...DEFAULT_RUNTIME_INFO.torch,
-        available: Boolean(config?.runtime?.torch?.available ?? config?.torch_available),
-        device: config?.runtime?.torch?.device ?? DEFAULT_RUNTIME_INFO.torch.device,
-        gpuName: config?.runtime?.torch?.gpuName ?? DEFAULT_RUNTIME_INFO.torch.gpuName,
-        cudaAvailable: Boolean(config?.runtime?.torch?.cudaAvailable),
-        cudaVersion: config?.runtime?.torch?.cudaVersion ?? DEFAULT_RUNTIME_INFO.torch.cudaVersion,
-      },
-    },
-  };
-}
-
-/** The persisted slice of the runtime config — hardware info is never stored. */
-function persistedRuntimeConfig(config) {
-  return {
-    sampleRate: config.sampleRate,
-    chunkSize: config.chunkSize,
-    silenceSaver: config.silenceSaver,
-    silenceThresholdDb: config.silenceThresholdDb,
-  };
-}
-
-// RVC parameters a short-lived build wrote back for every user. Only this
-// exact, untouched combination is migrated, so deliberate tuning survives.
-const LEGACY_FIDELITY_VOICE = { indexRate: 0.85, filterRadius: 5, rmsMixRate: 0.4, protect: 0.4 };
-
-function loadInitialVoice() {
-  const stored = readStored(VOICE_STORAGE_KEY);
-  if (!stored) return { ...DEFAULT_VOICE };
-  const legacy = Object.entries(LEGACY_FIDELITY_VOICE)
-    .every(([key, value]) => stored[key] === value);
-  if (!legacy) return { ...DEFAULT_VOICE, ...stored };
-  return {
-    ...DEFAULT_VOICE,
-    ...stored,
-    indexRate: DEFAULT_VOICE.indexRate,
-    filterRadius: DEFAULT_VOICE.filterRadius,
-    rmsMixRate: DEFAULT_VOICE.rmsMixRate,
-    protect: DEFAULT_VOICE.protect,
-    // That build also forced Harvest, which cannot keep up in realtime.
-    f0Method: stored.f0Method === 'harvest' ? DEFAULT_VOICE.f0Method : stored.f0Method,
-  };
-}
-
-/** True when the user (or an earlier session) already chose a pitch detector. */
-function hasStoredF0Method() {
-  return typeof readStored(VOICE_STORAGE_KEY)?.f0Method === 'string';
-}
-
 function loadInitialEffects() {
-  const stored = readStored(EFFECTS_STORAGE_KEY);
+  const stored = readStored(STORAGE_KEYS.effects);
   return stored ? effectsFromPreset(stored) : defaultEffects();
 }
 
@@ -223,33 +46,14 @@ export default function App() {
   const wsHook = useWebSocket();
   const pipeline = useAudioPipeline(wsHook);
   const devices = useAudioDevices();
-  const [converterBlock, setConverterBlock] = useState(null);
-  const [audioStarting, setAudioStarting] = useState(false);
-  const maintenanceBlock = localUpdateBlock({
-    isStarting: audioStarting,
-    isRunning: pipeline.isRunning,
-    isRecording: pipeline.isRecording,
-    lastRecording: pipeline.library.unsaved,
-    converterBlock,
-  });
-  const runtimeSetup = useRuntimeSetup(maintenanceBlock);
-  const updates = useUpdates(maintenanceBlock || (runtimeSetup.busy ? 'Wait for runtime setup to finish.' : null));
 
   // Deep links: ?tab=models|converter selects a tab, ?settings opens the modal.
   const [tab, setTab] = useState(() => readTabFromSearch(window.location.search));
   const [activeModel, setActiveModel] = useState(null);
-  const [runtimeConfig, setRuntimeConfig] = useState(DEFAULT_RUNTIME_CONFIG);
-  const [runtimeRefresh, setRuntimeRefresh] = useState(0);
-  const [runtimeChecking, setRuntimeChecking] = useState(false);
-  const [runtimeError, setRuntimeError] = useState(null);
-  const [capabilitiesRevision, setCapabilitiesRevision] = useState(0);
-  const refreshRuntime = useCallback(() => setRuntimeRefresh((value) => value + 1), []);
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () => new URLSearchParams(window.location.search).has('settings')
   );
   const [voice, setVoice] = useState(loadInitialVoice);
-  // Captured before the first debounced save writes the default back.
-  const adoptServerF0Ref = useRef(!hasStoredF0Method());
   const [effects, setEffects] = useState(loadInitialEffects);
   const [activePresetId, setActivePresetId] = useState(null);
   // Full conversion bypass. Deliberately not persisted: a monitoring toggle
@@ -259,140 +63,33 @@ export default function App() {
   // so React adopts the pre-paint theme instead of deciding it a second time.
   const [theme, setTheme] = useState(() => readAppliedTheme(document.documentElement));
 
+  const { isRunning, isRecording, startRecording, stopRecording } = pipeline;
   const {
-    status: wsStatus,
-    latency,
-    latencyHistory,
-    serverMs,
-    serverStats,
-    connect,
-    disconnect,
-    retryNow,
-    sendSettings,
-    setOnSettingsResponse,
-    setOnOpen,
-    resetLatency,
+    status: wsStatus, latency, latencyHistory, serverMs, serverStats, retryNow,
+    setOnSettingsResponse, resetLatency,
   } = wsHook;
 
-  const updateBusy = updates.busy || updates.needsReload || runtimeSetup.busy;
-  const setupControls = { ...runtimeSetup, blocked: maintenanceBlock
-    || (updates.busy || updates.needsReload ? 'Finish the app update before installing the runtime.' : null) };
-
-  useEffect(() => { refreshRuntime(); }, [runtimeSetup.state?.active_job, refreshRuntime]);
-
-  // --- Settings payload sync -------------------------------------------------
-
-  // The full settings message, kept in a ref so the connection-open callback
-  // and the debounced sender always read the latest values.
-  const settingsPayloadRef = useRef(null);
-  useEffect(() => {
-    settingsPayloadRef.current = {
-      pitch_shift: voice.pitch,
-      formant_shift: voice.formant,
-      f0_method: voice.f0Method,
-      index_rate: voice.indexRate,
-      filter_radius: voice.filterRadius,
-      rms_mix_rate: voice.rmsMixRate,
-      protect: voice.protect,
-      crepe_hop_length: voice.crepeHopLength,
-      effects,
-      bypass,
-      silence_saver: runtimeConfig.silenceSaver,
-      silence_threshold_db: runtimeConfig.silenceThresholdDb,
-    };
-  }, [voice, effects, bypass, runtimeConfig.silenceSaver, runtimeConfig.silenceThresholdDb]);
-
-  const wsStatusRef = useRef(wsStatus);
-  useEffect(() => {
-    wsStatusRef.current = wsStatus;
-  }, [wsStatus]);
-
-  // Persist and push voice/effects once the user pauses. Storage writes sit
-  // inside the debounce too: serialising the whole rack on every slider tick
-  // was pure waste. A reconnect re-sends everything through onOpen, so the
-  // status is only consulted at fire time.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      writeStored(VOICE_STORAGE_KEY, voice);
-      writeStored(EFFECTS_STORAGE_KEY, effects);
-      if (wsStatusRef.current === 'connected') {
-        sendSettings(settingsPayloadRef.current);
-      }
-    }, SETTINGS_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [voice, effects, sendSettings]);
-
-  // Bypass is a monitoring action, not a parameter tweak: send it immediately
-  // rather than through the settings debounce, so A/B feels instant.
-  useEffect(() => {
-    if (wsStatus !== 'connected') return;
-    sendSettings({ bypass });
-  }, [bypass, wsStatus, sendSettings]);
-
-  // Push the full current settings as soon as a connection opens.
-  useEffect(() => {
-    setOnOpen(() => sendSettings(settingsPayloadRef.current));
-  }, [setOnOpen, sendSettings]);
-
-  // --- Bootstrap -------------------------------------------------------------
-
-  useEffect(() => {
-    if (wsStatus !== 'connected' && runtimeRefresh === 0) return undefined;
-    let cancelled = false;
-    setRuntimeChecking(true);
-    fetchConfig().then((config) => {
-      if (cancelled) return;
-      const next = mergeRuntimeConfig(config);
-      // Refresh capabilities only: never change live transport geometry.
-      setRuntimeConfig((current) => ({ ...current, runtime: next.runtime, f0Methods: next.f0Methods }));
-      setCapabilitiesRevision((value) => value + 1);
-      setRuntimeError(null);
-    }).catch(() => {
-      if (!cancelled) setRuntimeError('Runtime check failed. Reconnect to the server and retry.');
-    }).finally(() => {
-      if (!cancelled) setRuntimeChecking(false);
-    });
-    return () => { cancelled = true; };
-  }, [wsStatus, runtimeRefresh]);
-
-  useEffect(() => {
-    const current = runtimeConfig.f0Methods.find((method) => method.id === voice.f0Method);
-    if (current?.available) return;
-    const preferred = runtimeConfig.f0Methods.find((method) => method.realtime && method.available);
-    if (preferred) setVoice((previous) => ({ ...previous, f0Method: preferred.id }));
-  }, [runtimeConfig.f0Methods, voice.f0Method]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const storedConfig = readStored(GLOBAL_SETTINGS_STORAGE_KEY);
-
-    const adopt = (cfg) => {
-      if (cancelled) return;
-      const nextRuntimeConfig = mergeRuntimeConfig(cfg, storedConfig);
-      applyConfig({
-        sample_rate: nextRuntimeConfig.sampleRate,
-        chunk_size: nextRuntimeConfig.chunkSize,
-      });
-      setRuntimeConfig(nextRuntimeConfig);
-      // First run only: start from the detector the server recommends for
-      // its hardware (RMVPE on a GPU). An explicit choice is never replaced.
-      const recommended = nextRuntimeConfig.defaultF0Method;
-      if (adoptServerF0Ref.current && recommended) {
-        adoptServerF0Ref.current = false;
-        setVoice((previous) => ({ ...previous, f0Method: recommended }));
-      }
-    };
-
-    fetchConfig()
-      .then(adopt)
-      .catch(() => adopt({}))
-      .finally(() => { if (!cancelled) connect(); });
-    return () => {
-      cancelled = true;
-      disconnect();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // First run only: start from the detector the server recommends for its
+  // hardware (RMVPE on a GPU). An explicit earlier choice is never replaced.
+  const adoptServerF0Ref = useRef(!hasStoredF0Method());
+  const adoptRecommendedF0 = useCallback((method) => {
+    if (!adoptServerF0Ref.current) return;
+    adoptServerF0Ref.current = false;
+    setVoice((previous) => ({ ...previous, f0Method: method }));
   }, []);
+
+  const runtime = useRuntimeConfig({ wsHook, isRunning, onRecommendedF0: adoptRecommendedF0 });
+  const { runtimeConfig } = runtime;
+  useSettingsSync({ voice, effects, bypass, runtimeConfig, wsHook });
+
+  // Never leave the voice on a detector this server cannot run.
+  useEffect(() => {
+    const methods = runtimeConfig.f0Methods;
+    if (methods.find((method) => method.id === voice.f0Method)?.available) return;
+    const preferred = methods.find((method) => method.id === runtimeConfig.defaultF0Method && method.available)
+      || methods.find((method) => method.realtime && method.available);
+    if (preferred) setVoice((previous) => ({ ...previous, f0Method: preferred.id }));
+  }, [runtimeConfig.f0Methods, runtimeConfig.defaultF0Method, voice.f0Method]);
 
   // Tab selection is reflected in ?tab= so the current view can be linked and
   // Back/Forward moves between tabs instead of leaving the app.
@@ -412,7 +109,6 @@ export default function App() {
 
   // Studio shortcuts, all single letters that stay out of the way of typing:
   // "B" toggles the A/B bypass, "R" starts/stops a take while routing runs.
-  const { isRunning, isRecording, startRecording, stopRecording } = pipeline;
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (isSettingsOpen) return;
@@ -519,51 +215,6 @@ export default function App() {
     [voice, effects]
   );
 
-  // The next config is derived from the rendered state and its side effects
-  // (storage, transport constants, the live settings message) run once, here.
-  // Doing that inside a setState updater would repeat them: React may invoke
-  // an updater more than once and expects it to be pure.
-  const handleGlobalSettingsChange = useCallback(
-    (partialConfig) => {
-      const nextRuntimeConfig = {
-        ...runtimeConfig,
-        sampleRate: normalizePositiveInt(partialConfig.sampleRate, runtimeConfig.sampleRate),
-        chunkSize: normalizePositiveInt(partialConfig.chunkSize, runtimeConfig.chunkSize),
-        silenceSaver: typeof partialConfig.silenceSaver === 'boolean'
-          ? partialConfig.silenceSaver
-          : runtimeConfig.silenceSaver,
-        silenceThresholdDb: normalizeSilenceThreshold(
-          partialConfig.silenceThresholdDb,
-          runtimeConfig.silenceThresholdDb
-        ),
-      };
-
-      setRuntimeConfig(nextRuntimeConfig);
-      writeStored(GLOBAL_SETTINGS_STORAGE_KEY, persistedRuntimeConfig(nextRuntimeConfig));
-      applyConfig({
-        sample_rate: nextRuntimeConfig.sampleRate,
-        chunk_size: nextRuntimeConfig.chunkSize,
-      });
-
-      if (wsStatus === 'connected') {
-        const liveSettings = {
-          silence_saver: nextRuntimeConfig.silenceSaver,
-          silence_threshold_db: nextRuntimeConfig.silenceThresholdDb,
-        };
-        // Transport geometry cannot change under a live stream; it applies
-        // when the next one starts.
-        if (!isRunning) {
-          Object.assign(liveSettings, {
-            sample_rate: nextRuntimeConfig.sampleRate,
-            chunk_size: nextRuntimeConfig.chunkSize,
-          });
-        }
-        sendSettings(liveSettings);
-      }
-    },
-    [runtimeConfig, isRunning, sendSettings, wsStatus]
-  );
-
   const openSettings = useCallback(() => setIsSettingsOpen(true), []);
   const closeSettings = useCallback(() => {
     setIsSettingsOpen(false);
@@ -594,9 +245,6 @@ export default function App() {
 
   const headerActions = (
     <>
-      <UpdateButton updates={updates} onClick={openSettings} />
-      <GitHubStarButton />
-
       <button
         onClick={openSettings}
         /* frost-control owns the surface, border, radius, transition and focus
@@ -652,8 +300,6 @@ export default function App() {
               bypass={bypass}
               onBypassChange={setBypass}
               onRetryConnection={retryNow}
-              updateBusy={updateBusy}
-              onStartingChange={setAudioStarting}
             />
             <Recorder pipeline={pipeline} />
           </div>
@@ -681,7 +327,7 @@ export default function App() {
         </div>
 
         <PresetBar
-          refreshRevision={capabilitiesRevision}
+          refreshRevision={runtime.revision}
           activePresetId={activePresetId}
           onApplyPreset={applyPreset}
           getCurrentSettings={getCurrentSettings}
@@ -700,8 +346,8 @@ export default function App() {
           onActiveModelChange={setActiveModel}
           active={tab === 'models'}
         />
-        <RuntimeReadiness readiness={runtimeConfig.runtime?.rvc} checking={runtimeChecking}
-          error={runtimeError} onRefresh={refreshRuntime} setup={setupControls} />
+        <RuntimeReadiness config={runtimeConfig} checking={runtime.checking} error={runtime.error}
+          onRefresh={runtime.refresh} />
       </div>
 
       <div {...panelProps('converter')} className="mx-auto max-w-3xl animate-fade-in-up">
@@ -710,8 +356,6 @@ export default function App() {
           effects={effects}
           activeModel={activeModel}
           f0Methods={runtimeConfig.f0Methods}
-          updateBusy={updateBusy}
-          onUpdateBlockChange={setConverterBlock}
         />
       </div>
 
@@ -724,12 +368,11 @@ export default function App() {
           />
           <div className="relative max-h-[calc(100svh-2.5rem)] w-full max-w-5xl overflow-y-auto">
             <GlobalSettings
-              runtimeSetup={setupControls}
-              runtimeChecking={runtimeChecking}
-              runtimeError={runtimeError}
-              onRefreshRuntime={refreshRuntime}
+              runtimeChecking={runtime.checking}
+              runtimeError={runtime.error}
+              onRefreshRuntime={runtime.refresh}
               config={runtimeConfig}
-              onChange={handleGlobalSettingsChange}
+              onChange={runtime.changeSettings}
               disabled={pipeline.isRunning}
               onClose={closeSettings}
               theme={theme}
@@ -738,7 +381,6 @@ export default function App() {
               serverMs={serverMs}
               serverStats={serverStats}
               streamSampleRate={pipeline.streamInfo?.sampleRate}
-              updates={updates}
             />
           </div>
         </div>

@@ -13,9 +13,9 @@
 // Pure with respect to the clock: every method takes `now` so the rules can be
 // tested without timers or a socket.
 
-export const DEFAULT_MAX_IN_FLIGHT = 1;
-export const DEFAULT_MAX_PENDING = 2;
-export const DEFAULT_STALE_MS = 2000;
+const DEFAULT_MAX_IN_FLIGHT = 1;
+const DEFAULT_MAX_PENDING = 2;
+const DEFAULT_STALE_MS = 2000;
 
 export function createFrameScheduler({
   maxInFlight = DEFAULT_MAX_IN_FLIGHT,

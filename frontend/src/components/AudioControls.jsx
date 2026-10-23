@@ -9,8 +9,6 @@ function AudioControls({
   bypass = false,
   onBypassChange,
   onRetryConnection,
-  updateBusy = false,
-  onStartingChange,
 }) {
   const [selectedInput, setSelectedInput] = useState('');
   const [selectedOutput, setSelectedOutput] = useState('');
@@ -22,13 +20,12 @@ function AudioControls({
 
   // A voice model is optional: without one, the stream runs through the
   // server-side DSP chain (pitch + effects) instead.
-  const canStart = wsStatus === 'connected' && !pipeline.isRunning && captureSupported && !updateBusy;
+  const canStart = wsStatus === 'connected' && !pipeline.isRunning && captureSupported;
 
   const handleStart = async () => {
     if (!canStart) return;
     setError(null);
     setStarting(true);
-    onStartingChange?.(true);
     try {
       await devices.refresh?.();
       await pipeline.start(selectedInput || undefined, selectedOutput || undefined);
@@ -36,7 +33,6 @@ function AudioControls({
       setError(err.message || 'Failed to start audio pipeline');
     } finally {
       setStarting(false);
-      onStartingChange?.(false);
     }
   };
 
@@ -53,7 +49,7 @@ function AudioControls({
           <h2 className="panel-title">Devices & stream</h2>
         </div>
         <div className="flex items-center gap-2">
-          <span className="rounded border border-line bg-control px-2.5 py-1 text-[11px] font-medium text-fg-muted">
+          <span className="rounded-sm border border-line bg-control px-2.5 py-1 text-[11px] font-medium text-fg-muted">
             {activeModel ? 'Model engine' : 'DSP engine'}
           </span>
           <button
@@ -155,7 +151,7 @@ function AudioControls({
           aria-label="Conversion bypass"
           title="Toggle full conversion bypass (shortcut: B)"
           data-tone={bypass ? 'warning' : undefined}
-          className="frost-control inline-flex h-9 min-w-[112px] flex-shrink-0 items-center justify-center px-3.5 text-xs font-medium text-fg-muted"
+          className="frost-control inline-flex h-9 min-w-[112px] shrink-0 items-center justify-center px-3.5 text-xs font-medium text-fg-muted"
         >
           {bypass ? 'Bypass on' : 'Bypass off'}
         </button>
@@ -246,7 +242,7 @@ function AudioControls({
       {!pipeline.isRunning && wsStatus === 'connected' && !activeModel && (
         <p className="mt-3 text-[11px] text-fg-subtle">
           No model active — streaming will use the DSP pitch shifter and effects rack.
-          Load an RVC/ONNX model in the Models tab for full voice conversion.
+          Load an RVC voice in the Models tab for full voice conversion.
         </p>
       )}
 

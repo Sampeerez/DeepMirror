@@ -1,7 +1,11 @@
+// Streaming quality profiles. Each one trades latency for conversion quality:
+// a larger chunk gives the server more time per render, and more past/future
+// context gives the model steadier timbre and intonation at window seams.
+// Ordered from highest quality to lowest latency.
 export const PERFORMANCE_PROFILES = [
-  { id: 'responsive', label: 'Responsive', chunkSize: 2048 },
-  { id: 'balanced', label: 'Balanced', chunkSize: 4096 },
-  { id: 'stable', label: 'Stable', chunkSize: 8192 },
+  { id: 'quality', label: 'Quality', chunkSize: 8192, lookbackSeconds: 1.0, lookaheadSeconds: 0.15 },
+  { id: 'balanced', label: 'Balanced', chunkSize: 4096, lookbackSeconds: 1.0, lookaheadSeconds: 0.1 },
+  { id: 'responsive', label: 'Responsive', chunkSize: 2048, lookbackSeconds: 0.5, lookaheadSeconds: 0.05 },
 ];
 
 function finitePositive(values) {
@@ -31,6 +35,17 @@ export function profileForChunkSize(chunkSize) {
   };
 }
 
+/** Context timing the server should use for a chunk size (custom sizes keep server defaults). */
+export function streamTimingForChunkSize(chunkSize) {
+  const profile = profileForChunkSize(chunkSize);
+  if (profile.id === 'custom') return {};
+  return { lookback_seconds: profile.lookbackSeconds, lookahead_seconds: profile.lookaheadSeconds };
+}
+
+/**
+ * Highest-quality profile whose chunk budget covers the measured processing
+ * time with headroom (70%) and whose network jitter (p95 round trip) fits.
+ */
 export function recommendPerformanceProfile({
   latencyHistory,
   sampleRate,
@@ -54,19 +69,18 @@ export function recommendPerformanceProfile({
   }
 
   const p95Ms = percentile(samples, 0.95);
-  const profile = PERFORMANCE_PROFILES.find((candidate) => {
+  const fits = (candidate) => {
     const budgetMs = bufferDurationMs(candidate.chunkSize, sampleRate);
     return processingMs <= budgetMs * 0.7 && p95Ms <= budgetMs * 1.65;
-  }) || PERFORMANCE_PROFILES[PERFORMANCE_PROFILES.length - 1];
+  };
+  const profile = PERFORMANCE_PROFILES.find(fits) || PERFORMANCE_PROFILES[0];
 
   return {
     ready: true,
     profile,
     p95Ms,
     processingMs,
-    constrained: profile.id === 'stable'
-      && (processingMs > bufferDurationMs(profile.chunkSize, sampleRate) * 0.7
-        || p95Ms > bufferDurationMs(profile.chunkSize, sampleRate) * 1.65),
+    constrained: !fits(profile),
     sampleCount: samples.length,
   };
 }

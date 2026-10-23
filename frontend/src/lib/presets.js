@@ -20,7 +20,7 @@ export const ADVANCED_FIELD_MAP = [
   { preset: 'crepe_hop_length', voice: 'crepeHopLength', min: 64, max: 512, integer: true },
 ];
 
-export const F0_METHODS = F0_METHOD_IDS;
+const F0_METHODS = F0_METHOD_IDS;
 
 function clampNumber(value, { min, max, integer }) {
   const number = Number(value);

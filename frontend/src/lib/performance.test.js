@@ -4,12 +4,13 @@ import {
   percentile,
   profileForChunkSize,
   recommendPerformanceProfile,
+  streamTimingForChunkSize,
 } from './performance';
 
 function recommendation(overrides = {}) {
   return recommendPerformanceProfile({
     latencyHistory: Array(12).fill(45),
-    sampleRate: 40000,
+    sampleRate: 48000,
     serverMs: 30,
     serverStats: { modelMs: 25, dspMs: 4, inferenceSleeping: false },
     isRunning: true,
@@ -18,26 +19,18 @@ function recommendation(overrides = {}) {
 }
 
 describe('performance profile recommendation', () => {
-  it('chooses the smallest buffer with measured headroom', () => {
-    expect(recommendation().profile.id).toBe('responsive');
+  it('prefers the highest-quality profile the measured load allows', () => {
+    expect(recommendation().profile.id).toBe('quality');
   });
 
-  it('moves to balanced when the responsive budget is too tight', () => {
-    const result = recommendation({
-      latencyHistory: Array(12).fill(90),
-      serverMs: 65,
-      serverStats: { modelMs: 60, dspMs: 5 },
-    });
-    expect(result.profile.id).toBe('balanced');
+  it('steps down when the quality budget is too tight for the network', () => {
+    expect(recommendation({ latencyHistory: Array(12).fill(400) }).profile.id).toBe('quality');
+    expect(recommendation({ latencyHistory: Array(12).fill(400) }).constrained).toBe(true);
   });
 
-  it('chooses stable for heavy processing and marks overload', () => {
-    const result = recommendation({
-      latencyHistory: Array(12).fill(360),
-      serverMs: 190,
-      serverStats: { modelMs: 185, dspMs: 5 },
-    });
-    expect(result.profile.id).toBe('stable');
+  it('marks overload when nothing fits', () => {
+    const result = recommendation({ serverMs: 400, serverStats: { modelMs: 395, dspMs: 5 } });
+    expect(result.profile.id).toBe('quality');
     expect(result.constrained).toBe(true);
   });
 
@@ -53,6 +46,11 @@ describe('performance helpers', () => {
     expect(bufferDurationMs(2048, 40000)).toBeCloseTo(51.2);
     expect(profileForChunkSize(4096).id).toBe('balanced');
     expect(profileForChunkSize(1024).id).toBe('custom');
+  });
+
+  it('maps profiles to server stream timing', () => {
+    expect(streamTimingForChunkSize(8192)).toEqual({ lookback_seconds: 1, lookahead_seconds: 0.15 });
+    expect(streamTimingForChunkSize(1000)).toEqual({});
   });
 
   it('uses a nearest-rank percentile', () => {

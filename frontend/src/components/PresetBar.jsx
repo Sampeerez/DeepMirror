@@ -4,7 +4,7 @@ import { fetchPresets, savePreset, deletePreset } from '../lib/api';
 
 function PresetChip({ preset, active, onApply, onDelete }) {
   return (
-    <div className="group relative flex-shrink-0">
+    <div className="group relative shrink-0">
       <button
         onClick={() => onApply(preset)}
         title={preset.description}
@@ -31,7 +31,7 @@ function PresetChip({ preset, active, onApply, onDelete }) {
           }}
           title="Delete preset"
           aria-label={`Delete ${preset.name} preset`}
-          className="reveal-on-hover absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-md border border-danger-line-strong bg-panel text-danger-fg shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]"
+          className="reveal-on-hover absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-md border border-danger-line-strong bg-panel text-danger-fg shadow-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]"
         >
           <Trash2 className="h-3 w-3" aria-hidden="true" />
         </button>
@@ -147,7 +147,7 @@ function PresetBar({ activePresetId, onApplyPreset, getCurrentSettings, refreshR
             onApply={onApplyPreset}
           />
         ))}
-        {presets.user.length > 0 && <div className="mx-1 w-px flex-shrink-0 self-stretch bg-line-strong" />}
+        {presets.user.length > 0 && <div className="mx-1 w-px shrink-0 self-stretch bg-line-strong" />}
         {presets.user.map((preset) => (
           <PresetChip
             key={preset.id}

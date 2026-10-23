@@ -19,12 +19,12 @@ export default function StatusIndicator({ wsStatus, activeModel, mode, bypass = 
   const engineLabel = bypassed
     ? 'BYPASS'
     : failed ? 'ERROR' : activeModel
-      ? (mode === 'onnx' ? 'ONNX' : 'RVC')
+      ? 'RVC'
       : 'DSP';
 
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center gap-2 rounded border border-line bg-control px-2.5 py-1.5">
+      <div className="flex items-center gap-2 rounded-sm border border-line bg-control px-2.5 py-1.5">
         <div className="relative">
           <div className={`h-2 w-2 rounded-full ${config.color}`} />
           {wsStatus === 'connecting' && (
@@ -37,7 +37,7 @@ export default function StatusIndicator({ wsStatus, activeModel, mode, bypass = 
       </div>
 
       <div
-        className={`hidden items-center gap-2 rounded border px-2.5 py-1.5 md:flex ${
+        className={`hidden items-center gap-2 rounded-sm border px-2.5 py-1.5 md:flex ${
           bypassed
             ? 'border-warn-line-strong bg-warn-bg'
             : 'border-line bg-control'

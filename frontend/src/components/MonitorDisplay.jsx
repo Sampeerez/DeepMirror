@@ -110,7 +110,7 @@ function Sparkline({ history }) {
 
 function StatChip({ label, value }) {
   return (
-    <div className="rounded border border-line bg-input px-3 py-2 text-center">
+    <div className="rounded-sm border border-line bg-input px-3 py-2 text-center">
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-subtle">{label}</p>
       <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-fg-secondary">{value}</p>
     </div>
@@ -147,16 +147,16 @@ function MonitorDisplay({
           <h2 className="panel-title">Levels & latency</h2>
         </div>
         {bypass ? (
-          <span className="rounded border border-warn-line-strong bg-warn-bg px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-warn-fg">
+          <span className="rounded-sm border border-warn-line-strong bg-warn-bg px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-warn-fg">
             Bypassed
           </span>
         ) : serverStats?.inferenceSleeping ? (
-          <span className="inline-flex items-center gap-1.5 rounded border border-ok-line bg-ok-bg px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-ok-fg">
+          <span className="inline-flex items-center gap-1.5 rounded-sm border border-ok-line bg-ok-bg px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-ok-fg">
             <Pause className="h-3 w-3" aria-hidden="true" />
             Saver
           </span>
         ) : serverStats?.effectsActive > 0 ? (
-          <span className="rounded border border-line-strong bg-control px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-secondary">
+          <span className="rounded-sm border border-line-strong bg-control px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-secondary">
             {serverStats.effectsActive} FX
           </span>
         ) : null}
@@ -170,7 +170,7 @@ function MonitorDisplay({
         <VuMeter label="Output" meters={meters} channel="output" />
       </div>
 
-      <div className="mt-5 rounded border border-line bg-input p-4">
+      <div className="mt-5 rounded-sm border border-line bg-input p-4">
         <div className="flex items-end justify-between gap-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-subtle">
@@ -181,7 +181,7 @@ function MonitorDisplay({
               <span className="ml-1 text-sm text-fg-subtle">ms</span>
             </p>
           </div>
-          <div className="w-28 flex-shrink-0 sm:w-36">
+          <div className="w-28 shrink-0 sm:w-36">
             <Sparkline history={latencyHistory} />
           </div>
         </div>
