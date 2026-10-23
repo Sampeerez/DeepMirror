@@ -70,7 +70,7 @@ class FormantShifter:
 
     def __init__(self, sample_rate: int) -> None:
         self.sr = sample_rate
-        self.window = sps.get_window("hann", self.FFT).astype(np.float32)
+        self.window = np.asarray(sps.get_window("hann", self.FFT), dtype=np.float32)
         # Hann with 75% overlap sums (analysis*synthesis window) to 1.5.
         self._ola_norm = 1.5
         self._in_buf = np.zeros(0, dtype=np.float32)

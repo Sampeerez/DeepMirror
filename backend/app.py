@@ -10,12 +10,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.api import convert, models, presets, stream, system, training
 from backend.assets import AssetStore, legacy_asset_directories
 from backend.config import ROOT, Settings
 from backend.config import settings as default_settings
+from backend.frontend_build import MISSING_UI_PAGE
 from backend.model_manager import ModelManager
 from backend.presets import PresetStore
 from backend.security import cors_origins
@@ -73,9 +75,13 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
     for module in (system, models, presets, convert, stream, training):
         app.include_router(module.router)
 
-    if settings.FRONTEND_DIST.is_dir():
+    if (settings.FRONTEND_DIST / "index.html").is_file():
         app.mount("/", StaticFiles(directory=settings.FRONTEND_DIST, html=True), name="frontend")
     else:
-        logger.warning("Frontend build not found at %s; run the start script or `npm run build`.",
+        logger.warning("Web UI build not found at %s; serving setup instructions instead.",
                        settings.FRONTEND_DIST)
+
+        @app.get("/", include_in_schema=False)
+        async def missing_ui() -> HTMLResponse:
+            return HTMLResponse(MISSING_UI_PAGE, status_code=503)
     return app

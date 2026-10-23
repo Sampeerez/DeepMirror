@@ -16,6 +16,8 @@ dependencies = [
     "soundfile>=0.14",
     "torch>=2.14",
     "praat-parselmouth>=0.4.7",
+    # Node.js for building the web UI from a source checkout (no system Node needed).
+    "nodejs-wheel-binaries>=24.19",
     # Harvest/DIO pitch trackers. pyworld only publishes wheels for Windows;
     # elsewhere install the `classic-f0` extra (needs a C compiler).
     "pyworld>=0.3.5; sys_platform == 'win32' and python_version < '3.14'",
@@ -93,5 +95,7 @@ ignore = ["E501", "RUF001", "RUF002", "RUF003", "SIM108"]
 
 [tool.pyright]
 include = ["backend"]
+venvPath = "."
+venv = ".venv"
 typeCheckingMode = "basic"
 pythonVersion = "3.12"

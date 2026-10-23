@@ -137,7 +137,9 @@ def save_segments(segments: list[Segment], path: Path) -> None:
 
     fields = ["audio"] + (["phone", "pitch", "pitchf"] if segments and segments[0].phone is not None else [])
     partial = path.with_name(path.stem + ".part.npz")
-    np.savez(partial, **{key: value for name in fields for key, value in packed(name).items()})
+    arrays: dict[str, np.ndarray] = {k: v for name in fields for k, v in packed(name).items()}
+    with partial.open("wb") as handle:
+        np.savez(handle, **arrays)  # type: ignore[arg-type]  # numpy stubs reserve the allow_pickle keyword
     partial.replace(path)
 
 
