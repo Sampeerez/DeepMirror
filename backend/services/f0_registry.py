@@ -1,10 +1,11 @@
 """Canonical F0 method metadata and cheap runtime capability detection."""
 
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 import importlib.util
 from pathlib import Path
 
-from backend.config import settings
+from backend.config import DEFAULT_F0_METHOD, settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +120,43 @@ def f0_capabilities() -> list[dict]:
 
 def capability_map() -> dict[str, dict]:
     return {item["id"]: item for item in f0_capabilities()}
+
+
+# Smallest CUDA card on which RMVPE plus RVC inference was measured to fit an
+# 85 ms (4096 @ 48 kHz) chunk with headroom. A 6 GB FP32 card sat right at the
+# budget, so smaller cards keep the cheaper default.
+_RMVPE_MIN_CUDA_GB = 8.0
+
+
+@lru_cache(maxsize=1)
+def _accelerator_available() -> bool:
+    """True when torch has an accelerator fast enough for realtime RMVPE."""
+    try:
+        import torch
+    except Exception:
+        return False
+    try:
+        if torch.cuda.is_available():
+            total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            return total >= _RMVPE_MIN_CUDA_GB
+        mps = getattr(torch.backends, "mps", None)
+        return bool(mps and mps.is_available())
+    except Exception:
+        return False
+
+
+def resolve_default_f0_method(capabilities: dict[str, dict] | None = None) -> str:
+    """Pick the realtime pitch detector new sessions should start with.
+
+    RMVPE is the most accurate realtime-capable detector, but on CPU or a
+    small GPU it costs about a whole 85 ms chunk budget. Prefer it only on a
+    capable accelerator with its weights installed; otherwise use PM, which
+    needs no assets and stays well below the budget.
+    """
+    caps = capabilities if capabilities is not None else capability_map()
+    if caps.get("rmvpe", {}).get("available") and _accelerator_available():
+        return "rmvpe"
+    return DEFAULT_F0_METHOD
 
 
 def runtime_readiness() -> dict:

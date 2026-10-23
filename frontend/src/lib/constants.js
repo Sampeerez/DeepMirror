@@ -1,11 +1,13 @@
 // Defaults — overridden by /api/config response at runtime
-export let SAMPLE_RATE = 40000;
+export let SAMPLE_RATE = 48000;
 export let CHUNK_SIZE = 4096;
 export const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/audio`;
 export const API_BASE = '/api';
 
 // Matches backend.config.DEFAULT_F0_METHOD so the live stream, the offline
-// converter and the UI all start from the same pitch-detection method.
+// converter and the UI all start from the same pitch-detection method. The
+// server may recommend a better one for its hardware (`default_f0_method` in
+// /api/config); App adopts it for users who never picked a method.
 export const DEFAULT_F0_METHOD = 'pm';
 
 // SAMPLE_RATE above is only what we *ask* the browser for. An AudioContext may

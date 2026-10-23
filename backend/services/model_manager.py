@@ -8,7 +8,8 @@ from pathlib import Path
 import numpy as np
 from fastapi import UploadFile
 
-from backend.config import DEFAULT_F0_METHOD
+from backend.config import DEFAULT_F0_METHOD, settings as app_settings
+from backend.services.f0_registry import resolve_default_f0_method
 from backend.services.onnx_processor import OnnxProcessor
 from backend.services.rvc_processor import RvcProcessor
 
@@ -207,16 +208,18 @@ class ModelManager:
                 logger.error("Failed to load model %s: %s", name, exc)
                 raise RuntimeError(f"Failed to load model: {exc}") from exc
 
+            if isinstance(processor, RvcProcessor):
+                # Warm up before describe() so the realtime-index decision is
+                # reflected in the details the UI shows.
+                try:
+                    processor.warm_up(f0_method=resolve_default_f0_method())
+                except Exception:
+                    logger.exception("RVC warm-up failed for %s", name)
+
             try:
                 meta["details"] = processor.describe()
             except Exception:
                 logger.exception("Failed to collect model details for %s", name)
-
-            if isinstance(processor, RvcProcessor):
-                try:
-                    processor.warm_up()
-                except Exception as exc:
-                    logger.warning("RVC warm-up failed for %s: %s", name, exc)
 
             # Publish the new processor only after loading and warm-up finish,
             # so readers never observe a half-ready model.
@@ -233,12 +236,28 @@ class ModelManager:
         }
 
     def _find_index_file(self, model_name: str) -> str | None:
-        """Look for a .index file matching the model name."""
+        """Find the matching RVC index, including common generated names.
+
+        RVC tools often name an index with its IVF/settings metadata rather
+        than the checkpoint stem. Prefer an exact stem match, then a unique
+        index in the models directory so uploading a checkpoint and its only
+        companion index works as users expect.
+        """
         stem = Path(model_name).stem
-        for ext in (".index",):
-            candidate = self._models_dir / f"{stem}{ext}"
-            if candidate.exists():
+        exact = self._models_dir / f"{stem}.index"
+        if exact.exists():
+            return str(exact)
+
+        casefold_stem = stem.casefold()
+        candidates = sorted(
+            path for path in self._models_dir.iterdir()
+            if path.is_file() and path.suffix.casefold() == ".index"
+        )
+        for candidate in candidates:
+            if candidate.stem.casefold() == casefold_stem:
                 return str(candidate)
+        if len(candidates) == 1:
+            return str(candidates[0])
         return None
 
     def deactivate_model(self) -> None:
@@ -290,7 +309,7 @@ class ModelManager:
 
         if isinstance(processor, RvcProcessor):
             f0_method = settings.get("f0_method", DEFAULT_F0_METHOD)
-            sample_rate = int(settings.get("sample_rate", 40000))
+            sample_rate = int(settings.get("sample_rate", app_settings.SAMPLE_RATE))
             stream_id = settings.get("stream_id")
             return processor.process(
                 audio,

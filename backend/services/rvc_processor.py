@@ -2,7 +2,8 @@ import importlib
 import logging
 import os
 import threading
-from contextlib import nullcontext
+import time
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -88,10 +89,78 @@ class _RuntimeConfig:
 @dataclass(slots=True)
 class _StreamState:
     audio_16k: np.ndarray
+    output_tail: np.ndarray
+
+
+class _CachedIndex:
+    """A FAISS index whose full vector table is reconstructed only once."""
+
+    def __init__(self, index: Any) -> None:
+        self._index = index
+        self._vectors: np.ndarray | None = None
+
+    def reconstruct_n(self, start: int, count: int) -> np.ndarray:
+        if start != 0 or count != self._index.ntotal:
+            return self._index.reconstruct_n(start, count)
+        if self._vectors is None:
+            self._vectors = self._index.reconstruct_n(0, self._index.ntotal)
+        return self._vectors
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._index, name)
+
+
+class _CachingFaiss:
+    """Stand-in for the ``faiss`` module inside the upstream pipeline.
+
+    The upstream ``Pipeline.pipeline`` calls ``faiss.read_index`` and then
+    ``reconstruct_n`` over the whole index on *every* call. For realtime
+    streaming that is a disk read plus a copy of every vector per chunk,
+    which alone can exceed the chunk budget. This proxy memoises both, keyed
+    by path and modification time so a replaced index file is picked up.
+    """
+
+    _MAX_ENTRIES = 2
+
+    def __init__(self, faiss_module: Any) -> None:
+        self._faiss = faiss_module
+        self._cache: dict[tuple[str, int], _CachedIndex] = {}
+        self._lock = threading.Lock()
+
+    def read_index(self, path: str, *args: Any) -> _CachedIndex:
+        try:
+            key = (str(path), os.stat(path).st_mtime_ns)
+        except OSError:
+            return _CachedIndex(self._faiss.read_index(path, *args))
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached is None:
+                if len(self._cache) >= self._MAX_ENTRIES:
+                    self._cache.pop(next(iter(self._cache)))
+                cached = _CachedIndex(self._faiss.read_index(path, *args))
+                self._cache[key] = cached
+            return cached
+
+    def clear(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._faiss, name)
 
 
 class RvcProcessor:
     """Real RVC inference processor backed by the official RVC runtime."""
+
+    # Overlap between consecutive streaming windows (see _stream_crossfade).
+    STREAM_CROSSFADE_MS = 10.0
+    # Default reflect padding per side for streaming windows (seconds); the
+    # instance value comes from settings.RVC_STREAM_PAD_SECONDS. Upstream pads
+    # every call by x_pad (1-3 s per side), sized for whole-file renders; for
+    # an 85 ms chunk that multiplies HuBERT/net_g work several-fold. Real left
+    # context already comes from the lookback, so streaming only needs enough
+    # padding to settle the model edges.
+    STREAM_PAD_SECONDS = 0.1
 
     def __init__(self, model_path: str, index_path: str | None = None) -> None:
         self._model_path = Path(model_path)
@@ -104,6 +173,11 @@ class RvcProcessor:
             0, int(round(settings.RVC_STREAM_CONTEXT_SECONDS * 16000))
         )
         self._index_rate = float(settings.RVC_INDEX_RATE)
+        # Whole 10 ms frames, at least one, so pad lengths stay frame-aligned.
+        self.STREAM_PAD_SECONDS = max(1, round(float(settings.RVC_STREAM_PAD_SECONDS) * 100)) / 100.0
+        # Cleared by warm_up() when index retrieval would push realtime
+        # inference past the chunk budget. Offline renders always use it.
+        self._realtime_index_enabled = True
         self._filter_radius = int(settings.RVC_FILTER_RADIUS)
         self._rms_mix_rate = float(settings.RVC_RMS_MIX_RATE)
         self._protect = float(settings.RVC_PROTECT)
@@ -201,7 +275,12 @@ class RvcProcessor:
             )
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             device = "mps"
+            is_half = True
 
+        # Upstream RVC budgets. x_pad is the reflect padding (in seconds) the
+        # pipeline adds on *each side* of every inference window, so it is paid
+        # on every realtime chunk: keep the upstream values, which are what the
+        # pipeline's edge trimming is tuned for.
         if gpu_mem is not None and gpu_mem <= 4:
             x_pad, x_query, x_center, x_max = 1, 5, 30, 32
         elif is_half:
@@ -306,6 +385,10 @@ class RvcProcessor:
         net_g = net_g.eval().to(self._runtime.device)
         self._net_g = net_g.half() if self._runtime.is_half else net_g.float()
         self._pipeline = pipeline_module.Pipeline(self._target_sample_rate, self._runtime)
+        if not isinstance(getattr(pipeline_module, "faiss", None), _CachingFaiss) and hasattr(
+            pipeline_module, "faiss"
+        ):
+            pipeline_module.faiss = _CachingFaiss(pipeline_module.faiss)
         self._f0_adapter = F0Adapter(self._pipeline, self._runtime)
 
     def _load_hubert_model(self) -> None:
@@ -344,7 +427,10 @@ class RvcProcessor:
     def _get_stream_state(self, stream_id: str) -> _StreamState:
         state = self._stream_states.get(stream_id)
         if state is None:
-            state = _StreamState(audio_16k=np.zeros(0, dtype=np.float32))
+            state = _StreamState(
+                audio_16k=np.zeros(0, dtype=np.float32),
+                output_tail=np.zeros(0, dtype=np.float32),
+            )
             self._stream_states[stream_id] = state
         return state
 
@@ -388,7 +474,7 @@ class RvcProcessor:
         audio: np.ndarray,
         pitch_shift: float = 0.0,
         f0_method: str = DEFAULT_F0_METHOD,
-        sample_rate: int = 40000,
+        sample_rate: int = 48000,
         stream_id: str | int | None = None,
         index_rate: float | None = None,
         filter_radius: int | None = None,
@@ -435,8 +521,12 @@ class RvcProcessor:
             if use_stream_context and self._context_samples_16k > 0:
                 state = self._get_stream_state(stream_key)
                 state.audio_16k = np.concatenate([state.audio_16k, chunk_16k]).astype(np.float32)
-                if len(state.audio_16k) > self._context_samples_16k:
-                    state.audio_16k = state.audio_16k[-self._context_samples_16k :]
+                # Keep the complete browser block plus a short lookback. The
+                # lookback gives F0 and HuBERT enough left context at every
+                # boundary; only the tail is returned to the browser.
+                context_samples = len(chunk_16k) + self._context_samples_16k
+                if len(state.audio_16k) > context_samples:
+                    state.audio_16k = state.audio_16k[-context_samples:]
                 audio_for_inference = state.audio_16k
             else:
                 # Offline renders (and a zero-length context) infer over exactly
@@ -453,8 +543,9 @@ class RvcProcessor:
                 realtime=use_stream_context,
                 crepe_hop_length=crepe_hop_length,
             ) if adapter else nullcontext()
+            padding = self._stream_padding() if use_stream_context else nullcontext()
             try:
-                with adapter_mode:
+                with adapter_mode, padding:
                     output_i16 = self._pipeline.pipeline(
                         self._hubert_model,
                         self._net_g,
@@ -465,7 +556,10 @@ class RvcProcessor:
                         pitch_shift,
                         method,
                         str(self._index_path) if self._index_path else None,
-                        resolved_index_rate if self._index_path else 0.0,
+                        resolved_index_rate
+                        if self._index_path
+                        and (self._realtime_index_enabled or not use_stream_context)
+                        else 0.0,
                         self._if_f0,
                         resolved_filter_radius,
                         self._target_sample_rate,
@@ -486,10 +580,63 @@ class RvcProcessor:
                 output = resample_audio(output, self._target_sample_rate, sample_rate)
 
             if use_stream_context:
-                output = self._tail_to_length(output, len(audio))
+                output = self._stream_crossfade(
+                    self._get_stream_state(stream_key), output, len(audio), sample_rate
+                )
             else:
                 output = self._head_to_length(output, len(audio))
             return np.clip(output, -1.0, 1.0).astype(np.float32, copy=False)
+
+    @contextmanager
+    def _stream_padding(self):
+        """Temporarily shrink the pipeline's edge padding for one streaming call.
+
+        The caller holds ``self._lock``, so offline renders (which keep the
+        upstream padding) never observe the swapped values.
+        """
+        pipeline = self._pipeline
+        names = ("x_pad", "t_pad", "t_pad2", "t_pad_tgt")
+        if not all(hasattr(pipeline, name) for name in names):
+            yield
+            return
+        saved = {name: getattr(pipeline, name) for name in names}
+        sr = int(getattr(pipeline, "sr", 16000))
+        pipeline.x_pad = self.STREAM_PAD_SECONDS
+        pipeline.t_pad = int(round(sr * self.STREAM_PAD_SECONDS))
+        pipeline.t_pad2 = pipeline.t_pad * 2
+        pipeline.t_pad_tgt = int(round(self._target_sample_rate * self.STREAM_PAD_SECONDS))
+        try:
+            yield
+        finally:
+            for name, value in saved.items():
+                setattr(pipeline, name, value)
+
+    @classmethod
+    def _stream_crossfade(
+        cls,
+        state: _StreamState,
+        output: np.ndarray,
+        chunk_length: int,
+        sample_rate: int,
+    ) -> np.ndarray:
+        """Return ``chunk_length`` samples that join seamlessly with the last chunk.
+
+        Each inference re-renders the lookback, so the window also holds
+        converted audio for the region just before the newest chunk. The newest
+        ``cf`` samples are held back; the next call re-renders that same region
+        (now with right-hand context) and the two renders are crossfaded. This
+        smooths the seam between independently inferred windows without
+        repeating any audio. Cost: a fixed ``STREAM_CROSSFADE_MS`` of latency.
+        """
+        cf = min(chunk_length, int(round(sample_rate * cls.STREAM_CROSSFADE_MS / 1000.0)))
+        window = cls._tail_to_length(output, chunk_length + cf)
+        body = window[:chunk_length].copy()
+        previous = state.output_tail
+        if cf and len(previous) == cf:
+            ramp = np.linspace(0.0, 1.0, cf, dtype=np.float32)
+            body[:cf] = previous * (1.0 - ramp) + body[:cf] * ramp
+        state.output_tail = window[chunk_length:].copy()
+        return body
 
     def release_stream(self, stream_id: str | int | None) -> None:
         """Release cached context for one audio stream."""
@@ -498,16 +645,44 @@ class RvcProcessor:
         with self._lock:
             self._stream_states.pop(str(stream_id), None)
 
-    def warm_up(self, sample_rate: int = 40000, chunk_size: int = 4096) -> None:
-        """Run one silent inference so the first live chunk does not pay setup cost."""
+    def warm_up(
+        self,
+        sample_rate: int | None = None,
+        chunk_size: int | None = None,
+        f0_method: str = DEFAULT_F0_METHOD,
+    ) -> None:
+        """Prime kernels and caches, then time one realtime chunk.
+
+        The first pass pays one-off setup (CUDA kernels, HuBERT/net_g graphs,
+        F0 model load) so the first live chunk does not. The second pass is
+        timed against the chunk budget; when index retrieval would make
+        realtime inference slower than the audio it produces, the index is
+        disabled for streaming (file conversion still uses it).
+        """
+        sample_rate = int(sample_rate or settings.SAMPLE_RATE)
+        chunk_size = int(chunk_size or settings.CHUNK_SIZE)
+        silence = np.zeros(chunk_size, dtype=np.float32)
         try:
-            self.process(
-                np.zeros(chunk_size, dtype=np.float32),
-                pitch_shift=0.0,
-                f0_method="pm",
-                sample_rate=sample_rate,
-                stream_id="__warmup__",
-            )
+            self.process(silence, f0_method=f0_method, sample_rate=sample_rate,
+                         stream_id="__warmup__")
+            started = time.perf_counter()
+            self.process(silence, f0_method=f0_method, sample_rate=sample_rate,
+                         stream_id="__warmup__")
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            budget_ms = chunk_size * 1000.0 / max(sample_rate, 1)
+
+            if self._index_path and elapsed_ms > budget_ms * 1.1:
+                self._realtime_index_enabled = False
+                logger.warning(
+                    "RVC index disabled for realtime streaming: %.1f ms processing "
+                    "for a %.1f ms chunk (f0=%s); offline conversion keeps the index",
+                    elapsed_ms, budget_ms, f0_method,
+                )
+            else:
+                logger.info(
+                    "RVC warm-up complete: %.1f ms processing for %.1f ms chunk budget (f0=%s)",
+                    elapsed_ms, budget_ms, f0_method,
+                )
         finally:
             self.release_stream("__warmup__")
 
@@ -540,6 +715,7 @@ class RvcProcessor:
             ).items() if info.get("available")],
             "speakers": self._speaker_count,
             "index": self._index_path.name if self._index_path else None,
+            "realtime_index": self._realtime_index_enabled,
             "device": self._runtime.device,
             "half_precision": self._runtime.is_half,
         }

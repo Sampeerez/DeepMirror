@@ -20,7 +20,7 @@ import {
 } from '../lib/performance';
 
 const SAMPLE_RATE_OPTIONS = [32000, 40000, 44100, 48000];
-const CHUNK_SIZE_OPTIONS = [1024, 2048, 4096, 8192];
+const CHUNK_SIZE_OPTIONS = [1024, 2048, 4096, 8192, 16384];
 
 const THEME_OPTIONS = [
   { value: 'light', label: 'Light', Icon: Sun },

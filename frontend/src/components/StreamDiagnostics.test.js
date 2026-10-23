@@ -9,7 +9,7 @@ it('clears a recent-drop warning even when parent props are recreated', () => {
   vi.useFakeTimers();
   const props = () => ({ streamInfo: { sampleRate: 48000, chunkSize: 2048 }, transport: { dropped: 1 } });
   const view = render(React.createElement(StreamDiagnostics, props()));
-  expect(screen.getByText(/Recent audio discontinuities/)).toBeTruthy();
+  expect(screen.getByText(/Frames were lost before playback/)).toBeTruthy();
   view.rerender(React.createElement(StreamDiagnostics, props()));
   act(() => vi.advanceTimersByTime(5100));
   expect(screen.queryByText(/Recent audio discontinuities/)).toBeNull();

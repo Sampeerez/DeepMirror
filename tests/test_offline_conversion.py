@@ -60,6 +60,7 @@ def make_processor(pipeline=None, context_seconds=None):
     p._hubert_model = object()
     p._net_g = object()
     p._index_path = None
+    p._realtime_index_enabled = True
     p._speaker_id = 0
     p._if_f0 = 1
     p._version = "v2"
@@ -140,19 +141,21 @@ class TestOfflineFullFileInference:
 
 
 class TestStreamingPathUnchanged:
-    def test_streaming_window_is_capped_by_the_context_setting(self):
+    def test_streaming_window_is_capped_at_chunk_plus_lookback(self):
         pipe = FakePipeline()
         processor = make_processor(pipe)
         chunk = np.ones(4096, dtype=np.float32)
         chunk_16k = int(round(len(chunk) * 16000 / SAMPLE_RATE))
+        cap = chunk_16k + processor._context_samples_16k
 
-        # The window starts as just the chunk and grows until it hits the cap.
+        # The window starts as just the chunk and grows until it hits the cap:
+        # the whole newest chunk plus RVC_STREAM_CONTEXT_SECONDS of lookback.
         for _ in range(6):
             processor.process(chunk, sample_rate=SAMPLE_RATE, stream_id="s1")
 
         assert pipe.seen_lengths[0] == chunk_16k
-        assert max(pipe.seen_lengths) == processor._context_samples_16k
-        assert all(n <= processor._context_samples_16k for n in pipe.seen_lengths)
+        assert max(pipe.seen_lengths) == cap
+        assert all(n <= cap for n in pipe.seen_lengths)
 
     def test_streaming_accumulates_context_across_chunks(self):
         pipe = FakePipeline()
@@ -190,8 +193,8 @@ class TestStreamingPathUnchanged:
 
         processor.process(long_input, sample_rate=SAMPLE_RATE, stream_id="s")
 
-        # Without the flag a long buffer is still clipped to the context window.
-        assert pipe.seen_lengths[0] == processor._context_samples_16k
+        # Without the flag the buffer is treated as one live chunk.
+        assert pipe.seen_lengths[0] == int(round(len(long_input) * 16000 / SAMPLE_RATE))
         assert processor._stream_states, "streaming mode keeps per-stream state"
 
 
@@ -372,3 +375,118 @@ class TestAdvancedSettingsReachThePipeline:
         assert args[self.INDEX_RATE] == pytest.approx(1.0)
         assert args[self.FILTER_RADIUS] == 0
         assert args[self.PROTECT] == pytest.approx(0.5)
+
+
+class IdentityPipeline:
+    """Returns its 16 kHz input unchanged, so stream continuity is exact."""
+
+    def pipeline(self, _hubert, _net_g, _sid, audio_16k, _key, _times, *args):
+        return np.round(np.asarray(audio_16k) * 32767.0).astype(np.int16)
+
+
+class TestStreamingRegressions:
+    """The streaming path must produce audio, and join chunks without seams."""
+
+    RATE = 16000  # no resampling, so the identity pipeline is sample-exact
+
+    def _processor(self):
+        processor = make_processor(IdentityPipeline())
+        processor._target_sample_rate = self.RATE
+        return processor
+
+    def test_streaming_returns_audio_not_an_error(self):
+        """Regression: an undefined name after inference muted every chunk."""
+        processor = self._processor()
+        chunk = np.full(1024, 0.25, dtype=np.float32)
+        for _ in range(3):
+            out = processor.process(chunk, sample_rate=self.RATE, stream_id="s")
+        assert len(out) == len(chunk)
+        assert np.allclose(out, 0.25, atol=1e-3)
+
+    def test_consecutive_chunks_reconstruct_the_input_with_a_fixed_delay(self):
+        processor = self._processor()
+        t = np.arange(16 * 1024) / self.RATE
+        signal = (0.5 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32)
+
+        out = np.concatenate([
+            processor.process(block, sample_rate=self.RATE, stream_id="s")
+            for block in signal.reshape(-1, 1024)
+        ])
+
+        delay = int(round(self.RATE * RvcProcessor.STREAM_CROSSFADE_MS / 1000.0))
+        assert len(out) == len(signal)
+        # No repeated or dropped samples anywhere, including every seam.
+        assert np.max(np.abs(out[delay:] - signal[:-delay])) < 1e-3
+
+    def test_release_resets_the_held_back_tail(self):
+        processor = self._processor()
+        chunk = np.full(1024, 0.5, dtype=np.float32)
+        processor.process(chunk, sample_rate=self.RATE, stream_id="s")
+        processor.release_stream("s")
+        assert "s" not in processor._stream_states
+
+    def test_warm_up_leaves_no_stream_state(self):
+        processor = self._processor()
+        processor._realtime_index_enabled = True
+        processor.warm_up(sample_rate=self.RATE, chunk_size=1024)
+        assert processor._stream_states == {}
+        assert processor._realtime_index_enabled is True
+
+
+class PaddedIdentityPipeline(IdentityPipeline):
+    """Exposes the upstream padding attributes and records what each call saw."""
+
+    def __init__(self):
+        self.sr, self.x_pad = 16000, 1
+        self.t_pad, self.t_pad2, self.t_pad_tgt = 16000, 32000, 16000
+        self.seen_pads = []
+
+    def pipeline(self, *args):
+        self.seen_pads.append(self.t_pad)
+        return super().pipeline(*args)
+
+
+class TestStreamingPadding:
+    def test_streaming_uses_a_short_pad_and_restores_upstream_values(self):
+        pipe = PaddedIdentityPipeline()
+        processor = make_processor(pipe)
+        processor._target_sample_rate = 16000
+        chunk = np.full(1024, 0.1, dtype=np.float32)
+
+        processor.process(chunk, sample_rate=16000, stream_id="s")
+        processor.process(chunk, sample_rate=16000, use_stream_context=False)
+
+        short = int(round(16000 * RvcProcessor.STREAM_PAD_SECONDS))
+        assert pipe.seen_pads == [short, 16000], "offline keeps the upstream pad"
+        assert (pipe.x_pad, pipe.t_pad, pipe.t_pad2, pipe.t_pad_tgt) == (1, 16000, 32000, 16000)
+
+
+class TestFaissCache:
+    def test_index_is_read_and_reconstructed_once(self, tmp_path):
+        from backend.services.rvc_processor import _CachingFaiss
+
+        calls = {"read": 0, "reconstruct": 0}
+
+        class FakeIndex:
+            ntotal = 3
+
+            def reconstruct_n(self, start, count):
+                calls["reconstruct"] += 1
+                return np.zeros((count, 2), dtype=np.float32)
+
+            def search(self, npy, k):
+                return "searched"
+
+        class FakeFaiss:
+            def read_index(self, path):
+                calls["read"] += 1
+                return FakeIndex()
+
+        path = tmp_path / "model.index"
+        path.write_bytes(b"x")
+        faiss = _CachingFaiss(FakeFaiss())
+        for _ in range(3):
+            index = faiss.read_index(str(path))
+            index.reconstruct_n(0, index.ntotal)
+        assert calls == {"read": 1, "reconstruct": 1}
+        assert index.search(None, k=8) == "searched"

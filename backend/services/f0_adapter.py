@@ -31,9 +31,34 @@ def _fit_f0(values: Any, length: int) -> np.ndarray:
     return np.pad(values, (before, length - len(values) - before))
 
 
+def _suppress_octave_spikes(pitchf: np.ndarray) -> np.ndarray:
+    """Replace isolated single-frame octave errors with their neighbours' pitch.
+
+    Neural trackers occasionally jump an octave (or a fifth) for one frame,
+    which RVC renders as a sharp squeak. A frame is corrected only when both
+    neighbours are voiced, agree with each other within ~4 semitones, and the
+    frame sits more than ~11 semitones away from them, so genuine glides and
+    voiced/unvoiced transitions are left untouched.
+    """
+    if len(pitchf) < 3:
+        return pitchf
+    prev, nxt = pitchf[:-2], pitchf[2:]
+    mid = pitchf[1:-1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        reference = np.sqrt(prev * nxt)
+        neighbours_agree = np.abs(np.log2(prev / nxt)) < 1.0 / 3.0
+        deviation = np.abs(np.log2(mid / reference))
+    spike = (prev > 0) & (nxt > 0) & (mid > 0) & neighbours_agree & (deviation > 0.9)
+    if not spike.any():
+        return pitchf
+    fixed = pitchf.copy()
+    fixed[1:-1][spike] = reference[spike]
+    return fixed
+
+
 def _pitch_pair(f0: Any, length: int, semitones: float) -> tuple[np.ndarray, np.ndarray]:
-    pitchf = _fit_f0(f0, length)
-    pitchf *= float(2 ** (float(semitones) / 12.0))
+    pitchf = _suppress_octave_spikes(_fit_f0(f0, length))
+    pitchf = pitchf * float(2 ** (float(semitones) / 12.0))
     pitchf = np.clip(pitchf, 0.0, F0_MAX * 4).astype(np.float32, copy=False)
     mel_min = 1127.0 * math.log(1.0 + F0_MIN / 700.0)
     mel_max = 1127.0 * math.log(1.0 + F0_MAX / 700.0)

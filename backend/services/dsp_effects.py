@@ -508,6 +508,45 @@ class GainEffect:
         return (x * (10.0 ** (db / 20.0))).astype(np.float32)
 
 
+class LimiterEffect:
+    """Block-based peak limiter: instant attack, smooth release.
+
+    Each 64-sample block gets a gain no larger than ``threshold / peak`` of
+    that block, so the output never exceeds the threshold. Gain recovers with
+    an exponential release between blocks, which keeps the gain changes far
+    below audible zipper rates. State carries across chunks.
+    """
+
+    BLOCK = 64
+
+    def __init__(self, sample_rate: int) -> None:
+        self.sr = sample_rate
+        self._gain = 1.0
+        # ~60 ms release time constant, expressed per block.
+        self._release = math.exp(-self.BLOCK / (sample_rate * 0.060))
+
+    def process(self, x: np.ndarray, params: dict) -> np.ndarray:
+        threshold_db = _clipf(params.get("threshold"), -12.0, 0.0, -1.0)
+        threshold = 10.0 ** (threshold_db / 20.0)
+        n = len(x)
+        n_blocks = math.ceil(n / self.BLOCK)
+        padded = np.zeros(n_blocks * self.BLOCK, dtype=np.float32)
+        padded[:n] = x
+        peaks = np.max(np.abs(padded.reshape(n_blocks, self.BLOCK)), axis=1)
+        ceilings = np.minimum(1.0, threshold / np.maximum(peaks, 1e-9))
+
+        gains = np.empty(n_blocks, dtype=np.float32)
+        gain = self._gain
+        release = self._release
+        for i in range(n_blocks):
+            recovered = 1.0 - (1.0 - gain) * release
+            gain = min(recovered, float(ceilings[i]))
+            gains[i] = gain
+        self._gain = float(gain)
+
+        return (x * np.repeat(gains, self.BLOCK)[:n]).astype(np.float32)
+
+
 # Post-chain processing order. The gate runs pre-model (see pre_process).
 POST_CHAIN_ORDER = (
     "robot",
@@ -521,6 +560,8 @@ POST_CHAIN_ORDER = (
     "eq",
     "compressor",
     "gain",
+    # Last, so no later stage can push peaks back over the ceiling.
+    "limiter",
 )
 
 KNOWN_EFFECTS = POST_CHAIN_ORDER + ("gate",)
@@ -551,6 +592,7 @@ class EffectsChain:
             "eq": EqEffect(self.sr),
             "compressor": CompressorEffect(self.sr),
             "gain": GainEffect(),
+            "limiter": LimiterEffect(self.sr),
             "gate": GateEffect(self.sr),
         }
 

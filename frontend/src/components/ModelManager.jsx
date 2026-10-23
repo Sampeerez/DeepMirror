@@ -324,6 +324,9 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true }
                       )}
                       {details?.f0 === true && <MetaBadge>F0</MetaBadge>}
                       {details?.device && <MetaBadge>{details.device}</MetaBadge>}
+                      {details?.realtime_index === false && (
+                        <MetaBadge>Realtime index off</MetaBadge>
+                      )}
                     </div>
                   </div>
 

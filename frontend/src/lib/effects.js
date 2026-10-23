@@ -104,6 +104,14 @@ export const EFFECT_DEFS = [
       { key: 'db', label: 'Gain', min: -24, max: 24, step: 0.5, default: 0, unit: 'dB' },
     ],
   },
+  {
+    key: 'limiter',
+    label: 'Limiter',
+    tagline: 'Peak ceiling after every other stage',
+    params: [
+      { key: 'threshold', label: 'Ceiling', min: -12, max: 0, step: 0.5, default: -1, unit: 'dB' },
+    ],
+  },
 ];
 
 export function defaultEffects() {

@@ -70,8 +70,10 @@ const DEFAULT_RUNTIME_INFO = {
     cudaVersion: null,
   },
 };
+// Largest buffer GlobalSettings offers; see mergeRuntimeConfig.
+const MAX_STORED_CHUNK_SIZE = 16384;
 const DEFAULT_RUNTIME_CONFIG = {
-  sampleRate: 40000,
+  sampleRate: 48000,
   chunkSize: 4096,
   silenceSaver: true,
   silenceThresholdDb: -52,
@@ -122,10 +124,15 @@ function mergeRuntimeConfig(config, stored = null) {
     config?.silence_threshold_db,
     DEFAULT_RUNTIME_CONFIG.silenceThresholdDb
   );
+  const storedChunkSize = normalizePositiveInt(stored?.chunkSize, baseChunkSize);
+  // A short-lived build stored 0.5-1 s buffers, which delay output by seconds
+  // and starve playback. Anything above the largest offered buffer goes back
+  // to the server default.
+  const chunkSize = storedChunkSize > MAX_STORED_CHUNK_SIZE ? baseChunkSize : storedChunkSize;
 
   return {
     sampleRate: normalizePositiveInt(stored?.sampleRate, baseSampleRate),
-    chunkSize: normalizePositiveInt(stored?.chunkSize, baseChunkSize),
+    chunkSize,
     silenceSaver: typeof stored?.silenceSaver === 'boolean'
       ? stored.silenceSaver
       : baseSilenceSaver,
@@ -134,6 +141,8 @@ function mergeRuntimeConfig(config, stored = null) {
       baseSilenceThresholdDb
     ),
     f0Methods: normalizeF0Capabilities(config?.f0_methods),
+    defaultF0Method: typeof config?.default_f0_method === 'string' ? config.default_f0_method : null,
+    hardwareOptimization: config?.hardware_optimization || null,
     runtime: {
       rvc: config?.runtime?.rvc ?? null,
       onnx: {
@@ -170,9 +179,31 @@ function persistedRuntimeConfig(config) {
   };
 }
 
+// RVC parameters a short-lived build wrote back for every user. Only this
+// exact, untouched combination is migrated, so deliberate tuning survives.
+const LEGACY_FIDELITY_VOICE = { indexRate: 0.85, filterRadius: 5, rmsMixRate: 0.4, protect: 0.4 };
+
 function loadInitialVoice() {
   const stored = readStored(VOICE_STORAGE_KEY);
-  return stored ? { ...DEFAULT_VOICE, ...stored } : { ...DEFAULT_VOICE };
+  if (!stored) return { ...DEFAULT_VOICE };
+  const legacy = Object.entries(LEGACY_FIDELITY_VOICE)
+    .every(([key, value]) => stored[key] === value);
+  if (!legacy) return { ...DEFAULT_VOICE, ...stored };
+  return {
+    ...DEFAULT_VOICE,
+    ...stored,
+    indexRate: DEFAULT_VOICE.indexRate,
+    filterRadius: DEFAULT_VOICE.filterRadius,
+    rmsMixRate: DEFAULT_VOICE.rmsMixRate,
+    protect: DEFAULT_VOICE.protect,
+    // That build also forced Harvest, which cannot keep up in realtime.
+    f0Method: stored.f0Method === 'harvest' ? DEFAULT_VOICE.f0Method : stored.f0Method,
+  };
+}
+
+/** True when the user (or an earlier session) already chose a pitch detector. */
+function hasStoredF0Method() {
+  return typeof readStored(VOICE_STORAGE_KEY)?.f0Method === 'string';
 }
 
 function loadInitialEffects() {
@@ -217,6 +248,8 @@ export default function App() {
     () => new URLSearchParams(window.location.search).has('settings')
   );
   const [voice, setVoice] = useState(loadInitialVoice);
+  // Captured before the first debounced save writes the default back.
+  const adoptServerF0Ref = useRef(!hasStoredF0Method());
   const [effects, setEffects] = useState(loadInitialEffects);
   const [activePresetId, setActivePresetId] = useState(null);
   // Full conversion bypass. Deliberately not persisted: a monitoring toggle
@@ -323,6 +356,13 @@ export default function App() {
   }, [wsStatus, runtimeRefresh]);
 
   useEffect(() => {
+    const current = runtimeConfig.f0Methods.find((method) => method.id === voice.f0Method);
+    if (current?.available) return;
+    const preferred = runtimeConfig.f0Methods.find((method) => method.realtime && method.available);
+    if (preferred) setVoice((previous) => ({ ...previous, f0Method: preferred.id }));
+  }, [runtimeConfig.f0Methods, voice.f0Method]);
+
+  useEffect(() => {
     let cancelled = false;
     const storedConfig = readStored(GLOBAL_SETTINGS_STORAGE_KEY);
 
@@ -334,6 +374,13 @@ export default function App() {
         chunk_size: nextRuntimeConfig.chunkSize,
       });
       setRuntimeConfig(nextRuntimeConfig);
+      // First run only: start from the detector the server recommends for
+      // its hardware (RMVPE on a GPU). An explicit choice is never replaced.
+      const recommended = nextRuntimeConfig.defaultF0Method;
+      if (adoptServerF0Ref.current && recommended) {
+        adoptServerF0Ref.current = false;
+        setVoice((previous) => ({ ...previous, f0Method: recommended }));
+      }
     };
 
     fetchConfig()

@@ -219,8 +219,8 @@ export default function useAudioPipeline(wsHook) {
         audioContextRef.current = audioContext;
 
         // Canonical rate for everything downstream: WebSocket config, WAV
-        // header, record timer. Asking for 40 kHz and getting 48 kHz would
-        // otherwise mis-tune conversion and save recordings at the wrong speed.
+        // header, record timer. Use the actual context rate so conversion and
+        // saved recordings never assume a rate the browser did not provide.
         const actualSampleRate = Math.round(audioContext.sampleRate);
         sampleRateRef.current = actualSampleRate;
         recordLimitRef.current = maxRecordingSamples(actualSampleRate);

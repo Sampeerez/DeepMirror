@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 from backend.main import app
+from backend.services.model_manager import ModelManager
 from backend.routers.websocket import _send_status
 
 # How long the fake load blocks for, and how quickly an unrelated request
@@ -237,7 +238,6 @@ class TestContractsPreserved:
         assert response.status_code == 500
         # The safe-checkpoint refusal message must still reach the user.
         assert "checkpoint refused" in response.json()["detail"]
-
     @pytest.mark.anyio
     @pytest.mark.parametrize("failing", [FileNotFoundError("nope")], indirect=True)
     async def test_delete_missing_model_is_404(self, client, failing):
@@ -278,6 +278,21 @@ class TestContractsPreserved:
                 del app.state.model_manager
             else:
                 app.state.model_manager = previous
+
+
+def test_model_manager_uses_unique_index_with_generated_name(tmp_path):
+    checkpoint = tmp_path / "Quevedo_e300_s19200.pth"
+    checkpoint.write_bytes(b"checkpoint")
+    index = tmp_path / "added_IVF1884_Flat_nprobe_1_Quevedo_v2.index"
+    index.write_bytes(b"index")
+
+    manager = ModelManager(str(tmp_path))
+
+    models = manager.list_models()
+    assert len(models) == 1
+    assert models[0]["name"] == checkpoint.name
+    assert models[0]["has_index"] is True
+    assert manager._find_index_file(checkpoint.name) == str(index)
 
 
 class TestManagerLockSemantics:

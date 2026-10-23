@@ -37,8 +37,13 @@ export default function StreamDiagnostics({ streamInfo, playbackStats, transport
         </div>)}
       </dl>
       {streamInfo && (recentIssue || serverMs > chunkMs) && <p role="status" className="mt-3 text-xs text-warn-fg">
-        {serverMs > chunkMs ? 'Processing exceeds the capture interval. Try a lighter F0 method or a larger buffer.'
-          : 'Recent audio discontinuities detected. Check CPU load, output device and buffer size.'}
+        {serverMs > chunkMs
+          ? 'Processing exceeds the capture interval. Select Stable, use a lighter F0 method, or a larger buffer.'
+          : transport.dropped || transport.timedOut
+            ? 'Frames were lost before playback. Keep the selected model loaded and reduce background CPU load.'
+            : playbackStats?.underruns
+              ? 'Playback ran out of converted audio. Try the Stable profile; check the output device if it persists.'
+              : 'Recent audio discontinuities detected. Check the output device and browser audio load.'}
       </p>}
     </details>
   );

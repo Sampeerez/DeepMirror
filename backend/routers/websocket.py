@@ -105,8 +105,8 @@ async def audio_websocket(websocket: WebSocket) -> None:
     # Connection-local state
     conn_state: dict = {
         "stream_id": str(client_id),
-        "sample_rate": 40000,
-        "chunk_size": 4096,
+        "sample_rate": settings.SAMPLE_RATE,
+        "chunk_size": settings.CHUNK_SIZE,
         "pitch_shift": 0.0,
         "formant_shift": 0.0,
         "f0_method": DEFAULT_F0_METHOD,
@@ -387,11 +387,20 @@ def _process_frame_sync(audio, model_manager, conn_state: dict) -> tuple:
                 conn_state["status_model_inference_frames"] = (
                     conn_state.get("status_model_inference_frames", 0) + 1
                 )
-        except Exception:
-            if not conn_state.get("failure_logged"):
+        except Exception as exc:
+            # Log the full traceback once per distinct failure type, so a
+            # persistent fault does not flood the log but a new one is never
+            # hidden behind an earlier one.
+            failure = type(exc).__name__
+            if conn_state.get("failure_logged") != failure:
                 logger.exception("Model inference failed; muting stream %s", conn_state["stream_id"])
-            conn_state["failure_logged"] = True
-            conn_state["processing_error"] = "Model inference failed. Output is muted. Check runtime readiness, F0 assets and server logs, then reload the model."
+            conn_state["failure_logged"] = failure
+            # Only the exception type reaches the client: messages can carry
+            # filesystem paths or other server-private details.
+            conn_state["processing_error"] = (
+                f"Model inference failed ({failure}). Output is muted. Check runtime "
+                "readiness, F0 assets and server logs, then reload the model."
+            )
             conn_state["inference_sleeping"] = False
             # Do not run post-effects: delay/reverb tails could leak previous audio.
             conn_state["chain"] = None

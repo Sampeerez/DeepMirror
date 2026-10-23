@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -12,10 +13,11 @@ from backend.routers import convert, github_star, models, presets, runtime_setup
 from backend.security import cors_origins
 from backend.services.model_manager import ModelManager
 from backend.services.preset_store import PresetStore
-from backend.services.f0_registry import f0_capabilities, runtime_readiness
+from backend.services.f0_registry import f0_capabilities, resolve_default_f0_method, runtime_readiness
 from backend.services.update_activity import UpdateGuardMiddleware
 from backend.services.update_service import UpdateService
 from backend.services.runtime_setup_service import RuntimeSetupService
+from backend.services.hardware_detector import get_hardware_optimized_config
 from backend.version import VERSION
 
 _onnx_available = False
@@ -182,6 +184,11 @@ async def health_check():
 
 @app.get("/api/config")
 async def get_config():
+    # Cached after the first call; the first probe imports torch, so keep it
+    # off the event loop.
+    hw_config = await asyncio.to_thread(get_hardware_optimized_config)
+    f0_methods = f0_capabilities()
+
     return {
         "version": app.version,
         "update_instance": app.state.updates.instance,
@@ -197,7 +204,9 @@ async def get_config():
             "torch": _get_torch_runtime_info(),
             "rvc": runtime_readiness(),
         },
-        "f0_methods": f0_capabilities(),
+        "f0_methods": f0_methods,
+        "default_f0_method": resolve_default_f0_method({item["id"]: item for item in f0_methods}),
+        "hardware_optimization": hw_config,
     }
 
 
