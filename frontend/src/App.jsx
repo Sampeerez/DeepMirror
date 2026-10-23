@@ -13,6 +13,7 @@ import PresetBar from './components/PresetBar';
 import Recorder from './components/Recorder';
 import FileConverter from './components/FileConverter';
 import RuntimeReadiness from './components/RuntimeReadiness';
+import TrainingStudio from './components/TrainingStudio';
 import useWebSocket from './hooks/useWebSocket';
 import useAudioPipeline from './hooks/useAudioPipeline';
 import useAudioDevices from './hooks/useAudioDevices';
@@ -348,6 +349,10 @@ export default function App() {
         />
         <RuntimeReadiness config={runtimeConfig} checking={runtime.checking} error={runtime.error}
           onRefresh={runtime.refresh} />
+      </div>
+
+      <div {...panelProps('training')} className="mx-auto max-w-5xl animate-fade-in-up">
+        <TrainingStudio active={tab === 'training'} onActiveModelChange={setActiveModel} />
       </div>
 
       <div {...panelProps('converter')} className="mx-auto max-w-3xl animate-fade-in-up">

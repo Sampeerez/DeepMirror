@@ -12,13 +12,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.api import convert, models, presets, stream, system
+from backend.api import convert, models, presets, stream, system, training
 from backend.assets import AssetStore, legacy_asset_directories
 from backend.config import ROOT, Settings
 from backend.config import settings as default_settings
 from backend.model_manager import ModelManager
 from backend.presets import PresetStore
 from backend.security import cors_origins
+from backend.training.jobs import TrainingJobs
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         try:
             yield
         finally:
+            app.state.training.close()
             app.state.model_manager.close()
 
     app = FastAPI(title="OpenVoiceChanger", version=app_version(), lifespan=lifespan)
@@ -59,6 +61,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
     app.state.assets = assets
     app.state.model_manager = manager or ModelManager(settings, assets)
     app.state.preset_store = PresetStore(settings.PRESETS_PATH)
+    app.state.training = TrainingJobs(settings)
 
     app.add_middleware(
         CORSMiddleware,
@@ -67,7 +70,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for module in (system, models, presets, convert, stream):
+    for module in (system, models, presets, convert, stream, training):
         app.include_router(module.router)
 
     if settings.FRONTEND_DIST.is_dir():

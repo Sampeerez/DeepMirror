@@ -16,6 +16,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
+  <a href="#train-your-own-voice">Train a voice</a> •
   <a href="#how-the-realtime-engine-works">Realtime engine</a> •
   <a href="#configuration">Configuration</a> •
   <a href="#development">Development</a> •
@@ -68,6 +69,9 @@ OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OV
 - Output recorder (<kbd>R</kbd>) with a take library stored in the browser; <kbd>B</kbd> toggles an A/B bypass
 - Model-free DSP mode: pitch shifting and effects with no voice loaded
 
+### Voice training
+- **Train** tab: upload recordings of one speaker and get a ready-to-use voice (`.pth` + `.index`), trained on your GPU; see [Train your own voice](#train-your-own-voice)
+
 ### Offline converter
 - Render a whole file (WAV, FLAC, OGG, MP3, ...) through the active voice, the Voice Lab settings and the effect rack, with RVC's full padding and quiet-point splitting for maximum quality
 
@@ -91,6 +95,27 @@ OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OV
 
 ### Settings
 ![Settings: quality profiles, Silence Saver and engine status](docs/images/settings-modal.png)
+
+## Train your own voice
+
+Open the **Train** tab, drop recordings of one speaker, name the voice and press **Start
+training**. Everything else is automatic:
+
+1. **Base models.** The official RVC v2 pretrained generator and discriminator (40 or 48 kHz) are downloaded once and verified by SHA-256. Fine-tuning from them is what makes a few minutes of audio enough.
+2. **Data preparation.** Audio is converted to mono and high-pass filtered, cut at pauses, split into overlapping 3.7 s segments and softly peak-normalised. Clipped segments are dropped.
+3. **Features.** HuBERT content features and RMVPE pitch are extracted on the GPU.
+4. **Index.** The retrieval index is built straight away, in the standard faiss format, so it also works in other RVC tools.
+5. **Training.** The GAN (generator, multi-period discriminator, mel + KL + feature-matching losses) trains for the epochs you chose. The batch size follows free GPU memory and halves automatically if memory runs out. Precision is chosen per GPU: bf16 on RTX 30 and newer, FP16 where it is reliable, FP32 on GTX 16xx and older, where FP16 is slower and unstable.
+6. **Saving.** The voice is saved to **Models** every N epochs and at the end. **Stop and save** keeps the work done, and **Continue training** adds more epochs later, even after a restart.
+
+**Recordings:** 10–30 minutes of clean, dry speech from one person is ideal; 1 minute
+is the minimum. Avoid music, reverb, noise and other voices. Vary intonation: questions,
+calm and lively speech. **Epochs:** 200–500 suits 10–30 minutes of audio; more epochs
+capture finer detail but can over-fit tiny datasets.
+
+Training runs in its own process, so the studio keeps working. Live conversion is slower
+while the GPU trains. On a GTX 1660 SUPER one epoch over 6 minutes of speech takes about
+35 s; RTX cards are several times faster. Without a GPU, training works but is very slow.
 
 ## How the realtime engine works
 
@@ -162,9 +187,10 @@ backend/
   model_manager.py   Voice library and the active voice
   presets.py         Built-in and user presets
   security.py        Origin checks for CORS and the WebSocket
-  api/               HTTP + WebSocket endpoints (models, presets, convert, stream, system)
+  api/               HTTP + WebSocket endpoints (models, presets, convert, stream, training, system)
   audio/             Wire protocol, soxr resampling, realtime streaming (SOLA), DSP effects
   inference/         HuBERT, RVC synthesizers, RMVPE, pitch trackers, index retrieval, pipeline
+  training/          Dataset preparation, index builder, GAN training loop, job manager and worker process
 frontend/            React 19 + Vite 8 + Tailwind 4 studio
 tests/               pytest suite (API, streaming, DSP, inference equivalence)
 start.sh, start.bat  One-command launchers

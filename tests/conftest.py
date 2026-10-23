@@ -53,7 +53,7 @@ class FakeConverter:
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(MODELS_DIR=tmp_path / "models", ASSETS_DIR=tmp_path / "assets",
+    return Settings(MODELS_DIR=tmp_path / "models", ASSETS_DIR=tmp_path / "assets", DATA_DIR=tmp_path / "data",
                     PRESETS_PATH=tmp_path / "presets.json", FRONTEND_DIST=tmp_path / "no-frontend",
                     DEVICE="cpu")
 

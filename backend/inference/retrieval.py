@@ -228,3 +228,35 @@ class FeatureIndex:
         neighbours = self.vectors[rows.clamp_min(0)]
         blended = (neighbours * weights.unsqueeze(-1)).sum(dim=1)
         return blended.to(features.dtype).to(features.device)
+
+
+def write_ivf_flat(path: Path, centroids: np.ndarray, vectors: np.ndarray, assignments: np.ndarray) -> None:
+    """Write an ``IndexIVFFlat`` (L2, nprobe=1) exactly as faiss serialises it.
+
+    ``assignments[i]`` is the inverted list of ``vectors[i]``. The file loads
+    in faiss itself and in other RVC tools, not only in :func:`read_index`.
+    """
+    d = vectors.shape[1]
+    nlist = len(centroids)
+
+    def header(ntotal: int) -> bytes:
+        return struct.pack("<iqqq?i", d, ntotal, 1 << 20, 1 << 20, True, 1)
+
+    order = np.argsort(assignments, kind="stable")
+    sizes = np.bincount(assignments, minlength=nlist).astype("<u8")
+    partial = path.with_suffix(path.suffix + ".part")
+    with partial.open("wb") as out:
+        out.write(b"IwFl" + header(len(vectors)) + struct.pack("<QQ", nlist, 1))
+        out.write(b"IxF2" + header(nlist) + struct.pack("<Q", centroids.size))
+        out.write(np.ascontiguousarray(centroids, dtype="<f4").tobytes())
+        out.write(struct.pack("<bQ", 0, 0))  # no direct map
+        out.write(b"ilar" + struct.pack("<QQ", nlist, d * 4) + b"full")
+        out.write(struct.pack("<Q", nlist) + sizes.tobytes())
+        start = 0
+        for size in sizes.tolist():
+            rows = order[start:start + size]
+            if size:
+                out.write(np.ascontiguousarray(vectors[rows], dtype="<f4").tobytes())
+                out.write(rows.astype("<i8").tobytes())
+            start += size
+    partial.replace(path)

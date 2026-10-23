@@ -1,4 +1,4 @@
-"""Model assets every voice needs: the HuBERT content encoder and RMVPE weights.
+"""Model assets: the HuBERT content encoder and RMVPE weights every voice needs.
 
 They are fetched once from pinned Hugging Face revisions and verified by
 SHA-256 before use. Copies left by earlier OpenVoiceChanger versions are
@@ -11,6 +11,7 @@ import logging
 import shutil
 import threading
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,7 +26,9 @@ def legacy_asset_directories(root: Path) -> list[Path]:
     setup = root / "data" / "rvc-setup"
     return [root / "models" / "assets", setup / "downloads", *sorted(setup.glob("jobs/*/assets"))]
 
-_REVISION = "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/e6d0c1a17da07c33557852f9dfa2bd44cc75737d"
+
+PINNED_REVISION = ("https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/"
+                   "e6d0c1a17da07c33557852f9dfa2bd44cc75737d")
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,9 +41,29 @@ class Asset:
     required: bool
 
 
+def download_verified(asset: Asset, target: Path, on_progress: Callable[[int], None] | None = None) -> None:
+    """Download ``asset`` to ``target`` atomically, verifying its SHA-256; raises on failure."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(target.suffix + ".part")
+    received = 0
+    try:
+        request = urllib.request.Request(asset.url, headers={"User-Agent": "OpenVoiceChanger"})
+        with urllib.request.urlopen(request, timeout=60) as response, partial.open("wb") as out:
+            while block := response.read(1024 * 1024):
+                out.write(block)
+                received += len(block)
+                if on_progress is not None:
+                    on_progress(received)
+        if file_sha256(partial) != asset.sha256:
+            raise RuntimeError(f"{asset.filename}: checksum mismatch")
+        partial.replace(target)
+    finally:
+        partial.unlink(missing_ok=True)
+
+
 ASSETS = (
-    Asset("hubert", "hubert_base.pt", f"{_REVISION}/hubert_base.pt", HUBERT_SHA256, 189507909, True),
-    Asset("rmvpe", "rmvpe.pt", f"{_REVISION}/rmvpe.pt",
+    Asset("hubert", "hubert_base.pt", f"{PINNED_REVISION}/hubert_base.pt", HUBERT_SHA256, 189507909, True),
+    Asset("rmvpe", "rmvpe.pt", f"{PINNED_REVISION}/rmvpe.pt",
           "6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193", 181184272, False),
 )
 
@@ -108,22 +131,16 @@ class AssetStore:
 
     def _download(self, asset: Asset) -> None:
         progress = self._progress[asset.name]
-        target = self.directory / asset.filename
-        partial = target.with_suffix(target.suffix + ".part")
         progress.state, progress.received, progress.error = "downloading", 0, None
         logger.info("Downloading %s (%.0f MB)...", asset.filename, asset.size / 1e6)
+
+        def report(received: int) -> None:
+            progress.received = received
+
         try:
-            request = urllib.request.Request(asset.url, headers={"User-Agent": "OpenVoiceChanger"})
-            with urllib.request.urlopen(request, timeout=60) as response, partial.open("wb") as out:
-                while block := response.read(1024 * 1024):
-                    out.write(block)
-                    progress.received += len(block)
-            if file_sha256(partial) != asset.sha256:
-                raise RuntimeError("checksum mismatch")
-            partial.replace(target)
+            download_verified(asset, self.directory / asset.filename, report)
             progress.state = "ready"
             logger.info("Downloaded %s", asset.filename)
         except Exception as exc:
-            partial.unlink(missing_ok=True)
             progress.state, progress.error = "error", f"{type(exc).__name__}: {exc}"
             logger.error("Could not download %s: %s", asset.filename, exc)

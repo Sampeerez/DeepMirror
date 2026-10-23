@@ -212,7 +212,7 @@ class WaveNet(nn.Module):
 
 
 class CouplingLayer(nn.Module):
-    """Mean-only affine coupling layer (inverse pass only)."""
+    """Mean-only affine coupling layer."""
 
     def __init__(self, channels: int, hidden_channels: int, kernel_size: int, dilation_rate: int,
                  n_layers: int, gin_channels: int) -> None:
@@ -222,11 +222,17 @@ class CouplingLayer(nn.Module):
         self.enc = WaveNet(hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels)
         self.post = nn.Conv1d(hidden_channels, self.half_channels, 1)
 
+    def _mean(self, x0: torch.Tensor, mask: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        return self.post(self.enc(self.pre(x0) * mask, mask, g)) * mask
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        """Training direction (posterior -> prior)."""
+        x0, x1 = torch.split(x, [self.half_channels] * 2, 1)
+        return torch.cat([x0, self._mean(x0, mask, g) + x1 * mask], 1)
+
     def inverse(self, x: torch.Tensor, mask: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         x0, x1 = torch.split(x, [self.half_channels] * 2, 1)
-        h = self.enc(self.pre(x0) * mask, mask, g)
-        mean = self.post(h) * mask
-        return torch.cat([x0, (x1 - mean) * mask], 1)
+        return torch.cat([x0, (x1 - self._mean(x0, mask, g)) * mask], 1)
 
 
 class Flip(nn.Module):
@@ -240,6 +246,14 @@ class ResidualCouplingFlow(nn.Module):
         for _ in range(n_flows):
             self.flows.append(CouplingLayer(channels, hidden_channels, 5, 1, 3, gin_channels))
             self.flows.append(Flip())
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        for flow in self.flows:
+            if isinstance(flow, CouplingLayer):
+                x = flow(x, mask, g)
+            else:
+                x = torch.flip(x, [1])
+        return x
 
     def inverse(self, x: torch.Tensor, mask: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         for flow in reversed(self.flows):

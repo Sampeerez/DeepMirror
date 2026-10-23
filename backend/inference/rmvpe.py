@@ -1,8 +1,7 @@
 """RMVPE pitch estimator (deep U-Net + BiGRU over a log-mel spectrogram).
 
-Ported from RVC's ``rmvpe.py`` (MIT). The mel filterbank is computed here
-(HTK mel scale, Slaney area normalisation, as ``librosa.filters.mel(htk=True)``)
-so librosa is not needed.
+Ported from RVC's ``rmvpe.py`` (MIT). The mel filterbank comes from
+``backend.audio.mel`` (HTK scale, as ``librosa.filters.mel(htk=True)``).
 """
 
 from __future__ import annotations
@@ -14,30 +13,13 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from backend.audio.mel import mel_filterbank
+
 SAMPLE_RATE = 16000
 HOP_LENGTH = 160
 N_MELS = 128
 N_CLASSES = 360
 _CENTS = np.pad(20 * np.arange(N_CLASSES) + 1997.3794084376191, (4, 4))
-
-
-def mel_filterbank(sr: int, n_fft: int, n_mels: int, fmin: float, fmax: float) -> np.ndarray:
-    """Triangular HTK-mel filters with Slaney normalisation, shape ``[n_mels, n_fft//2+1]``."""
-    def hz_to_mel(f: np.ndarray | float) -> np.ndarray:
-        return 2595.0 * np.log10(1.0 + np.asarray(f, dtype=np.float64) / 700.0)
-
-    def mel_to_hz(m: np.ndarray) -> np.ndarray:
-        return 700.0 * (10.0 ** (m / 2595.0) - 1.0)
-
-    fft_freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
-    mel_freqs = mel_to_hz(np.linspace(hz_to_mel(fmin), hz_to_mel(fmax), n_mels + 2))
-    widths = np.diff(mel_freqs)
-    ramps = mel_freqs[:, None] - fft_freqs[None, :]
-    lower = -ramps[:-2] / widths[:-1, None]
-    upper = ramps[2:] / widths[1:, None]
-    weights = np.maximum(0.0, np.minimum(lower, upper))
-    weights *= (2.0 / (mel_freqs[2:n_mels + 2] - mel_freqs[:n_mels]))[:, None]
-    return weights.astype(np.float32)
 
 
 class _ConvBlockRes(nn.Module):
@@ -181,7 +163,7 @@ class Rmvpe:
         model.load_state_dict(torch.load(weights, map_location="cpu", weights_only=True))
         model = model.eval().to(device)
         self.model = model.half() if half else model.float()
-        self.mel_basis = torch.from_numpy(mel_filterbank(SAMPLE_RATE, 1024, N_MELS, 30, 8000)).to(device)
+        self.mel_basis = torch.from_numpy(mel_filterbank(SAMPLE_RATE, 1024, N_MELS, 30, 8000, htk=True)).to(device)
         self.window = torch.hann_window(1024, device=device)
 
     def _log_mel(self, audio: torch.Tensor) -> torch.Tensor:

@@ -87,19 +87,23 @@ export async function fetchModels() {
  * it is the true byte ratio; once the last byte is sent the request sits at 99
  * until the server finishes writing the file and responds.
  */
-export function uploadModel(file, onProgress) {
+/**
+ * POST a multipart form, reporting real upload progress (0..100).
+ *
+ * fetch() cannot observe request-body progress in any shipping browser, so a
+ * large upload would have to be faked; XMLHttpRequest exposes
+ * upload.onprogress. The value sits at 99 once the last byte is sent, until
+ * the server finishes processing and responds.
+ */
+function postFormWithProgress(url, formData, onProgress) {
   return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    formData.append('file', file);
-
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE}/models/upload`);
+    xhr.open('POST', `${API_BASE}${url}`);
     xhr.responseType = 'text';
 
     if (typeof onProgress === 'function') {
       xhr.upload.onprogress = (event) => {
         if (!event.lengthComputable || event.total === 0) return;
-        // Cap below 100: the server still has to persist and register the file.
         onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
       };
       xhr.upload.onload = () => onProgress(99);
@@ -112,27 +116,49 @@ export function uploadModel(file, onProgress) {
       } catch {
         // Response may not be JSON.
       }
-
       if (xhr.status >= 200 && xhr.status < 300) {
         onProgress?.(100);
         resolve(data ?? xhr.responseText ?? null);
         return;
       }
-
-      reject(new ApiError(
-        data?.detail || `Upload failed: ${xhr.status} ${xhr.statusText}`,
-        xhr.status,
-        data
-      ));
+      reject(new ApiError(data?.detail || `Upload failed: ${xhr.status} ${xhr.statusText}`, xhr.status, data));
     };
-
     xhr.onerror = () => reject(new ApiError('Upload failed: network error', 0, null));
     xhr.onabort = () => reject(new ApiError('Upload cancelled', 0, null));
     xhr.ontimeout = () => reject(new ApiError('Upload timed out', 0, null));
-
     xhr.send(formData);
   });
 }
+
+export function uploadModel(file, onProgress) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return postFormWithProgress('/models/upload', formData, onProgress);
+}
+
+// --- Voice training --------------------------------------------------------
+
+export const fetchTrainingInfo = () => request('/training/info', { timeoutMs: 15000 });
+export const fetchTrainingJobs = () => request('/training/jobs', { timeoutMs: 15000 });
+
+export function createTrainingJob({ name, files, sampleRate, epochs, batchSize, saveEvery, overwrite }, onProgress) {
+  const formData = new FormData();
+  formData.append('name', name);
+  for (const audio of files) formData.append('files', audio);
+  formData.append('sample_rate', String(sampleRate));
+  formData.append('epochs', String(epochs));
+  if (batchSize) formData.append('batch_size', String(batchSize));
+  if (saveEvery) formData.append('save_every', String(saveEvery));
+  if (overwrite) formData.append('overwrite', 'true');
+  return postFormWithProgress('/training/jobs', formData, onProgress);
+}
+
+export const stopTrainingJob = (id) => request(`/training/jobs/${id}/stop`, { method: 'POST' });
+export const resumeTrainingJob = (id, epochs) => request(`/training/jobs/${id}/resume`, {
+  method: 'POST',
+  body: JSON.stringify(epochs ? { epochs } : {}),
+});
+export const deleteTrainingJob = (id) => request(`/training/jobs/${id}`, { method: 'DELETE' });
 
 export async function deleteModel(name) {
   return request(`/models/${encodeURIComponent(name)}`, {

@@ -65,6 +65,18 @@ OVC_TORCH=cpu ./start.sh                # CPU용 PyTorch 강제 (Windows: set OV
 ![Converter](docs/images/converter.png)
 ![Settings](docs/images/settings-modal.png)
 
+## 내 목소리 학습하기
+
+**Train** 탭에 한 사람의 녹음을 끌어다 놓고 이름을 정한 뒤 **Start training**을 누르면 됩니다.
+
+1. 공식 RVC v2 사전 학습 모델(40/48 kHz)을 한 번만 내려받아 SHA-256으로 검증합니다. 이를 기반으로 하므로 몇 분의 음성으로도 학습할 수 있습니다.
+2. 음성을 모노·하이패스 처리하고, 무음에서 나눈 뒤 3.7초씩 겹치는 구간으로 자르고 정규화합니다.
+3. GPU에서 HuBERT 특징과 RMVPE 피치를 추출하고, faiss 호환 index를 바로 만듭니다.
+4. 지정한 에포크만큼 GAN을 학습합니다. 배치 크기는 남은 VRAM으로 자동 결정되고 메모리가 부족하면 절반으로 줄입니다. 정밀도는 GPU별로 고릅니다(RTX 30 이상 bf16, GTX 16 이하 fp32).
+5. N 에포크마다, 그리고 끝날 때 **Models**에 저장합니다. **Stop and save**로 중간 저장, **Continue training**으로 나중에 추가 학습할 수 있습니다.
+
+**녹음:** 잔향·잡음 없는 한 사람의 음성 10~30분이 이상적입니다(최소 1분). **에포크:** 10~30분이면 200~500이 적당합니다.
+
 ## 실시간 엔진 동작 방식
 
 1. **롤링 윈도우 재렌더링:** 최근 1초의 입력과 새 청크를 매번 추론해 HuBERT·피치 추정·합성기에 실제 과거 컨텍스트를 제공합니다.

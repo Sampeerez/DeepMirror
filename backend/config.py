@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # --- Storage ------------------------------------------------------------
     MODELS_DIR: Path = ROOT / "models"
     ASSETS_DIR: Path = ROOT / "models" / "assets"
+    DATA_DIR: Path = ROOT / "data"          # training jobs and other studio data
     PRESETS_PATH: Path = ROOT / "data" / "presets.json"
     FRONTEND_DIST: Path = ROOT / "frontend" / "dist"
 
