@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Boxes, FileDown, GraduationCap, Mic2 } from 'lucide-react';
+import { Boxes, FileDown, GraduationCap, Mic2, ScrollText } from 'lucide-react';
 
 // Ids match lib/navigation TAB_IDS; the matching panels in App carry
 // id="panel-<id>" and aria-labelledby="tab-<id>".
@@ -23,6 +23,11 @@ const TABS = [
     id: 'converter',
     label: 'Converter',
     Icon: FileDown,
+  },
+  {
+    id: 'logs',
+    label: 'Logs',
+    Icon: ScrollText,
   },
 ];
 

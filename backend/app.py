@@ -14,15 +14,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.api import convert, models, presets, stream, system, training
+from backend import lifecycle as presence
+from backend.api import convert, logs, models, presets, stream, system, training
 from backend.assets import AssetStore, legacy_asset_directories
 from backend.config import ROOT, Settings
 from backend.config import settings as default_settings
 from backend.frontend_build import MISSING_UI_PAGE
+from backend.lifecycle import Lifecycle
+from backend.logbook import logbook
 from backend.model_manager import ModelManager
 from backend.presets import PresetStore
 from backend.security import cors_origins
 from backend.training.jobs import TrainingJobs
+from backend.virtual_mic import VirtualMic
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +39,7 @@ def app_version() -> str:
 
 
 def create_app(settings: Settings | None = None, *, manager: ModelManager | None = None,
-               on_ready: Callable[[], None] | None = None) -> FastAPI:
+               on_ready: Callable[[], None] | None = None, lifecycle: Lifecycle | None = None) -> FastAPI:
     settings = settings or default_settings
     assets = manager.assets if manager is not None else AssetStore(settings.ASSETS_DIR,
                                                                     legacy_asset_directories(ROOT))
@@ -56,10 +60,15 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
                              daemon=True).start()
         if on_ready is not None:
             on_ready()
+        watcher = asyncio.create_task(app.state.lifecycle.watch()) if app.state.lifecycle.enabled else None
         try:
             yield
         finally:
-            app.state.training.close()
+            if watcher is not None:
+                watcher.cancel()
+            # Closed by closing the page: a training run carries on and exits by itself.
+            app.state.training.close(stop_workers=not app.state.lifecycle.closed_by_idle)
+            app.state.virtual_mic.close()
             app.state.model_manager.close()
 
     app = FastAPI(title="OpenVoiceChanger", version=app_version(), lifespan=lifespan)
@@ -68,6 +77,10 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
     app.state.model_manager = manager or ModelManager(settings, assets)
     app.state.preset_store = PresetStore(settings.PRESETS_PATH)
     app.state.training = TrainingJobs(settings)
+    if logbook not in logging.getLogger().handlers:   # the Logs page works however the app is started
+        logging.getLogger().addHandler(logbook)
+    app.state.lifecycle = lifecycle or Lifecycle(enabled=False)
+    app.state.virtual_mic = VirtualMic(settings.DATA_DIR / "downloads")
 
     app.add_middleware(
         CORSMiddleware,
@@ -76,7 +89,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for module in (system, models, presets, convert, stream, training):
+    for module in (system, models, presets, convert, stream, training, logs, presence):
         app.include_router(module.router)
 
     if (settings.FRONTEND_DIST / "index.html").is_file():

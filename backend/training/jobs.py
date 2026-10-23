@@ -237,8 +237,31 @@ class TrainingJobs:
                 raise TrainingError("Stop the training before deleting it.")
         shutil.rmtree(directory)
 
-    def close(self) -> None:
-        """Ask running workers to save and stop when the server shuts down."""
+    def log_tail(self, job_id: str, lines: int = 400) -> list[str]:
+        """The last ``lines`` lines of a job's worker log."""
+        path = self._job_dir(job_id) / "worker.log"
+        if not path.is_file():
+            return []
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            size = handle.tell()
+            handle.seek(max(0, size - 512 * 1024))
+            text = handle.read().decode("utf-8", errors="replace")
+        return text.splitlines()[-lines:]
+
+    @property
+    def running(self) -> bool:
+        return any(process.poll() is None for process in self._processes.values())
+
+    def close(self, stop_workers: bool = True) -> None:
+        """Server shutdown: ask running workers to save and stop, unless they should finish.
+
+        Workers are separate processes: with ``stop_workers=False`` (the studio
+        closed because its page was closed) a training run carries on, saves
+        its best epoch and exits by itself.
+        """
+        if not stop_workers:
+            return
         for job_id, process in self._processes.items():
             if process.poll() is None:
                 (self.root / job_id / "stop").touch()

@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -53,11 +54,36 @@ def _npm_runner() -> NpmRunner | None:
         node_dir = next((d for d in (root / "bin", root) if (d / "node").exists() or (d / "node.exe").exists()),
                         root)
         env = {**os.environ, "PATH": f"{node_dir}{os.pathsep}{os.environ.get('PATH', '')}"}
-        return lambda args, cwd: int(nodejs_wheel.npm(args, cwd=cwd, env=env))  # type: ignore[arg-type]
+        def bundled(args: list[str], cwd: Path) -> int:
+            result = nodejs_wheel.npm(args, return_completed_process=True, cwd=cwd, env=env,  # type: ignore[arg-type]
+                                      **_QUIET)
+            assert isinstance(result, subprocess.CompletedProcess)
+            _log_output(result)
+            return result.returncode
+
+        return bundled
     npm = shutil.which("npm")
     if npm is None:
         return None
-    return lambda args, cwd: subprocess.run([npm, *args], cwd=cwd, check=False).returncode
+
+    def system(args: list[str], cwd: Path) -> int:
+        result = subprocess.run([npm, *args], cwd=cwd, check=False, **_QUIET)
+        _log_output(result)
+        return result.returncode
+
+    return system
+
+
+# The studio may run without a console (Windows shortcut): npm must not open one,
+# and its output belongs in the log (the Logs page), not on a terminal.
+_QUIET: dict = {"capture_output": True, "text": True, "encoding": "utf-8", "errors": "replace",
+                "creationflags": subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0}  # type: ignore[attr-defined]
+
+
+def _log_output(result: subprocess.CompletedProcess) -> None:
+    for line in f"{result.stdout or ''}{result.stderr or ''}".splitlines()[-60:]:
+        if line.strip():
+            logger.info("npm: %s", line)
 
 
 def ensure_frontend(frontend: Path, dist: Path, npm: NpmRunner | None = None) -> bool:

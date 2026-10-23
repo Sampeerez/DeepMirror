@@ -38,10 +38,14 @@ cd OpenVoiceChanger
 ./start.sh          # Windows: double-click start.bat
 ```
 
-The studio opens at <http://127.0.0.1:8000>. On the first run it also downloads the
-two shared model assets (HuBERT, ~190 MB, and RMVPE, ~180 MB), verified by SHA-256. The
-web UI is prebuilt in release archives; from a git checkout it is built automatically
-when [Node.js](https://nodejs.org/) 20+ is installed.
+The studio opens in your browser at <http://127.0.0.1:8000>. There is no console window
+to keep open: the server runs in the background, its log is in the **Logs** tab, and
+**closing the studio page stops it** (a reload does not; a training run in progress
+finishes on its own). On Windows the first run also adds an **OpenVoiceChanger** shortcut
+to the Desktop and Start menu that starts it with no window at all; on Linux an app-menu
+entry is added. On the first run the shared model assets (HuBERT, ~190 MB, RMVPE,
+~180 MB, and the Silero voice detector, 2 MB) are downloaded and verified by SHA-256.
+The web UI is built automatically with a bundled Node.js.
 
 Then open **Models**, drop in an RVC `.pth` voice (and its `.index` if it has one),
 press **Activate**, and start the voice changer in **Studio**.
@@ -50,6 +54,8 @@ Useful options:
 
 ```bash
 ./start.sh --port 8080 --no-browser     # any CLI flag is passed through
+./start.sh --keep-alive                 # keep running after the page is closed
+./start.sh --foreground                 # (Linux/macOS) stay attached to this terminal
 OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OVC_TORCH=cpu on Windows)
 ./start.sh --device cpu                 # keep the GPU build but run inference on the CPU
 ```
@@ -64,6 +70,10 @@ OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OV
 - Pitch and formant shifting, RVC controls (index rate, filter radius, RMS mix, protect, Crepe hop) and **13 pitch trackers**: PM, Harvest, DIO, Crepe/Mangio-Crepe (full and tiny), RMVPE, FCPE and offline hybrids. RMVPE is chosen automatically on a GPU
 - **13-effect DSP rack**: noise gate, robot, whisper, telephone, distortion, bitcrush, chorus, echo, reverb, EQ, compressor, output gain, limiter
 - **16 built-in presets** plus your own, saving the whole Voice Lab state
+- **Calls (Discord, Teams, Meet…)**: call mode sends the converted voice to a virtual microphone and you stop hearing yourself (optional headphone monitor). On Windows and macOS the studio downloads the official VB-CABLE package by VB-Audio (free donationware) and opens its installer for you; on Linux it creates a PipeWire/PulseAudio microphone with nothing to install. Then pick "CABLE Output" (or "OpenVoiceChanger Microphone") as the microphone in the call app
+- **Natural, melodic voice**: Expressiveness (default ×1.25) widens your rises and falls in pitch so the voice is less monotone, leaving the fine detail alone; voices trained in the studio use their own melodic range. Your pitch centre and range are learnt in the first seconds you speak and remembered for the next session (Recalibrate any time). Laughs, humming and other pitched sounds are converted as voice
+- **No invented sounds on quiet speech**: voicing must be audible and periodic at its own pitch, so a soft "no, no" does not turn fricatives or room noise into sung vowels, and the converted voice can never be louder than what you actually said around speech
+- **Logs** tab: the server's output live (filter, search, pause, copy, download) and each training run's log
 - **Speech-only conversion**: a neural voice detector (Silero VAD) converts only speech. Room noise, breaths and clicks are never sent through the voice model; the room stays audible, unconverted and time-aligned (Room ambience slider)
 - **Noise reduction** for what the model hears, learnt from the pauses, gentle while you speak so soft word endings survive
 - **Match my volume**: the converted voice comes out as loud as you speak, whatever the model's own level, with a soft limiter against clipping

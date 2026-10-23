@@ -1,5 +1,10 @@
 import React, { memo, useState } from 'react';
 import { LoaderCircle, Pause, Play, RefreshCw } from 'lucide-react';
+import CallMode from './CallMode';
+import { findCableOutput, isCableMicrophone } from '../lib/callMode';
+import { readStored, writeStored } from '../lib/storage';
+
+const CALL_MODE_KEY = 'ovc_call_mode_v1';
 
 function AudioControls({
   devices,
@@ -14,6 +19,14 @@ function AudioControls({
   const [selectedOutput, setSelectedOutput] = useState('');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
+  const [callMode, setCallMode] = useState(() => readStored(CALL_MODE_KEY)?.enabled === true);
+  const [monitorId, setMonitorId] = useState('');
+  const cable = findCableOutput(devices.outputDevices);
+  const inCall = callMode && Boolean(cable);
+  const changeCallMode = (enabled) => {
+    setCallMode(enabled);
+    writeStored(CALL_MODE_KEY, { enabled });
+  };
 
   const outputSelectable = devices.outputSelectionSupported !== false;
   const captureSupported = devices.captureSupported !== false;
@@ -28,7 +41,9 @@ function AudioControls({
     setStarting(true);
     try {
       await devices.refresh?.();
-      await pipeline.start(selectedInput || undefined, selectedOutput || undefined);
+      // Call mode: the voice goes to the virtual cable; you hear it only on the chosen monitor.
+      const output = inCall ? cable.deviceId : selectedOutput || undefined;
+      await pipeline.start(selectedInput || undefined, output, inCall ? monitorId || undefined : undefined);
     } catch (err) {
       setError(err.message || 'Failed to start audio pipeline');
     } finally {
@@ -77,7 +92,7 @@ function AudioControls({
             className="native-select-safe mt-2 w-full rounded-[var(--frost-radius)] border border-line bg-input px-3 py-2.5 text-sm text-fg transition focus:border-line-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <option value="">Default Microphone</option>
-            {devices.inputDevices.map((device) => (
+            {devices.inputDevices.filter((device) => !isCableMicrophone(device)).map((device) => (
               <option key={device.deviceId} value={device.deviceId}>
                 {device.label || `Microphone (${device.deviceId.slice(0, 8)}...)`}
               </option>
@@ -91,9 +106,9 @@ function AudioControls({
           </label>
           <select
             id="audio-output-device"
-            value={outputSelectable ? selectedOutput : ''}
+            value={inCall ? cable.deviceId : (outputSelectable ? selectedOutput : '')}
             onChange={(event) => setSelectedOutput(event.target.value)}
-            disabled={pipeline.isRunning || !outputSelectable}
+            disabled={pipeline.isRunning || !outputSelectable || inCall}
             title={
               outputSelectable
                 ? undefined
@@ -132,6 +147,9 @@ function AudioControls({
           Microphone permission is blocked in the browser.
         </p>
       )}
+
+      <CallMode devices={devices} enabled={callMode} onEnabledChange={changeCallMode} monitorId={monitorId}
+        onMonitorChange={setMonitorId} running={pipeline.isRunning} />
 
       {/* True A/B: keeps the mic, the WebSocket and the output routing live and
           returns the raw input instead of the converted signal. */}

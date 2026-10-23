@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request
 
 from backend.assets import AssetStore
@@ -14,6 +16,17 @@ router = APIRouter(tags=["system"])
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@router.get("/api/virtual-mic")
+async def virtual_mic_status(request: Request) -> dict:
+    return await asyncio.to_thread(request.app.state.virtual_mic.status)
+
+
+@router.post("/api/virtual-mic/install")
+async def install_virtual_mic(request: Request) -> dict:
+    """Download the official VB-CABLE package and open its installer (Linux: create the devices)."""
+    return await asyncio.to_thread(request.app.state.virtual_mic.install)
 
 
 @router.get("/api/config")

@@ -1,8 +1,12 @@
 @echo off
-rem OpenVoiceChanger launcher for Windows. Double-click it or run it from a terminal.
-rem It installs uv (per user, no admin) if needed; uv then fetches Python and every
-rem dependency into .venv and starts the studio. Extra arguments are passed through,
-rem e.g.  start.bat --port 8080  or  start.bat --device cpu
+rem OpenVoiceChanger launcher for Windows. Double-click it.
+rem It installs uv (per user, no admin) if needed and prepares Python and every
+rem dependency in .venv (visible here, the first time it takes a few minutes).
+rem The studio then starts WITHOUT a console window and opens in the browser;
+rem its log is in the Logs tab. Closing the studio page stops it.
+rem A Desktop and Start-menu shortcut "OpenVoiceChanger" is created, which
+rem starts it directly with no window at all.
+rem Extra arguments are passed through, e.g.  start.bat --port 8080
 setlocal
 cd /d "%~dp0"
 
@@ -25,5 +29,28 @@ if not defined OVC_TORCH (
   where nvidia-smi >nul 2>nul && (set "OVC_TORCH=cuda") || (set "OVC_TORCH=cpu")
 )
 
-uv run --extra %OVC_TORCH% --extra neural-f0 openvoicechanger %*
-if errorlevel 1 pause
+echo Preparing OpenVoiceChanger (%OVC_TORCH%)...
+uv sync --extra %OVC_TORCH% --extra neural-f0
+if errorlevel 1 (
+  echo.
+  echo Setting up the environment failed. See the messages above.
+  pause
+  exit /b 1
+)
+
+rem Shortcuts that start the studio with no console window (uvw = uv without a console).
+for /f "delims=" %%U in ('where uvw 2^>nul') do set "UVW=%%U"
+if defined UVW (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$s = New-Object -ComObject WScript.Shell;" ^
+    "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {" ^
+    "  $l = $s.CreateShortcut((Join-Path $dir 'OpenVoiceChanger.lnk'));" ^
+    "  $l.TargetPath = '%UVW%'; $l.Arguments = 'run --no-sync openvoicechanger';" ^
+    "  $l.WorkingDirectory = '%~dp0'; $l.Description = 'OpenVoiceChanger studio';" ^
+    "  $l.IconLocation = 'shell32.dll,168'; $l.Save() }" >nul 2>nul
+  start "" "%UVW%" run --no-sync openvoicechanger %*
+) else (
+  rem Older uv without uvw: run here (closing this window stops the studio).
+  uv run --no-sync openvoicechanger %*
+)
+exit /b 0

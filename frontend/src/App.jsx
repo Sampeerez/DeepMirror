@@ -14,6 +14,8 @@ import Recorder from './components/Recorder';
 import FileConverter from './components/FileConverter';
 import RuntimeReadiness from './components/RuntimeReadiness';
 import TrainingStudio from './components/TrainingStudio';
+import LogsPanel from './components/LogsPanel';
+import usePresence from './hooks/usePresence';
 import useWebSocket from './hooks/useWebSocket';
 import useAudioPipeline from './hooks/useAudioPipeline';
 import useAudioDevices from './hooks/useAudioDevices';
@@ -45,6 +47,8 @@ function clearSettingsParam() {
 
 export default function App() {
   const wsHook = useWebSocket();
+  // Keeps the studio running while this page is open (it closes when the last page closes).
+  usePresence();
   const pipeline = useAudioPipeline(wsHook);
   const devices = useAudioDevices();
 
@@ -390,6 +394,10 @@ export default function App() {
           activeModel={activeModel}
           f0Methods={runtimeConfig.f0Methods}
         />
+      </div>
+
+      <div {...panelProps('logs')} className="mx-auto max-w-6xl animate-fade-in-up">
+        <LogsPanel active={tab === 'logs'} />
       </div>
 
       {isSettingsOpen ? (

@@ -36,6 +36,7 @@ export default function useAudioPipeline(wsHook) {
   const [playbackStats, setPlaybackStats] = useState(null);
 
   const audioContextRef = useRef(null);
+  const monitorRef = useRef(null);
   const captureSinkRef = useRef(null);
   const streamRef = useRef(null);
   const sourceRef = useRef(null);
@@ -165,6 +166,11 @@ export default function useAudioPipeline(wsHook) {
 
     captureNodeRef.current?.port?.close?.();
     playbackNodeRef.current?.port?.close?.();
+    if (monitorRef.current) {
+      monitorRef.current.pause();
+      monitorRef.current.srcObject = null;
+      monitorRef.current = null;
+    }
 
     streamRef.current?.getTracks().forEach((track) => track.stop());
     // close() rejects if the context is already closed (a failed start that
@@ -195,7 +201,9 @@ export default function useAudioPipeline(wsHook) {
   }, [finalizeRecording, setOnAudioReceived, meters]);
 
   const start = useCallback(
-    async (inputDeviceId, outputDeviceId) => {
+    // ``monitorDeviceId``: also play the converted voice there (call mode: the main
+    // output is the virtual cable, the monitor your headphones).
+    async (inputDeviceId, outputDeviceId, monitorDeviceId) => {
       const support = getMediaDeviceSupport();
       if (!support.supported) {
         throw new Error(support.reason);
@@ -297,6 +305,19 @@ export default function useAudioPipeline(wsHook) {
         captureSink.connect(audioContext.destination);
         playbackNode.connect(outputAnalyser);
         outputAnalyser.connect(audioContext.destination);
+        if (monitorDeviceId && outputSelectionSupported) {
+          const monitorTap = audioContext.createMediaStreamDestination();
+          outputAnalyser.connect(monitorTap);
+          const monitor = new Audio();
+          monitor.srcObject = monitorTap.stream;
+          try {
+            await monitor.setSinkId?.(monitorDeviceId);
+            await monitor.play();
+            monitorRef.current = monitor;
+          } catch (monitorErr) {
+            console.warn('Monitor output unavailable:', monitorErr);
+          }
+        }
 
         // Tell the server the rate we are really streaming at before any audio
         // goes out, so the first chunk is interpreted correctly.

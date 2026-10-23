@@ -288,3 +288,11 @@ export async function convertFile(file, {
 export function isAbortError(err) {
   return err?.name === 'AbortError';
 }
+
+// --- Virtual microphone (calls) and server logs -----------------------------
+
+export const fetchVirtualMic = () => request('/virtual-mic');
+export const installVirtualMic = () => request('/virtual-mic/install', { method: 'POST' });
+export const fetchLogs = (after = 0, level = null) =>
+  request(`/logs?after=${after}${level ? `&level=${encodeURIComponent(level)}` : ''}&limit=2000`);
+export const fetchTrainingLog = (jobId, lines = 800) => request(`/training/jobs/${jobId}/log?lines=${lines}`);
