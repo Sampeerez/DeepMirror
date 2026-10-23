@@ -9,6 +9,7 @@ is always one Vite supports.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -42,10 +43,17 @@ def _npm_runner() -> NpmRunner | None:
     """The bundled npm when available, else a system npm."""
     try:
         import nodejs_wheel
-
-        return lambda args, cwd: int(nodejs_wheel.npm(args, cwd=cwd))  # type: ignore[arg-type]
+        from nodejs_wheel.executable import ROOT_DIR
     except ImportError:
         pass
+    else:
+        # Scripts run by npm (vite, ...) start with `#!/usr/bin/env node`; put the
+        # bundled node first on PATH so an old system Node is never picked up.
+        root = Path(ROOT_DIR)
+        node_dir = next((d for d in (root / "bin", root) if (d / "node").exists() or (d / "node.exe").exists()),
+                        root)
+        env = {**os.environ, "PATH": f"{node_dir}{os.pathsep}{os.environ.get('PATH', '')}"}
+        return lambda args, cwd: int(nodejs_wheel.npm(args, cwd=cwd, env=env))  # type: ignore[arg-type]
     npm = shutil.which("npm")
     if npm is None:
         return None
