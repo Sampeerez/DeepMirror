@@ -1,27 +1,28 @@
-.PHONY: dev-backend dev-frontend dev install install-test lint test test-backend test-frontend build clean
+# Developer shortcuts. Everyday use only needs ./start.sh or start.bat.
+TORCH ?= cpu
+
+.PHONY: run dev-backend dev-frontend install lint test test-backend test-frontend build release clean
+
+run:
+	uv run --extra $(TORCH) --extra neural-f0 openvoicechanger
 
 dev-backend:
-	PYTHONPATH=. uvicorn backend.main:app --reload
+	uv run --extra $(TORCH) uvicorn --factory backend.app:create_app --reload
 
 dev-frontend:
 	cd frontend && npm run dev
 
-dev:
-	$(MAKE) dev-backend & $(MAKE) dev-frontend & wait
-
 install:
-	pip install -r backend/requirements.txt
-	pip install --no-deps git+https://github.com/RVC-Project/Retrieval-based-Voice-Conversion
-	cd frontend && npm install
-
-install-test:
-	pip install -r backend/requirements-test.txt
-
-test-backend:
-	python -m pytest
+	uv sync --extra $(TORCH) --extra neural-f0
+	cd frontend && npm ci
 
 lint:
+	uv run ruff check backend tests
+	uv run pyright
 	cd frontend && npm run lint
+
+test-backend:
+	uv run pytest
 
 test-frontend:
 	cd frontend && npm test
@@ -31,5 +32,8 @@ test: test-backend test-frontend
 build:
 	cd frontend && npm run build
 
+release: build
+	uv run python scripts/package_release.py
+
 clean:
-	rm -rf frontend/node_modules frontend/dist __pycache__ backend/__pycache__
+	rm -rf frontend/node_modules frontend/dist .venv .pytest_cache .ruff_cache

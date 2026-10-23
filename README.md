@@ -1,508 +1,185 @@
 # OpenVoiceChanger
 
 <p align="center">
-  <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React 18" />
-  <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://img.shields.io/badge/TailwindCSS-3-06B6D4?logo=tailwindcss&logoColor=white" alt="TailwindCSS" />
+  <img src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" alt="Python 3.13" />
+  <img src="https://img.shields.io/badge/PyTorch-2.14-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch 2.14" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19" />
+  <img src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" alt="Vite 8" />
+  <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white" alt="Tailwind 4" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" />
 </p>
 
 <p align="center">
-  Real-time AI voice changer web application.<br/>
-  Route a microphone through ONNX or RVC models with a low-latency WebSocket audio pipeline.
+  Realtime and offline RVC voice conversion studio that runs locally in your browser.<br/>
+  One command to start, no manual Python setup, quality-first streaming.
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
-  <a href="#model-support">Model Support</a> •
-  <a href="#api">API</a> •
+  <a href="#how-the-realtime-engine-works">Realtime engine</a> •
   <a href="#configuration">Configuration</a> •
+  <a href="#development">Development</a> •
   <a href="README_KR.md">한국어</a> •
   <a href="README_JP.md">日本語</a>
 </p>
 
 ---
 
+## Quick Start
+
+**Requirements:** Windows, Linux or macOS. Nothing else: the start script installs
+[uv](https://docs.astral.sh/uv/), which downloads Python and every dependency on its own.
+An NVIDIA GPU is used automatically when present; Apple Silicon uses MPS.
+
+```bash
+git clone https://github.com/sioaeko/OpenVoiceChanger.git
+cd OpenVoiceChanger
+./start.sh          # Windows: double-click start.bat
+```
+
+The studio opens at <http://127.0.0.1:8000>. On the first run it also downloads the
+two shared model assets (HuBERT, ~190 MB, and RMVPE, ~180 MB), verified by SHA-256. The
+web UI is prebuilt in release archives; from a git checkout it is built automatically
+when [Node.js](https://nodejs.org/) 20+ is installed.
+
+Then open **Models**, drop in an RVC `.pth` voice (and its `.index` if it has one),
+press **Activate**, and start the voice changer in **Studio**.
+
+Useful options:
+
+```bash
+./start.sh --port 8080 --no-browser     # any CLI flag is passed through
+OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OVC_TORCH=cpu on Windows)
+./start.sh --device cpu                 # keep the GPU build but run inference on the CPU
+```
+
 ## Features
 
 ### Realtime studio
-- Real-time voice conversion with binary WebSocket streaming and AudioWorklet
-- ONNX and RVC model support, plus a **model-free DSP mode** (pitch shifting and effects with no checkpoint loaded)
-- Live pitch **and formant** shifting, **16 F0 methods** (PM / Harvest / DIO, Crepe and Mangio-Crepe, RMVPE, FCPE, their ONNX variants, and offline hybrids) — each greyed out with a reason when this machine lacks the runtime or model asset — plus RVC advanced controls (index rate, filter radius, RMS mix, protect, Crepe hop length)
-- **12-effect server-side DSP rack**: noise gate, robot, whisper, telephone, distortion, bitcrush, chorus, echo, reverb, tone EQ, compressor, output gain — all streaming-safe with per-connection state
-- **16 built-in voice presets** (Chipmunk, Deep Voice, Robot, Ghost, Telephone, Stadium, …) plus custom presets that save the complete Voice Lab state
-- **Silence Saver** pauses expensive model inference after quiet input while keeping DSP tails alive, then resumes on the first audible chunk
-- **Measured performance profiles** (Responsive / Balanced / Stable) recommend a chunk size from recent p95 round-trip and server processing time
-- Real-time spectrum visualizer, VU meters with peak hold, latency sparkline, server timing breakdown (model / DSP / network), and live inference duty monitoring
-- **Output recorder** — capture the converted voice (<kbd>R</kbd>) and download it as a timestamped WAV; <kbd>B</kbd> flips the A/B bypass
-- **Take library** stores multiple WAV takes in this browser with rename, playback, download, and confirmed deletion. IndexedDB storage survives refresh on the same origin; it is not a backup and can be cleared or evicted by the browser. Failed saves retain a downloadable take and offer retry.
-- **Stream diagnostics** separates capture chunk duration, queued audio, playback buffering, browser-reported output latency, dropped/timed-out frames, underruns and trimmed playback. Round trip measures WebSocket transport plus processing, not microphone-to-speaker latency. Counters reset with the stream/connection and update at low frequency.
-- Loaded-model inference failures mute output and show an error instead of falling back to the original voice. A failed output-device selection stops startup instead of using the default speakers.
-- Automatic reconnect with exponential back-off and a **Retry now** shortcut when the server goes away mid-session
+- RVC v1/v2 voice conversion (with and without pitch) streamed over a binary WebSocket and an AudioWorklet
+- Quality-first streaming: every chunk is re-rendered with **1 s of past and 150 ms of future context** and joined with a phase-aligned (SOLA) crossfade; see [How the realtime engine works](#how-the-realtime-engine-works)
+- Three profiles in Settings with an estimated end-to-end latency: **Quality** (~700 ms), **Balanced** (~400 ms), **Responsive** (~250 ms)
+- Exact nearest-neighbour **index retrieval** on the GPU for closer timbre than classic RVC's approximate search
+- Pitch and formant shifting, RVC controls (index rate, filter radius, RMS mix, protect, Crepe hop) and **13 pitch trackers**: PM, Harvest, DIO, Crepe/Mangio-Crepe (full and tiny), RMVPE, FCPE and offline hybrids. RMVPE is chosen automatically on a GPU
+- **13-effect DSP rack**: noise gate, robot, whisper, telephone, distortion, bitcrush, chorus, echo, reverb, EQ, compressor, output gain, limiter
+- **16 built-in presets** plus your own, saving the whole Voice Lab state
+- **Silence Saver** pauses inference during silence and resumes on the first audible chunk
+- Spectrum, meters, latency history, server timing (model/DSP/network) and stream diagnostics
+- Output recorder (<kbd>R</kbd>) with a take library stored in the browser; <kbd>B</kbd> toggles an A/B bypass
+- Model-free DSP mode: pitch shifting and effects with no voice loaded
 
 ### Offline converter
-- Upload a whole audio file (wav / mp3 / flac / ogg / m4a) and render it through the active model + current Voice Lab settings + effect chain to a downloadable WAV; long renders can be cancelled midway
+- Render a whole file (WAV, FLAC, OGG, MP3, ...) through the active voice, the Voice Lab settings and the effect rack, with RVC's full padding and quiet-point splitting for maximum quality
 
-### Management
-- Drag-and-drop model upload (`.pth` / `.pt` / `.onnx` + companion `.index` files), one active model at a time
-- Model metadata badges: RVC version, target sample rate, F0 support, index presence, device
-- Session settings for light/dark theme, transport profiles, Silence Saver, and ONNX / PyTorch / GPU / CUDA runtime visibility
-- **RVC readiness** in Models and Settings lists required packages and HuBERT, optional F0 weights, installation guidance and recheck. Detection is not an inference test; loading a real model verifies execution. Reconnecting refreshes capabilities and presets without resetting voice or transport settings.
-- In-app update check with one-click **Update and restart** through the managed launcher (see [Updates](#updates))
-- Linkable tabs (`?tab=models`, `?tab=converter`, `?settings`) that keep their state — a chosen file or an in-progress render survives switching views — with Back/Forward moving between them
-- Consistent Lucide controls with keyboard-visible focus states and a proper tablist, plus an explicit GitHub Star action with a normal repository-link fallback
+### Models
+- Drag-and-drop upload of `.pth` voices and `.index` files (matched by name, or the only index in the folder)
+- Voice details: RVC version, sample rate, pitch support, index size, device, warm-up render time
 
 ## Screenshots
 
-All captures show the studio running in model-free DSP mode on a machine without the RVC
-runtime installed, which is why the F0 picker reports its methods as unavailable — that
-capability readout is exactly what a user sees before installing the inference stack.
-
 ### Studio
-
 ![Studio — realtime workspace, streaming](docs/images/main-ui.png)
 
-The realtime workspace mid-stream with the **Deep Voice** preset applied: live input and
-output spectrum, VU meters with peak hold, a 5 ms round trip with its sparkline and the
-DSP / network split, a take being recorded, and the pitch, formant and F0 method controls.
-
 ### Presets & effects rack
-
 ![Voice presets and DSP effects rack](docs/images/effects-rack.png)
 
-16 one-click voice presets and the 12-effect server-side DSP chain, here with **Ghost**
-selected (whisper, echo and reverb on). Custom presets also remember F0, retrieval, filter,
-RMS, protect and Crepe hop settings. Everything here works with or without a voice model —
-enable an effect and it applies to the live stream instantly.
-
 ### Models
-
 ![Model bay](docs/images/models.png)
 
-Drag-and-drop upload for RVC / ONNX checkpoints and companion `.index` files, with metadata
-badges and one-click activation.
-
 ### Converter
-
 ![Offline file converter](docs/images/converter.png)
 
-Render whole audio files through the active model and effect chain, then preview and download
-the result as WAV. RVC renders process the complete file and honor the current Index Rate,
-Filter Radius, RMS Mix, and Protect values rather than using the realtime stream's short
-context window.
-
 ### Settings
+![Settings: quality profiles, Silence Saver and engine status](docs/images/settings-modal.png)
 
-![Session runtime settings](docs/images/settings-modal.png)
+## How the realtime engine works
 
-Update status, transport profiles with a **measured recommendation** taken from the live
-stream, Silence Saver controls, light/dark theme, and a live view of what the backend sees:
-ONNX provider, PyTorch device, GPU, and CUDA.
+RVC models are trained on whole utterances. Fed short chunks naively, they lose timbre and
+intonation at every chunk boundary and the seams click. For every chunk, the engine:
 
-The images are generated, not hand-captured: `node scripts/readme_screenshots.mjs` drives a
-headless Chromium against a running backend with a synthetic voice as the microphone.
+1. **Re-renders a rolling window.** The window holds the last second of input plus the new chunk, so HuBERT, the pitch tracker and the synthesizer always have real left context.
+2. **Holds back a lookahead.** The newest 150 ms of each render are not emitted yet. Every sample that reaches your speakers was rendered with real audio after it, so the model's edge effects never reach the output. This is a fixed 150 ms of extra latency.
+3. **Joins renders with SOLA.** The tail held back from the previous render is matched against the new one within ±6 ms, then crossfaded at the best-correlated offset. Windows join without clicks or phasing.
+4. **Resamples with soxr.** soxr is a band-limited resampler, unlike FFT resampling, which wraps the end of each window into its start.
+5. **Applies a shift-invariant loudness envelope.** The RMS mix envelope is computed with a sliding window, so overlapping renders agree on the level they apply.
 
-## Quick Start
+On a GTX 1660 SUPER, the Quality profile renders a 171 ms chunk in about 115 ms with RMVPE
+and index retrieval enabled. Its output keeps about 95% of the spectral similarity of a
+full offline render; the ceiling for this metric is two offline renders with different
+random seeds.
 
-The commands below assume Windows PowerShell in the repository root.
-
-### 0. Clone the repository
-
-```powershell
-git clone https://github.com/sioaeko/OpenVoiceChanger.git
-cd OpenVoiceChanger
-```
-
-### 1. Backend setup
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r backend/requirements.txt
-pip install --no-deps git+https://github.com/RVC-Project/Retrieval-based-Voice-Conversion
-```
-
-### 2. Optional: enable ONNX GPU acceleration
-
-CPU ONNX works with the default requirements. If you want ONNX to use CUDA locally, replace the CPU package with the GPU package:
-
-```powershell
-pip uninstall -y onnxruntime
-pip install onnxruntime-gpu==1.23.2
-```
-
-### 3. Frontend setup
-
-```powershell
-cd frontend
-npm install
-npm run build
-cd ..
-```
-
-### 4. Prepare model assets
-
-**Windows x64 CPU shortcut:** start the app with `python launch.py`, then open
-**Models > RVC readiness > Set up RVC > Install and restart**. This creates a
-separate Python 3.10.20 environment under `data/rvc-setup/`, installs hash-locked
-CPU dependencies and pinned inference-only RVC/fairseq sources, and downloads
-SHA-256-verified HuBERT and RMVPE weights (353.5 MiB, plus Python/packages).
-Allow at least 6 GiB free. The existing Python/CUDA installation, voice models,
-presets and takes are not replaced. Stop routing/conversion and save pending
-recordings before installation. The launcher switches only after HuBERT/RMVPE
-inference and API import checks pass; a failed restart restores the previous
-runtime. Cancel is available before switching, and retry reuses verified downloads.
-Logs: `data/rvc-setup/jobs/<job-id>/setup.log`. Incomplete attempts are retained
-for diagnosis. GPU acceleration, voice checkpoints, training extensions and
-optional ONNX F0 weights are **not** included. Other platforms use manual setup.
-The managed launcher remembers the selected environment on the next start;
-direct `uvicorn` commands do not use this selection.
-
-Download provenance and hashes: [`setup_manifest.py`](backend/services/setup_manifest.py).
-The dependency source and generated lock are in [`backend/runtime/`](backend/runtime/).
-Only the pinned HuBERT content hash permits legacy configuration-object loading;
-user-uploaded voice checkpoints retain the existing safe-loading restrictions.
-
-For manual installations:
-
-RVC `.pth` / `.pt` models need a HuBERT content encoder file.
-
-```powershell
-New-Item -ItemType Directory -Force models\assets | Out-Null
-```
-
-Place the file here:
-
-```text
-models/assets/hubert_base.pt
-```
-
-You can override that path with `OVC_HUBERT_PATH`.
-
-### 5. Start the app
-
-```powershell
-.venv\Scripts\python.exe launch.py
-```
-
-Open:
-
-```text
-http://127.0.0.1:8000
-```
-
-### 6. Optional: Vite dev mode
-
-Terminal 1:
-
-```powershell
-.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Terminal 2:
-
-```powershell
-cd frontend
-npm run dev
-```
-
-Then open `http://127.0.0.1:5173`.
-
-## Updates
-
-The studio checks the official public GitHub Release on startup and every hour. A quiet **Update available** button appears in the header only when a newer stable `vMAJOR.MINOR.PATCH` release exists. Drafts, prereleases and ordinary commits do not trigger it. Settings also has a manual check (at most once per minute). Nothing installs automatically.
-
-**Update and restart** requires `python launch.py`, Git, the official `origin`, and a clean `main` branch. The launcher downloads the release's prebuilt frontend, verifies the GitHub SHA-256 digest and per-file manifest, fast-forwards to the verified release commit, and restarts the server. No GitHub login, Node.js build, pip install or CUDA change is involved. Updates that change Python dependency files require a manual update. A ZIP source download or direct `uvicorn` launch supports notifications, but not in-app installation.
-
-- Stop audio routing before installing. Uploads, conversions and recent audio frames block installation on the server as well.
-- Wait for takes to finish saving, or download takes whose storage failed, and download unsaved converter output before restarting. Saved takes do not block updates. Other open tabs are not automatically reloaded.
-- Models, `data/presets.json` and browser-saved settings are kept. A failed startup restores the previous source and frontend; concurrent local edits stop recovery instead of being overwritten.
-- Recovery files remain in `tmp/updater/jobs/`. If recovery needs attention, inspect `tmp/updater/state.json` and the launcher log before changing the checkout.
-- Set `OVC_UPDATE_CHECK_ENABLED=false` to disable background GitHub checks. Manual checks still work. Installation is restricted to the same computer, even with permissive CORS settings.
-
-For maintainers: update `VERSION` and both frontend package versions together, commit to `main`, then push the matching `vX.Y.Z` tag. The Release workflow runs tests, builds `OpenVoiceChanger-frontend-vX.Y.Z.zip` plus its checksum, uploads them to a draft, and only then publishes it. `python scripts/package_release.py` packages a clean, already-built checkout without publishing. The first release enables this distribution path; an installed copy only offers releases with a higher version.
-
-## Model Support
-
-| Format | Engine | Notes |
-|--------|--------|-------|
-| `.onnx` | ONNX Runtime | CPU by default, CUDA if `onnxruntime-gpu` is installed |
-| `.pth` / `.pt` | PyTorch | RVC v1/v2 models, requires `hubert_base.pt` |
-
-## Web UI Flow
-
-1. Open the app in your browser.
-2. (Optional) Upload and activate a model in the `Models` tab — without one, the studio runs in pure DSP mode.
-3. Open Settings to choose a performance profile and tune Silence Saver if needed.
-4. Pick your input and output devices in the `Studio` tab.
-5. Click `Start Voice Changer`.
-6. Shape the voice live: pitch, formant, F0 method, effect rack, or a one-click preset.
-7. Press <kbd>B</kbd> (or the `A/B Monitor` toggle) to compare the converted voice against your raw input without stopping the stream.
-8. Record the output (<kbd>R</kbd> starts and stops a take), or render whole files in the `Converter` tab.
-
-Single-letter shortcuts stay out of the way while you type in a field, and switching tabs never resets what you were doing in another one.
-
-## API
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/api/config` | App version, stream and Silence Saver defaults, ONNX / PyTorch runtime info, and per-method F0 availability |
-| `GET` | `/api/updates` | Cached release status, current version and installation progress |
-| `POST` | `/api/updates/check` | Explicit, rate-limited local update check |
-| `POST` | `/api/updates/install` | Queue a verified version for installation and restart (managed launcher only) |
-| `GET` | `/api/github/star` | Check the active GitHub CLI account's star state |
-| `POST` | `/api/github/star` | Star this repository after an explicit same-device browser action |
-| `GET` | `/api/models/` | List uploaded models |
-| `POST` | `/api/models/upload` | Upload a model file |
-| `DELETE` | `/api/models/{name}` | Delete a model |
-| `POST` | `/api/models/{name}/activate` | Activate a model |
-| `POST` | `/api/models/deactivate` | Deactivate the current model |
-| `GET` | `/api/models/active` | Get the active model |
-| `GET` | `/api/presets/` | List built-in and user voice presets |
-| `POST` | `/api/presets/` | Save a user preset |
-| `DELETE` | `/api/presets/{id}` | Delete a user preset |
-| `POST` | `/api/convert/` | Offline file conversion (multipart upload → WAV) |
-| `WS` | `/ws/audio` | Real-time audio streaming |
-
-Interactive docs are available at `/docs` while the backend is running.
-
-### WebSocket protocol
-
-1. Connect to `/ws/audio`. Browser clients must connect from an allowed origin
-   (see [Network access](#network-access)); non-browser clients send no `Origin`
-   header and are accepted.
-2. Send JSON config: `{"sample_rate": 48000, "chunk_size": 4096}`.
-   Send the rate your `AudioContext` **actually** runs at (`audioContext.sampleRate`),
-   not the rate you requested — the browser is free to ignore the request, and the
-   server processes and resamples using whatever you report here.
-3. Send binary audio frames: `[uint32 seq_num][uint32 reserved][float32[] PCM samples]`
-4. Receive processed audio frames in the same format — the response `reserved` field carries the server processing time in hundredths of a millisecond
-5. Send settings updates such as
-   `{"pitch_shift": 3.0, "formant_shift": -2.0, "f0_method": "rmvpe", "index_rate": 0.75, "filter_radius": 3, "rms_mix_rate": 0.25, "protect": 0.33, "crepe_hop_length": 160, "silence_saver": true, "silence_threshold_db": -52, "effects": {"reverb": {"enabled": true, "size": 0.6, "mix": 0.4}}}`
-6. Receive periodic status JSON: `{"type": "status", "latency_ms": …, "model_ms": …, "dsp_ms": …, "mode": "rvc|onnx|dsp|bypass", "bypass": false, "inference_sleeping": false, "inference_duty_percent": 100.0, "effects_active": …}`
-
-All settings fields are optional and unknown fields are ignored, so older and
-newer clients interoperate with either side of this release.
-
-The server processes one chunk at a time, so a client that sends faster than
-replies arrive only builds a queue and adds that queue to its own latency. The
-bundled frontend keeps **one frame in flight**, parks at most two more, drops
-the oldest parked frame on overflow (fresh audio beats stale audio in a live
-monitor), and writes off a frame whose reply never comes after two seconds so a
-lost reply cannot wedge the sender. Third-party clients should apply the same
-back-pressure.
-
-#### Conversion bypass (A/B)
-
-`{"bypass": true}` returns the input signal untouched: no noise gate, no model,
-no pitch or formant shift, no effect rack. The microphone, the WebSocket and the
-output routing all keep running, so it is a true A/B against the converted
-signal rather than a stop. Press <kbd>B</kbd> in the UI to toggle it.
-
-This is deliberately different from the effect rack's **Bypass all** button,
-which only clears the effects and leaves model conversion running.
-
-Bypass is not persisted between sessions, and no artificial delay is added to
-match converted-path latency — the architecture has no timing primitive that
-would make such compensation reliable, so the raw path is simply faster.
-
-#### Performance profiles and Silence Saver
-
-The Settings modal maps **Responsive**, **Balanced**, and **Stable** to 2048,
-4096, and 8192-sample chunks. After at least eight live samples, the UI uses the
-recent p95 round-trip latency and model + DSP processing time to recommend the
-smallest profile with processing headroom. A profile selected while routing is
-queued for the next session; manual sample-rate and chunk-size fields remain
-locked until routing stops.
-
-Silence Saver is enabled by default at `-52 dB` and can be tuned from `-80` to
-`-20 dB`. When a model is active and input stays below the threshold for 180 ms,
-the server releases that stream's model context and skips inference. It still
-runs the post-effect stage with silence so echo and reverb tails decay normally,
-then wakes on the first audible chunk. The monitor exposes the current `Saver`
-state and the percentage of model-eligible frames that actually ran inference as
-`Duty`. DSP-only mode is never put to sleep.
-
-#### GitHub Star button
-
-The header control performs one transparent action for this fixed repository.
-From a loopback browser, an explicit click can use the active, authenticated
-GitHub CLI (`gh`) account to star `sioaeko/OpenVoiceChanger`; the credential never
-enters the frontend. If `gh` is missing, unauthenticated, unreachable, or the UI
-is opened from another device, the control becomes a normal link to the GitHub
-repository so the user can decide there.
+The inference code is a self-contained, typed port of the MIT-licensed
+[RVC](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion) synthesizer and
+RMVPE, plus fairseq's HuBERT encoder, with no dependency on fairseq, faiss or librosa. Its
+output was checked against the original implementation, and the tests keep checking it
+when the reference files are present.
 
 ## Configuration
 
-Environment variables use the `OVC_` prefix.
+Every setting can be overridden with an environment variable or a `.env` file in the
+project folder. Common ones:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OVC_MODELS_DIR` | `models` | Model directory |
-| `OVC_HOST` | `127.0.0.1` | Backend bind address — loopback only by default |
-| `OVC_PORT` | `8000` | Backend port |
-| `OVC_SAMPLE_RATE` | `40000` | Sample rate suggested to the client (the browser reports the rate it actually uses) |
-| `OVC_CHUNK_SIZE` | `4096` | Default chunk size |
-| `OVC_CORS_ORIGINS` | `["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000", "http://127.0.0.1:8000"]` | Cross-origin allowlist for HTTP **and** the audio WebSocket |
-| `OVC_ALLOW_ANY_ORIGIN` | `false` | Disable origin checks entirely (trusted networks only) |
-| `OVC_LOG_LEVEL` | `info` | Log level |
-| `OVC_HUBERT_PATH` | `models/assets/hubert_base.pt` | HuBERT path for RVC |
-| `OVC_RMVPE_ROOT` | `models/assets/rmvpe` | RMVPE assets directory (`rmvpe.pt`) — enables the `rmvpe` F0 method |
-| `OVC_RMVPE_ONNX_PATH` | `models/assets/rmvpe/rmvpe.onnx` | ONNX RMVPE model — enables `rmvpe-onnx` |
-| `OVC_CREPE_ONNX_FULL_PATH` | `models/assets/crepe/full.onnx` | ONNX Crepe (full) model — enables `crepe-onnx-full` |
-| `OVC_CREPE_ONNX_TINY_PATH` | `models/assets/crepe/tiny.onnx` | ONNX Crepe (tiny) model — enables `crepe-onnx-tiny` |
-| `OVC_CREPE_HOP_LENGTH` | `160` | Default hop length for the Mangio-Crepe methods (64–512) |
-| `OVC_RVC_STREAM_CONTEXT_SECONDS` | `0.14` | Rolling 16 kHz history each stream re-runs inference over |
-| `OVC_RVC_INDEX_RATE` | `0.75` | Retrieval mix when a matching `.index` exists |
-| `OVC_RVC_FILTER_RADIUS` | `3` | Harvest / DIO median filter radius (values below 3 disable smoothing) |
-| `OVC_RVC_RMS_MIX_RATE` | `0.25` | RMS envelope blend |
-| `OVC_RVC_PROTECT` | `0.33` | Consonant protection |
-| `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | Permit unpickling checkpoints that fail safe loading (see [Security](#security)) |
-| `OVC_PRESETS_PATH` | `data/presets.json` | User preset storage file |
-| `OVC_MAX_CONVERT_SECONDS` | `600` | Max audio length for offline conversion |
-| `OVC_UPDATE_CHECK_ENABLED` | `true` | Check public GitHub releases on startup and hourly; never installs without a click |
+| Variable | Default | Meaning |
+|---|---|---|
+| `OVC_HOST` / `OVC_PORT` | `127.0.0.1` / `8000` | Listen address. `0.0.0.0` exposes the studio on your LAN |
+| `OVC_DEVICE` | `auto` | `auto`, `cuda`, `mps`, `xpu` or `cpu` |
+| `OVC_MODELS_DIR` | `models` | Where voices and `.index` files live |
+| `OVC_CHUNK_SIZE` | `8192` | Default live chunk (samples at 48 kHz) |
+| `OVC_STREAM_LOOKBACK_SECONDS` | `1.0` | Past context re-rendered with every chunk |
+| `OVC_STREAM_LOOKAHEAD_SECONDS` | `0.15` | Future context per chunk (adds this much latency) |
+| `OVC_STREAM_PAD_SECONDS` | `0.1` | Edge padding of each streaming window |
+| `OVC_INDEX_EXACT_SEARCH` | `true` | `false` reproduces classic RVC's approximate index search |
+| `OVC_DEFAULT_INDEX_RATE` / `OVC_DEFAULT_PROTECT` / ... | RVC defaults | Starting values of the Voice Lab controls |
+| `OVC_SILENCE_THRESHOLD_DB` | `-52` | Level below which Silence Saver pauses inference |
+| `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See [Security](#security) |
+| `OVC_CORS_ORIGINS` | local origins | Extra origins allowed to use the API |
 
-`OVC_RVC_STREAM_CONTEXT_SECONDS` is a latency/quality trade-off, not a buffer
-size: every chunk is inferred against this entire window, so raising it improves
-continuity but multiplies per-chunk inference cost. `0.14` keeps realtime
-headroom at the default 4096-sample chunk.
+See [backend/config.py](backend/config.py) for the full list.
 
 ## Security
 
-The studio can upload and execute model checkpoints and open your microphone, so
-the defaults assume a single-user machine.
+- **Network:** the studio listens on loopback by default. Same-origin requests are always allowed. Cross-origin HTTP and WebSocket access is limited to `OVC_CORS_ORIGINS`, and the WebSocket checks the `Origin` header because browsers do not apply the same-origin policy to WebSockets. Anyone who can reach a LAN-exposed studio can upload and run models.
+- **Checkpoints:** `.pth` files are Python pickles, and unpickling one can run code. Voices load with PyTorch's `weights_only` mode, and a checkpoint that needs more is refused unless you set `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS=true`. The HuBERT asset is accepted only with its published SHA-256, and only through a restricted unpickler.
 
-### Network access
-
-- **Bind address.** `OVC_HOST` defaults to `127.0.0.1`; nothing outside the
-  machine can reach the API unless you change it.
-- **Origins.** Cross-origin HTTP requests and WebSocket handshakes are checked
-  against `OVC_CORS_ORIGINS`. Requests carrying no `Origin` header (curl, native
-  clients, tests) are allowed; the opaque `null` origin is rejected.
-- **Same-origin is always allowed.** A page served *by this backend* passes the
-  check on any address, so the frontend keeps working when you move it to a LAN
-  host without touching the allowlist. A hostile third-party page cannot satisfy
-  it, because the browser sends that page's own origin.
-
-The WebSocket needs this check because browsers do **not** apply the same-origin
-policy to WebSocket connections — without it, any website you visited could open
-your microphone stream through this backend.
-
-To use the studio from another device on your network:
+## Development
 
 ```bash
-OVC_HOST=0.0.0.0 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+make install            # uv sync (CPU torch; TORCH=cuda for CUDA) + npm ci
+make dev-backend        # API with auto-reload on :8000
+make dev-frontend       # Vite dev server on :5173 (proxies /api and /ws)
+make lint test          # ruff + pyright + eslint, pytest + vitest
+make release            # build the UI and package a release archive
 ```
 
-Serving the built frontend from that same backend needs no further configuration.
-Only if you run the Vite dev server on a *different* host must you add its origin:
+### Project structure
 
-```bash
-export OVC_CORS_ORIGINS='["http://192.168.1.50:5173"]'
+```
+backend/
+  __main__.py        CLI (`openvoicechanger`), UI build check, browser launch
+  app.py             FastAPI factory and lifespan
+  config.py          All settings (OVC_* environment variables)
+  assets.py          HuBERT / RMVPE download and verification
+  model_manager.py   Voice library and the active voice
+  presets.py         Built-in and user presets
+  security.py        Origin checks for CORS and the WebSocket
+  api/               HTTP + WebSocket endpoints (models, presets, convert, stream, system)
+  audio/             Wire protocol, soxr resampling, realtime streaming (SOLA), DSP effects
+  inference/         HuBERT, RVC synthesizers, RMVPE, pitch trackers, index retrieval, pipeline
+frontend/            React 19 + Vite 8 + Tailwind 4 studio
+tests/               pytest suite (API, streaming, DSP, inference equivalence)
+start.sh, start.bat  One-command launchers
 ```
 
-Note that browsers only expose microphone capture on secure origins: over plain
-HTTP, `getUserMedia` is unavailable on anything except `localhost`. Reach a LAN
-deployment over HTTPS, or use it from the host machine.
+### Wire protocol
 
-### Model checkpoints
-
-RVC `.pth` files are Python pickles, so loading one with PyTorch's legacy
-`weights_only=False` executes whatever code the file's author put in it. Since
-checkpoints arrive through the web upload endpoint, the backend loads them in
-PyTorch's safe weights-only mode (extended with data-only numpy symbols so
-checkpoints storing numpy values still load).
-
-If a checkpoint genuinely cannot be loaded that way, activation fails with an
-explanatory error instead of silently unpickling it. To load such a file you must
-opt in per-deployment, and only for a checkpoint you trust:
-
-```bash
-OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS=true python -m uvicorn backend.main:app
-```
-
-The backend logs a warning naming the file each time that path is taken.
-
-## Testing
-
-```bash
-pip install -r backend/requirements-test.txt
-python -m pytest          # backend
-
-cd frontend && npm install
-npm run lint              # ESLint with react-hooks rules as errors
-npm test                  # frontend (vitest: lib modules + SSR component checks)
-npm run build
-```
-
-`backend/requirements-test.txt` is intentionally lighter than
-`backend/requirements.txt` — the tests cover the transport, DSP chain, offline
-converter, origin validation, checkpoint loading and the updater, none of which
-need the full RVC inference stack. CI (`.github/workflows/ci.yml`) runs the
-backend suite on Linux, updater/setup tests on Windows, and frontend lint,
-tests and build. A separate Windows job runs `python -m scripts.verify_runtime_setup`:
-it downloads into empty caches, tests HuBERT/RMVPE inference, and verifies two
-managed starts and complete shutdowns. This networked check requires at least
-6 GiB free and leaves its isolated installation in `tmp/runtime-cold-*` for diagnosis.
-
-The frontend tests use Node, jsdom and SSR checks, so real browser behaviour is
-checked separately: `node scripts/readme_screenshots.mjs` doubles as a smoke
-test that starts a real stream in headless Chromium.
-
-## Project Structure
-
-```text
-OpenVoiceChanger/
-├── backend/
-│   ├── main.py
-│   ├── config.py
-│   ├── security.py
-│   ├── version.py
-│   ├── routers/
-│   └── services/
-├── frontend/
-│   ├── public/
-│   └── src/
-├── tests/
-├── scripts/            # release packaging, README screenshot generator
-├── docs/images/
-├── models/
-├── .github/workflows/  # ci.yml, release.yml
-├── launch.py           # managed launcher (enables in-app updates)
-├── VERSION
-├── README.md
-├── README_KR.md
-├── README_JP.md
-└── Makefile
-```
-
-## Makefile
-
-The included `Makefile` is a convenience for POSIX shells or WSL.
-
-| Command | Description |
-|---------|-------------|
-| `make install` | Install backend and frontend dependencies |
-| `make install-test` | Install backend test dependencies |
-| `make dev` | Run backend and frontend dev servers |
-| `make dev-backend` | Run backend only |
-| `make dev-frontend` | Run frontend only |
-| `make lint` | Lint the frontend |
-| `make test` | Run backend and frontend tests |
-| `make test-backend` | Run backend tests only |
-| `make test-frontend` | Run frontend tests only |
-| `make build` | Build the frontend |
-| `make clean` | Remove build artifacts |
-
-## Requirements
-
-- Python 3.10+
-- Node.js 20.19+ (Vitest 4 and ESLint 10 no longer run on Node 18)
-- npm
+The browser sends a JSON config (`sample_rate`, `chunk_size`, and optionally
+`lookback_seconds` / `lookahead_seconds`), then binary frames. Each frame is an 8-byte
+header followed by float32 PCM: a `uint32` sequence number and a reserved `uint32`. The
+server answers every frame with a converted frame of the same length. Its reserved field
+carries the server time in 1/100 ms. JSON messages update settings at any time, and
+the server sends a `status` message about once a second.
 
 ## License
 
-[MIT](LICENSE)
+MIT. The inference networks are ports of MIT-licensed RVC code and of fairseq's HuBERT
+(MIT).

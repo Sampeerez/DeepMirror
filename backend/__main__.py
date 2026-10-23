@@ -10,7 +10,8 @@ import webbrowser
 import uvicorn
 
 from backend.app import create_app
-from backend.config import Settings
+from backend.config import ROOT, Settings
+from backend.frontend_build import ensure_frontend
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -19,6 +20,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, help="port to listen on (default 8000)")
     parser.add_argument("--device", choices=["auto", "cuda", "mps", "xpu", "cpu"], help="inference device")
     parser.add_argument("--no-browser", action="store_true", help="do not open the studio in a browser")
+    parser.add_argument("--skip-ui-build", action="store_true", help="never rebuild the web UI on startup")
     return parser.parse_args(argv)
 
 
@@ -29,6 +31,9 @@ def main(argv: list[str] | None = None) -> None:
     settings = Settings(**overrides)
     logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
                         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    if not args.skip_ui_build:
+        ensure_frontend(ROOT / "frontend", settings.FRONTEND_DIST)
 
     url = f"http://{'127.0.0.1' if settings.HOST in {'0.0.0.0', '::'} else settings.HOST}:{settings.PORT}"
     # Opened from the app's startup hook, i.e. only once the server answers.
