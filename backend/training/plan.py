@@ -72,44 +72,59 @@ def plan_training(windows: int, dataset_seconds: float, vram_batch: int, *,
 
 @dataclass(slots=True)
 class ValidationTracker:
-    """Best epoch and early stopping from validation scores (lower is better).
+    """Which epoch to keep, and when to stop, from validation scores (lower is better).
 
-    The best epoch is picked on the raw score. Early stopping watches a
-    smoothed score, so one lucky or unlucky evaluation neither ends training
-    nor keeps it going: it stops after ``patience_epochs`` without a real gain.
+    GAN validation scores scatter by a few percent from one evaluation to the
+    next, so the single lowest score is partly luck. Once the score plateaus,
+    the most trained epoch whose score is still within that noise of the best
+    is kept: further training keeps refining timbre (measured: the epoch 40
+    later on a plateau was closer to the target voice on three source
+    speakers) while a real regression, such as over-fitting, is never kept.
+
+    Early stopping watches a smoothed score and ends training after
+    ``patience_epochs`` without a real gain, but never before ``min_epochs``.
     """
 
     patience_epochs: int
+    min_epochs: int = 0
     history: list[list[float]] = field(default_factory=list)  # [epoch, score, smoothed]
-    best_score: float | None = None
-    best_epoch: int = 0
-    best_smoothed: float | None = None
+    best_score: float | None = None      # score of the kept epoch
+    best_epoch: int = 0                  # the kept epoch
+    lowest_score: float | None = None
+    lowest_smoothed: float | None = None
+    gain_reference: float | None = None  # smoothed score of the last real gain
     last_gain_epoch: int = 0
     stopped: bool = False
 
-    MIN_RELATIVE_GAIN = 0.002
+    MIN_RELATIVE_GAIN = 0.002   # what counts as progress for early stopping
+    SCORE_TOLERANCE = 0.04      # raw scores within the evaluation noise of the lowest
+    SMOOTHED_TOLERANCE = 0.01   # and the trend still at its low
     SMOOTHING = 0.6
 
     @classmethod
-    def restore(cls, status: dict, patience_epochs: int) -> ValidationTracker:
-        tracker = cls(patience_epochs)
+    def restore(cls, status: dict, patience_epochs: int, min_epochs: int = 0) -> ValidationTracker:
+        tracker = cls(patience_epochs, min_epochs)
         for epoch, score, *_ in status.get("validation") or []:
             tracker.add(int(epoch), float(score))
         tracker.stopped = False
         return tracker
 
     def add(self, epoch: int, score: float) -> bool:
-        """Record a score; True when it is the best so far (export this epoch)."""
+        """Record a score; True when this epoch should be kept (export it)."""
         previous = self.history[-1][2] if self.history else None
         smoothed = score if previous is None else self.SMOOTHING * previous + (1 - self.SMOOTHING) * score
         self.history.append([epoch, round(score, 4), round(smoothed, 4)])
-        if self.best_smoothed is None or smoothed < self.best_smoothed * (1 - self.MIN_RELATIVE_GAIN):
-            self.best_smoothed, self.last_gain_epoch = smoothed, epoch
-        improved = self.best_score is None or score < self.best_score
-        if improved:
+        if self.gain_reference is None or smoothed < self.gain_reference * (1 - self.MIN_RELATIVE_GAIN):
+            self.gain_reference, self.last_gain_epoch = smoothed, epoch
+        self.lowest_score = score if self.lowest_score is None else min(self.lowest_score, score)
+        self.lowest_smoothed = smoothed if self.lowest_smoothed is None else min(self.lowest_smoothed, smoothed)
+        keep = (score <= self.lowest_score * (1 + self.SCORE_TOLERANCE)
+                and smoothed <= self.lowest_smoothed * (1 + self.SMOOTHED_TOLERANCE))
+        if keep:
             self.best_score, self.best_epoch = score, epoch
-        return improved
+        return keep
 
     def should_stop(self, epoch: int) -> bool:
-        self.stopped = self.stopped or epoch - self.last_gain_epoch >= self.patience_epochs
+        if epoch >= self.min_epochs and epoch - self.last_gain_epoch >= self.patience_epochs:
+            self.stopped = True
         return self.stopped

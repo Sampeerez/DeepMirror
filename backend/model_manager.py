@@ -248,21 +248,26 @@ class ModelManager:
     def _warm_up(self, converter: VoiceConverter) -> float | None:
         """Render one realtime-sized window so the first live chunk pays no setup cost."""
         s = self.settings
-        window = int((s.STREAM_LOOKBACK_SECONDS + s.STREAM_LOOKAHEAD_SECONDS + s.CHUNK_SIZE / s.SAMPLE_RATE)
-                     * 16000) // 160 * 160
+        chunk_size, lookback, lookahead = self.stream_defaults()  # this device's live geometry
+        window = int((lookback + lookahead + chunk_size / s.SAMPLE_RATE) * 16000) // 160 * 160
         silence = np.zeros(window, dtype=np.float32)
+        # Like the live stream, vocode only the emitted end of the window.
+        tail = (chunk_size / s.SAMPLE_RATE + lookahead + s.STREAM_CROSSFADE_SECONDS + s.STREAM_SEARCH_SECONDS
+                + s.STREAM_DECODE_MARGIN_SECONDS)
         settings = self.default_conversion()
         try:
-            converter.convert(silence, settings, pad_seconds=s.STREAM_PAD_SECONDS, split_long_input=False)
+            converter.convert(silence, settings, pad_seconds=s.STREAM_PAD_SECONDS, split_long_input=False,
+                              tail_seconds=tail)
             started = time.perf_counter()
-            converter.convert(silence, settings, pad_seconds=s.STREAM_PAD_SECONDS, split_long_input=False)
+            converter.convert(silence, settings, pad_seconds=s.STREAM_PAD_SECONDS, split_long_input=False,
+                              tail_seconds=tail)
             if converter.compute.device.type == "cuda":
                 torch.cuda.synchronize()
         except Exception:
             logger.exception("Warm-up failed")
             return None
         elapsed = (time.perf_counter() - started) * 1000.0
-        budget = s.CHUNK_SIZE * 1000.0 / s.SAMPLE_RATE
+        budget = chunk_size * 1000.0 / s.SAMPLE_RATE
         level = logging.INFO if elapsed < budget else logging.WARNING
         logger.log(level, "Realtime render: %.0f ms per %.0f ms chunk (f0=%s)", elapsed, budget, settings.f0_method)
         return round(elapsed, 1)

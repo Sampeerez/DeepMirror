@@ -172,7 +172,7 @@ def run(job: Job) -> None:
         trainer.load_pretrained(paths[PRETRAINED[rate][0].name], paths[PRETRAINED[rate][1].name])
     total = plan.epochs
     save_every = max(1, int(spec.get("save_every", 25)))
-    tracker = ValidationTracker.restore(job.status, plan.patience_epochs)
+    tracker = ValidationTracker.restore(job.status, plan.patience_epochs, min_epochs=round(0.6 * total))
     tracker.last_gain_epoch = max(tracker.last_gain_epoch, trainer.epoch)  # a resume gets a fresh patience
     job.report(force=True, stage="train", stage_progress=trainer.epoch / total, epoch=trainer.epoch,
                total_epochs=total, batch_size=trainer.batch_size, precision=trainer.precision_label,

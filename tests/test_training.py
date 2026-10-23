@@ -223,8 +223,19 @@ class TestValidationTracker:
         from backend.training.plan import ValidationTracker
 
         tracker = ValidationTracker(patience_epochs=20)
-        improved = [tracker.add(epoch, score) for epoch, score in [(5, 3.0), (10, 2.5), (15, 2.7), (20, 2.9)]]
-        assert improved == [True, True, False, False] and tracker.best_epoch == 10
+        kept = [tracker.add(epoch, score) for epoch, score in [(5, 3.0), (10, 2.5), (15, 2.7), (20, 2.9)]]
+        assert kept == [True, True, False, False] and tracker.best_epoch == 10
+
+    def test_on_a_plateau_the_most_trained_epoch_is_kept(self):
+        from backend.training.plan import ValidationTracker
+
+        # The scores of the real 5-minute run from epoch 85 on: noise around a plateau.
+        tracker = ValidationTracker(patience_epochs=40)
+        for epoch, score in [(80, 0.4098), (85, 0.3999), (90, 0.4086), (95, 0.4109), (100, 0.3957), (105, 0.4067),
+                             (110, 0.4046), (115, 0.407), (120, 0.4023), (125, 0.4023), (130, 0.4032)]:
+            tracker.add(epoch, score)
+        assert tracker.best_epoch == 130
+        assert not tracker.add(135, 0.45) and tracker.best_epoch == 130  # a real regression is never kept
 
     def test_stops_after_patience_without_gain(self):
         from backend.training.plan import ValidationTracker
@@ -233,6 +244,10 @@ class TestValidationTracker:
         for epoch, score in [(5, 2.0), (10, 2.1), (15, 2.1)]:
             tracker.add(epoch, score)
         assert not tracker.should_stop(10) and tracker.should_stop(15)
+        late = ValidationTracker(patience_epochs=10, min_epochs=30)
+        for epoch, score in [(5, 2.0), (10, 2.1), (15, 2.1)]:
+            late.add(epoch, score)
+        assert not late.should_stop(15)
 
     def test_restores_from_status(self):
         from backend.training.plan import ValidationTracker
