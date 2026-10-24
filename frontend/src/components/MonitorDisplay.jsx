@@ -1,6 +1,5 @@
 import React, { memo, useEffect, useMemo, useRef } from 'react';
 import { Pause } from 'lucide-react';
-import StreamDiagnostics from './StreamDiagnostics';
 import { levelToPercent, nextPeak } from '../lib/meters';
 
 // Solid zone coloring, VU convention: green / yellow / red. Listed as literal
@@ -110,13 +109,14 @@ function Sparkline({ history }) {
 
 function StatChip({ label, value }) {
   return (
-    <div className="rounded-sm border border-line bg-input px-3 py-2 text-center">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-subtle">{label}</p>
-      <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-fg-secondary">{value}</p>
+    <div className="min-w-0 rounded-sm border border-line bg-input px-2 py-1.5 text-center">
+      <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">{label}</p>
+      <p className="mt-0.5 truncate font-mono text-xs font-semibold tabular-nums text-fg-secondary">{value}</p>
     </div>
   );
 }
 
+/** The Monitor card: spectrum, levels, latency and the recorder. */
 function MonitorDisplay({
   meters,
   latency,
@@ -124,9 +124,8 @@ function MonitorDisplay({
   serverMs,
   serverStats,
   bypass = false,
-  streamInfo,
-  playbackStats,
-  transport,
+  visualizer = null,
+  recorder = null,
 }) {
   const latencyMs = Math.round(latency);
   const networkMs = Math.max(0, Math.round(latency - (serverMs || 0)));
@@ -140,11 +139,11 @@ function MonitorDisplay({
           : 'text-danger-fg';
 
   return (
-    <section className="panel p-5">
-      <div className="flex items-center justify-between">
-        <div>
+    <section className="panel flex h-full min-h-0 flex-col p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <p className="panel-kicker">Monitor</p>
-          <h2 className="panel-title">Levels & latency</h2>
+          <h2 className="panel-title truncate">Levels & recorder</h2>
         </div>
         {bypass ? (
           <span className="rounded-sm border border-warn-line-strong bg-warn-bg px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-warn-fg">
@@ -162,47 +161,34 @@ function MonitorDisplay({
         ) : null}
       </div>
 
-      {serverStats?.processingError && !bypass && (
-        <p role="alert" className="mt-3 text-sm text-danger-fg">{serverStats.processingError}</p>
-      )}
-      <div className="mt-5 space-y-3.5">
+      <div className="mt-4 shrink-0 space-y-3">
+        {visualizer}
+        {serverStats?.processingError && !bypass ? (
+          <p role="alert" className="truncate text-xs text-danger-fg" title={serverStats.processingError}>
+            {serverStats.processingError}
+          </p>
+        ) : null}
         <VuMeter label="Input" meters={meters} channel="input" />
         <VuMeter label="Output" meters={meters} channel="output" />
-      </div>
 
-      <div className="mt-5 rounded-sm border border-line bg-input p-4">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-subtle">
-              Round trip
-            </p>
-            <p className={`mt-1 font-mono text-3xl font-semibold tabular-nums tracking-normal ${latencyColor}`}>
-              {latencyMs > 0 ? `${latencyMs}` : '--'}
-              <span className="ml-1 text-sm text-fg-subtle">ms</span>
-            </p>
-          </div>
-          <div className="w-28 shrink-0 sm:w-36">
+        <div className="grid grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))] items-stretch gap-2">
+          <div className="min-w-0 rounded-sm border border-line bg-input px-2 py-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">Latency</p>
+              <p className={`shrink-0 font-mono text-xs font-semibold tabular-nums ${latencyColor}`}>
+                {latencyMs > 0 ? `${latencyMs} ms` : '--'}
+              </p>
+            </div>
             <Sparkline history={latencyHistory} />
           </div>
+          <StatChip label="Model" value={serverStats?.modelMs > 0 ? `${Math.round(serverStats.modelMs)} ms` : '--'} />
+          <StatChip label="Network" value={latencyMs > 0 ? `${networkMs} ms` : '--'} />
+          <StatChip label="Duty"
+            value={serverStats?.activeModel ? `${Math.round(serverStats.inferenceDutyPercent || 0)}%` : '--'} />
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <StatChip
-          label="Model"
-          value={serverStats?.modelMs > 0 ? `${Math.round(serverStats.modelMs)}ms` : '--'}
-        />
-        <StatChip
-          label="DSP"
-          value={serverStats?.dspMs > 0 ? `${Math.max(1, Math.round(serverStats.dspMs))}ms` : '--'}
-        />
-        <StatChip label="Transport" value={latencyMs > 0 ? `${networkMs}ms` : '--'} />
-        <StatChip
-          label="Duty"
-          value={serverStats?.activeModel ? `${Math.round(serverStats.inferenceDutyPercent || 0)}%` : '--'}
-        />
-      </div>
-      <StreamDiagnostics streamInfo={streamInfo} playbackStats={playbackStats} transport={transport} serverMs={serverMs} serverStats={serverStats || {}} />
+      {recorder ? <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-line pt-3">{recorder}</div> : null}
     </section>
   );
 }

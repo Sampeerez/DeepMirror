@@ -10,6 +10,7 @@ import {
   getActiveModel,
 } from '../lib/api';
 import { formatBytes } from '../lib/format';
+import Button from './Button';
 
 // A "Confirm" that stays armed forever is a trap for the next stray click.
 const DELETE_CONFIRM_MS = 4000;
@@ -25,7 +26,7 @@ function MetaBadge({ children, tone = 'default' }) {
     emerald: 'border-ok-line bg-ok-bg text-ok-fg',
   };
   return (
-    <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-medium ${tones[tone] || tones.default}`}>
+    <span className={`whitespace-nowrap rounded-sm border px-2 py-0.5 text-[11px] font-medium ${tones[tone] || tones.default}`}>
       {children}
     </span>
   );
@@ -195,15 +196,8 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
           <h2 className="panel-title">Voice models</h2>
         </div>
 
-        <button
-          onClick={loadModels}
-          disabled={loading}
-          className="chip-button inline-flex h-9 w-9 items-center justify-center !p-0"
-          aria-label="Refresh models"
-          title="Refresh models"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
-        </button>
+        <Button icon={RefreshCw} size="md" onClick={loadModels} disabled={loading} aria-label="Refresh models"
+          title="Refresh models" className={loading ? '[&_svg]:animate-spin' : ''} />
       </div>
 
       <p className="mt-2 text-sm text-fg-subtle">
@@ -271,7 +265,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
       {error && (
         <div className="mt-4 flex items-start gap-2 rounded-md border border-danger-line bg-danger-bg p-4">
           <CircleX className="mt-0.5 h-4 w-4 shrink-0 text-danger-fg" aria-hidden="true" />
-          <p className="text-sm text-danger-fg">{error}</p>
+          <p className="min-w-0 break-words text-sm text-danger-fg">{error}</p>
         </div>
       )}
 
@@ -332,48 +326,29 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-2">
+                  {/* Same width in every state, so the row never shifts. */}
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
                     {isActive ? (
-                      <button
-                        onClick={handleDeactivate}
-                        disabled={isOperating}
-                        title="Click to deactivate"
-                        data-tone="success"
-                        className="frost-control min-h-8 px-3 py-1.5 text-xs font-medium"
-                      >
-                        {isOperating ? '…' : 'Active'}
-                      </button>
+                      <Button variant="success" onClick={handleDeactivate} loading={isOperating} className="w-28"
+                        title="Click to deactivate">
+                        Active
+                      </Button>
                     ) : (
-                      <button
-                        onClick={() => handleActivate(name)}
-                        disabled={isOperating}
-                        className="chip-button"
-                      >
-                        {isOperating ? 'Loading… (warming up)' : 'Activate'}
-                      </button>
+                      <Button onClick={() => handleActivate(name)} loading={isOperating} className="w-28"
+                        title={isOperating ? 'Loading the voice and warming it up' : 'Use this voice'}>
+                        {isOperating ? 'Loading…' : 'Activate'}
+                      </Button>
                     )}
-
-                    <a
-                      href={modelDownloadUrl(name)}
-                      download
-                      aria-label={`Download ${name} with its index`}
-                      title="Download the voice (.pth and .index in a .zip)"
-                      className="frost-control inline-flex min-h-8 items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-fg-muted"
-                    >
-                      <Download className="h-3.5 w-3.5" aria-hidden="true" /> Download
-                    </a>
-
-                    <button
-                      onClick={() => handleDelete(name)}
-                      disabled={isOperating}
-                      data-tone={deleteConfirm === name ? 'danger' : undefined}
+                    <Button href={modelDownloadUrl(name)} download icon={Download} className="w-28"
+                      aria-label={`Download ${name} with its index`} title="Download the voice (.pth and .index in a .zip)">
+                      Download
+                    </Button>
+                    <Button icon={Trash2} variant={deleteConfirm === name ? 'danger' : 'secondary'} className="w-28"
+                      onClick={() => handleDelete(name)} disabled={isOperating}
                       aria-label={deleteConfirm === name ? `Confirm deleting ${name}` : `Delete ${name}`}
-                      title={deleteConfirm === name ? 'Click again to delete permanently' : undefined}
-                      className="frost-control inline-flex min-h-8 min-w-[84px] items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-fg-muted"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      title={deleteConfirm === name ? 'Click again to delete permanently' : undefined}>
                       {deleteConfirm === name ? 'Confirm' : 'Delete'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import Button from './Button';
 import RuntimeReadiness from './RuntimeReadiness';
+import StreamDiagnostics from './StreamDiagnostics';
 import Toggle from './Toggle';
 import {
   Activity,
@@ -123,6 +125,9 @@ export default function GlobalSettings({
   runtimeChecking,
   runtimeError,
   onRefreshRuntime,
+  streamInfo = null,
+  playbackStats = null,
+  transport = {},
 }) {
   const dialogRef = useRef(null);
 
@@ -185,14 +190,7 @@ export default function GlobalSettings({
         </div>
 
         {onClose ? (
-          <button
-            onClick={onClose}
-            className="frost-control inline-flex h-10 w-10 items-center justify-center text-fg-muted hover:text-fg-secondary"
-            aria-label="Close settings"
-            title="Close settings"
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
+          <Button icon={X} size="md" variant="ghost" onClick={onClose} aria-label="Close settings" title="Close settings" />
         ) : null}
       </div>
 
@@ -272,14 +270,10 @@ export default function GlobalSettings({
                 )}
               </div>
               {recommendation.ready ? (
-                <button
-                  type="button"
-                  disabled={recommendationApplied}
-                  onClick={() => onChange?.({ chunkSize: recommendation.profile.chunkSize })}
-                  className="chip-button shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
-                >
+                <Button disabled={recommendationApplied} className="w-24"
+                  onClick={() => onChange?.({ chunkSize: recommendation.profile.chunkSize })}>
                   {recommendationApplied ? 'Applied' : 'Apply'}
-                </button>
+                </Button>
               ) : null}
             </div>
           </div>
@@ -294,7 +288,7 @@ export default function GlobalSettings({
                 value={config.sampleRate}
                 onChange={(event) => onChange?.({ sampleRate: Number(event.target.value) })}
                 disabled={disabled}
-                className="native-select-safe mt-2 w-full rounded-lg border border-line-strong bg-input px-3 py-2.5 text-sm text-fg transition-colors focus:border-line-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="native-select-safe field mt-2"
               >
                 {sampleRateOptions.map((value) => (
                   <option key={value} value={value}>
@@ -313,7 +307,7 @@ export default function GlobalSettings({
                 value={config.chunkSize}
                 onChange={(event) => onChange?.({ chunkSize: Number(event.target.value) })}
                 disabled={disabled}
-                className="native-select-safe mt-2 w-full rounded-lg border border-line-strong bg-input px-3 py-2.5 text-sm text-fg transition-colors focus:border-line-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="native-select-safe field mt-2"
               >
                 {chunkSizeOptions.map((value) => (
                   <option key={value} value={value}>
@@ -406,6 +400,10 @@ export default function GlobalSettings({
               a phase-aligned crossfade. Server-side delay: {config.stream.algorithmic_delay_ms} ms.
             </p>
           ) : null}
+          <div className="mt-4">
+            <StreamDiagnostics streamInfo={streamInfo} playbackStats={playbackStats} transport={transport}
+              serverMs={serverMs} serverStats={serverStats} />
+          </div>
         </div>
       </div>
     </section>

@@ -1,26 +1,16 @@
 import React, { memo, useCallback, useEffect, useState } from 'react';
-import { LoaderCircle, Plus, Trash2, X } from 'lucide-react';
+import { Check, Plus, Trash2, X } from 'lucide-react';
+import Button from './Button';
 import { fetchPresets, savePreset, deletePreset } from '../lib/api';
 
 function PresetChip({ preset, active, onApply, onDelete }) {
   return (
     <div className="group relative shrink-0">
-      <button
-        onClick={() => onApply(preset)}
-        title={preset.description}
-        aria-pressed={active}
-        data-selected={active}
-        className={`frost-control min-h-9 px-3 py-2 text-sm font-medium ${active ? 'text-fg' : 'text-fg-muted hover:text-fg-secondary'}`}
-      >
-        <span className="flex items-center gap-1.5 whitespace-nowrap">
-          {preset.emoji && (
-            <span aria-hidden="true" className="text-base leading-none">
-              {preset.emoji}
-            </span>
-          )}
-          {preset.name}
-        </span>
-      </button>
+      <Button size="md" onClick={() => onApply(preset)} title={preset.description} aria-pressed={active}
+        selected={active} className={`max-w-48 ${active ? 'text-fg' : ''}`}>
+        {preset.emoji ? <span aria-hidden="true" className="mr-1.5">{preset.emoji}</span> : null}
+        {preset.name}
+      </Button>
       {onDelete && (
         /* reveal-on-hover: tucked away until hover/focus on a mouse-driven
            device, always visible where there is no hover to reveal it. */
@@ -90,70 +80,46 @@ function PresetBar({ activePresetId, onApplyPreset, getCurrentSettings, refreshR
     }
   };
 
+  // One row of fixed height: the chips scroll sideways, saving happens in place.
   return (
-    <section id="presets" className="panel scroll-mt-20 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-medium text-fg-secondary">Presets</p>
+    <section id="presets" className="panel flex flex-wrap items-center gap-3 p-3 sm:flex-nowrap">
+      <p className="shrink-0 text-xs font-semibold text-fg-secondary">Presets</p>
 
-        <div className="flex items-center gap-2">
-          {showSave ? (
-            <div className="flex items-center gap-2">
-              <input
-                value={saveName}
-                onChange={(event) => setSaveName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') handleSave();
-                  if (event.key === 'Escape') setShowSave(false);
-                }}
-                placeholder="Preset name"
-                aria-label="Preset name"
-                maxLength={40}
-                autoFocus
-                className="w-40 min-w-0 rounded-lg border border-line-strong bg-input px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-line-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]"
-              />
-              <button onClick={handleSave} disabled={saving || !saveName.trim()} className="chip-button inline-flex items-center gap-1.5">
-                {saving ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
-                Save
-              </button>
-              <button
-                onClick={() => setShowSave(false)}
-                className="chip-button inline-flex h-8 w-8 items-center justify-center !p-0"
-                aria-label="Cancel preset save"
-                title="Cancel"
-              >
-                <X className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-            </div>
-          ) : (
-            <button onClick={() => setShowSave(true)} className="chip-button inline-flex items-center gap-1.5">
-              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-              Save current
-            </button>
-          )}
-        </div>
-      </div>
-
-      {error && <p className="mt-2 text-xs text-danger-fg" role="alert">{error}</p>}
-
-      <div className="mt-2 flex gap-2 overflow-x-auto pb-1 pt-1">
+      <div className="order-last flex min-w-0 basis-full gap-2 overflow-x-auto py-1 sm:order-none sm:basis-auto sm:flex-1">
         {presets.builtin.map((preset) => (
-          <PresetChip
-            key={preset.id}
-            preset={preset}
-            active={activePresetId === preset.id}
-            onApply={onApplyPreset}
-          />
+          <PresetChip key={preset.id} preset={preset} active={activePresetId === preset.id} onApply={onApplyPreset} />
         ))}
         {presets.user.length > 0 && <div className="mx-1 w-px shrink-0 self-stretch bg-line-strong" />}
         {presets.user.map((preset) => (
-          <PresetChip
-            key={preset.id}
-            preset={preset}
-            active={activePresetId === preset.id}
-            onApply={onApplyPreset}
-            onDelete={handleDelete}
-          />
+          <PresetChip key={preset.id} preset={preset} active={activePresetId === preset.id} onApply={onApplyPreset}
+            onDelete={handleDelete} />
         ))}
+        {error ? <p className="self-center truncate text-xs text-danger-fg" role="alert" title={error}>{error}</p> : null}
+      </div>
+
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {showSave ? (
+          <>
+            <input
+              value={saveName}
+              onChange={(event) => setSaveName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') handleSave();
+                if (event.key === 'Escape') setShowSave(false);
+              }}
+              placeholder="Preset name"
+              aria-label="Preset name"
+              maxLength={40}
+              autoFocus
+              className="field w-40"
+            />
+            <Button size="md" icon={Check} variant="primary" onClick={handleSave} loading={saving}
+              disabled={!saveName.trim()} aria-label="Save preset" title="Save preset" />
+            <Button size="md" icon={X} onClick={() => setShowSave(false)} aria-label="Cancel preset save" title="Cancel" />
+          </>
+        ) : (
+          <Button size="md" icon={Plus} onClick={() => setShowSave(true)} className="w-40">Save current</Button>
+        )}
       </div>
     </section>
   );

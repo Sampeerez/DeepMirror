@@ -69,6 +69,12 @@ ASSETS = (
     Asset("vad", "silero_vad.onnx",
           "https://github.com/snakers4/silero-vad/raw/v6.2.3/src/silero_vad/data/silero_vad.onnx",
           "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3", 2327524, False),
+    # DeepFilterNet3 (MIT/Apache-2.0), streaming ONNX export (torchDF): removes room noise,
+    # keyboard clicks and breaths from what the voice model hears.
+    Asset("denoiser", "deepfilternet3_streaming.onnx",
+          "https://huggingface.co/kimtos-labs/denoiser-dfn3/resolve/888f33c41851d7168ae31c3637c323b9e2f3c2a4/"
+          "denoiser_model.onnx",
+          "fe5eb64fa2e4154c83f8e4935e82871c850c154387ee892e0ab65fe179e7d8c9", 16104687, False),
 )
 
 

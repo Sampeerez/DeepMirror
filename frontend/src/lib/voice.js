@@ -20,7 +20,7 @@ export const DEFAULT_VOICE = {
   // Around the model (live): convert speech only, clean the room noise out of
   // what the model hears, keep the room audible unconverted, match your volume.
   isolateVoice: true,
-  noiseReductionDb: 12,
+  noiseReductionDb: 60,   // the maximum: all noise removed (DeepFilterNet)
   ambientDb: -60,   // off: nothing of your raw microphone is ever played
   matchLoudness: true,
   customized: [],

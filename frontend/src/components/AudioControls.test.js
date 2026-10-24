@@ -45,6 +45,7 @@ describe('AudioControls connection state', () => {
     const html = render({ wsStatus: 'connected' });
     expect(html).not.toContain('Retry now');
     expect(html).not.toContain('Waiting for server connection');
-    expect(html).toContain('Start Voice Changer');
+    expect(html).toContain('Start');
+    expect(html).toContain('No voice active');
   });
 });

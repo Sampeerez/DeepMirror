@@ -28,6 +28,7 @@ import numpy as np
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.audio.effects import EffectsChain
+from backend.audio.neural_denoise import load_neural_denoiser
 from backend.audio.protocol import decode_frame, encode_frame
 from backend.audio.streaming import RealtimeVoiceStream, StreamCleanup, StreamTiming
 from backend.audio.voice_activity import load_vad
@@ -46,7 +47,7 @@ CHUNK_SIZE_RANGE = (128, 65536)
 SILENCE_THRESHOLD_RANGE = (-80.0, -20.0)
 LOOKBACK_RANGE = (0.2, 3.0)
 LOOKAHEAD_RANGE = (0.0, 0.5)
-NOISE_REDUCTION_RANGE = (0.0, 30.0)
+NOISE_REDUCTION_RANGE = (0.0, 60.0)   # 60 = remove all the noise
 AMBIENT_RANGE = (-60.0, 0.0)
 
 
@@ -310,7 +311,9 @@ class StreamSession:
                 return audio, converter.output_rate
 
             vad = load_vad(self.manager.vad_path(), lambda: self.silence_threshold_db)
-            stream = RealtimeVoiceStream(self.sample_rate, render, self.timing, vad=vad)
+            neural = (load_neural_denoiser(self.manager.denoiser_path(), self.sample_rate)
+                      if self.manager.neural_denoise_fits(self.chunk_size, self.sample_rate) else None)
+            stream = RealtimeVoiceStream(self.sample_rate, render, self.timing, vad=vad, neural=neural)
             self._stream = stream
             stream.set_cleanup(self._stream_cleanup())
             self._stream_converter = converter
@@ -407,6 +410,7 @@ class StreamSession:
             "voice_detector": "neural" if (stats and stats.neural_vad) or (stream is None and self.manager.vad_path())
             else "level",
             "speech_probability": stats.speech_probability if stats else 0.0,
+            "denoiser": stream.denoiser_kind if stream is not None else None,
             "noise_reduced_db": stats.noise_reduction_db if stats else 0.0,
             "loudness_gain_db": stats.loudness_gain_db if stats else 0.0,
         }

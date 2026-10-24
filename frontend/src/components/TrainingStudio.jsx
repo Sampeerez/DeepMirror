@@ -1,12 +1,13 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CircleX, Cpu, Download, GraduationCap, LoaderCircle, Play, RotateCcw, Square, Trash2, Upload, Wand2,
+  CircleX, Cpu, Download, GraduationCap, Play, RotateCcw, Square, Trash2, Upload, Wand2,
 } from 'lucide-react';
 import {
   activateModel, createTrainingJob, deleteTrainingJob, fetchTrainingInfo, fetchTrainingJobs, modelDownloadUrl,
   resumeTrainingJob, stopTrainingJob,
 } from '../lib/api';
 import { formatBytes } from '../lib/format';
+import Button from './Button';
 import {
   STAGE_LABELS, STATE_LABELS, bestEpochSummary, canResume, datasetQuality, formatDuration, isActiveJob, jobModelFile,
   plannedEpochs, readAudioDuration,
@@ -42,9 +43,7 @@ function Field({ label, htmlFor, hint, children }) {
   );
 }
 
-const inputClass = 'w-full rounded-lg border border-line-strong bg-input px-3 py-2.5 text-sm text-fg '
-  + 'focus:border-line-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 '
-  + 'focus-visible:outline-[color:var(--frost-focus)] disabled:cursor-not-allowed disabled:opacity-50';
+const inputClass = 'field';
 
 function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
   const [moreEpochs, setMoreEpochs] = useState('');
@@ -63,18 +62,18 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
             {job.segments ? ` · ${job.segments} segments` : ''}
           </p>
         </div>
-        <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-medium ${STATE_BADGE[job.state] || STATE_BADGE.queued}`}>
+        <span className={`shrink-0 whitespace-nowrap rounded-sm border px-2 py-0.5 text-[11px] font-medium ${STATE_BADGE[job.state] || STATE_BADGE.queued}`}>
           {STATE_LABELS[job.state] || job.state}
         </span>
       </div>
 
       <div className="mt-4">
         <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="text-fg-secondary">
+          <span className="min-w-0 truncate text-fg-secondary" title={job.message || undefined}>
             {active ? (STAGE_LABELS[job.stage] || job.message) : (job.message || STAGE_LABELS[job.stage])}
             {job.stage === 'train' && job.epoch ? ` · epoch ${job.epoch}/${plannedEpochs(job)}` : ''}
           </span>
-          <span className="font-mono tabular-nums text-fg-muted">
+          <span className="shrink-0 font-mono tabular-nums text-fg-muted">
             {progress}%{active && job.eta_seconds ? ` · ${formatDuration(job.eta_seconds)} left` : ''}
           </span>
         </div>
@@ -102,53 +101,40 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
 
       {job.warnings?.length ? (
         <ul className="mt-3 space-y-1 text-xs text-warn-fg">
-          {job.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          {job.warnings.map((warning) => <li key={warning} className="break-words">{warning}</li>)}
         </ul>
       ) : null}
       {job.error ? <p className="mt-3 break-words text-xs text-danger-fg">{job.error}</p> : null}
       {job.exported_epoch ? (
-        <p className="mt-3 text-xs text-fg-subtle">
-          {bestEpochSummary(job)} File: <span className="font-mono text-fg-secondary">{jobModelFile(job)}</span>
+        <p className="mt-3 break-words text-xs text-fg-subtle">
+          {bestEpochSummary(job)} File: <span className="break-all font-mono text-fg-secondary">{jobModelFile(job)}</span>
           {job.index ? ' with its index' : ''}
           {job.f0_stats?.median_hz ? ` · voice pitch ${Math.round(job.f0_stats.median_hz)} Hz (used by Auto pitch)` : ''}.
         </p>
       ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        {active ? (
-          <button type="button" className="chip-button inline-flex items-center gap-1.5" onClick={() => onStop(job)} disabled={busy}>
-            <Square className="h-3.5 w-3.5" aria-hidden="true" /> Stop and save
-          </button>
-        ) : null}
-        {canUse ? (
-          <button type="button" data-tone="primary" className="frost-control inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
-            onClick={() => onUse(job)} disabled={busy}>
-            <Wand2 className="h-3.5 w-3.5" aria-hidden="true" /> Use this voice
-          </button>
-        ) : null}
+        {active ? <Button icon={Square} onClick={() => onStop(job)} disabled={busy}>Stop and save</Button> : null}
+        {canUse ? <Button variant="primary" icon={Wand2} onClick={() => onUse(job)} disabled={busy}>Use this voice</Button> : null}
         {job.exported_epoch && !active ? (
-          <a href={modelDownloadUrl(jobModelFile(job))} download className="chip-button inline-flex items-center gap-1.5"
+          <Button href={modelDownloadUrl(jobModelFile(job))} download icon={Download}
             title="The trained voice is already saved in Models; this downloads a copy (.pth and .index)">
-            <Download className="h-3.5 w-3.5" aria-hidden="true" /> Download voice (.zip)
-          </a>
+            Download voice (.zip)
+          </Button>
         ) : null}
         {canResume(job) ? (
           <>
             <input type="number" min={(job.epoch || 0) + 1} max={2000} placeholder={String(Math.max(plannedEpochs(job) || 0, (job.epoch || 0) + 100))}
               value={moreEpochs} onChange={(event) => setMoreEpochs(event.target.value)}
-              className="w-24 rounded-md border border-line-strong bg-input px-2 py-1 text-xs text-fg"
-              aria-label="Total epochs when continuing" />
-            <button type="button" className="chip-button inline-flex items-center gap-1.5" disabled={busy}
-              onClick={() => onResume(job, moreEpochs ? Number(moreEpochs) : null)}>
-              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Continue training
-            </button>
+              className="field h-8 w-24 text-xs" aria-label="Total epochs when continuing" />
+            <Button icon={RotateCcw} disabled={busy} onClick={() => onResume(job, moreEpochs ? Number(moreEpochs) : null)}>
+              Continue training
+            </Button>
           </>
         ) : null}
         {!active ? (
-          <button type="button" className="chip-button ml-auto inline-flex items-center gap-1.5" disabled={busy}
-            onClick={() => onDelete(job)} aria-label={`Delete training ${job.name}`}>
-            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Delete
-          </button>
+          <Button icon={Trash2} className="ml-auto" disabled={busy} onClick={() => onDelete(job)}
+            aria-label={`Delete training ${job.name}`}>Delete</Button>
         ) : null}
       </div>
     </article>
@@ -308,13 +294,11 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           <ul className="mt-4 divide-y divide-line rounded-lg border border-line">
             {fileSummary.map((item, index) => (
               <li key={item.key} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
-                <span className="min-w-0 truncate text-fg-secondary">{item.name}</span>
-                <span className="flex shrink-0 items-center gap-3 font-mono text-fg-faint">
+                <span className="min-w-0 truncate text-fg-secondary" title={item.name}>{item.name}</span>
+                <span className="flex shrink-0 items-center gap-2 font-mono text-fg-faint">
                   {item.seconds ? formatDuration(item.seconds) : '?'} · {formatBytes(item.size)}
-                  <button type="button" className="text-fg-subtle hover:text-fg" aria-label={`Remove ${item.name}`}
-                    onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))}>
-                    <CircleX className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
+                  <Button icon={CircleX} variant="ghost" aria-label={`Remove ${item.name}`} title="Remove"
+                    onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))} />
                 </span>
               </li>
             ))}
@@ -324,7 +308,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           {totalSeconds ? `${formatDuration(totalSeconds)} in total. ` : ''}{quality.text}
         </p>
 
-        <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Voice name" htmlFor="training-name" hint="Saved as <name>.pth and <name>.index in Models.">
             <input id="training-name" className={inputClass} value={name} maxLength={60}
               onChange={(event) => setName(event.target.value)} placeholder="my_voice" />
@@ -355,28 +339,20 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             <input id="training-batch" type="number" min={1} max={32} className={inputClass} value={autoPlan ? '' : batchSize}
               disabled={autoPlan} onChange={(event) => setBatchSize(event.target.value)} placeholder="Auto" />
           </Field>
+          <Field label="Save every N epochs" htmlFor="training-save" hint="Checkpoint and update the usable voice this often.">
+            <input id="training-save" type="number" min={1} max={500} className={inputClass} value={saveEvery}
+              onChange={(event) => setSaveEvery(Number(event.target.value) || 25)} />
+          </Field>
         </div>
-        <details className="mt-4">
-          <summary className="cursor-pointer text-xs font-medium text-fg-secondary">Advanced</summary>
-          <div className="mt-3 max-w-xs">
-            <Field label="Save every N epochs" htmlFor="training-save" hint="Checkpoint and update the usable voice this often.">
-              <input id="training-save" type="number" min={1} max={500} className={inputClass} value={saveEvery}
-                onChange={(event) => setSaveEvery(Number(event.target.value) || 25)} />
-            </Field>
-          </div>
-        </details>
 
-        {error ? <p className="mt-4 rounded-md border border-danger-line bg-danger-bg p-3 text-sm text-danger-fg" role="alert">{error}</p> : null}
+        {error ? <p className="mt-4 break-words rounded-md border border-danger-line bg-danger-bg p-3 text-sm text-danger-fg" role="alert">{error}</p> : null}
         {notice ? <p className="mt-4 rounded-md border border-ok-line bg-ok-bg p-3 text-sm text-ok-fg" role="status">{notice}</p> : null}
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button type="button" data-tone="primary" onClick={start} disabled={!canStart}
-            className="frost-control inline-flex min-h-11 items-center gap-2 px-6 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45">
-            {uploadProgress !== null
-              ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
-              : <Play className="h-4 w-4" aria-hidden="true" />}
+          <Button variant="primary" size="lg" icon={Play} onClick={start} disabled={!canStart}
+            loading={uploadProgress !== null} className="w-48">
             {uploadProgress !== null ? `Uploading ${uploadProgress}%` : 'Start training'}
-          </button>
+          </Button>
           {anyActive ? <span className="text-xs text-fg-subtle">A voice is already training.</span> : null}
         </div>
       </section>

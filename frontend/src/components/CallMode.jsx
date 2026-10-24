@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Headphones, LoaderCircle, PhoneCall } from 'lucide-react';
+import Button from './Button';
 import Toggle from './Toggle';
 import { fetchVirtualMic, installVirtualMic } from '../lib/api';
 import { findCableOutput } from '../lib/callMode';
@@ -16,7 +17,7 @@ const APPS = [
  * monitor). The virtual cable is VB-CABLE (Windows, macOS) or a PipeWire /
  * PulseAudio device the studio creates (Linux).
  */
-export default function CallMode({ devices, enabled, onEnabledChange, monitorId, onMonitorChange, running }) {
+export default function CallMode({ devices, enabled, onEnabledChange, monitorId, onMonitorChange, running, onCallInput }) {
   const [status, setStatus] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState(null);
@@ -30,6 +31,7 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { if (status?.call_input) onCallInput?.(status.call_input); }, [status, onCallInput]);
 
   const busy = status && ['downloading', 'installing'].includes(status.state);
   useEffect(() => {
@@ -61,7 +63,7 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
           <PhoneCall className="h-4 w-4 shrink-0 text-fg-subtle" aria-hidden="true" />
           <div className="min-w-0">
             <p className="text-xs font-medium text-fg-muted">Call mode (Discord, Teams, Meet…)</p>
-            <p className="mt-1 text-[11px] text-fg-faint">
+            <p className="mt-1 break-words text-[11px] text-fg-faint">
               {enabled && ready ? `Your converted voice goes to “${status.call_input}”.`
                 : 'Send the converted voice to a virtual microphone instead of your speakers.'}
             </p>
@@ -80,15 +82,13 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
           {!confirming ? (
             <>
               A virtual microphone is needed for calls and is not installed yet.
-              <button type="button" className="chip-button ml-2" onClick={() => setConfirming(true)}>
-                Install virtual microphone
-              </button>
+              <span className="mt-2 flex"><Button onClick={() => setConfirming(true)}>Install virtual microphone</Button></span>
             </>
           ) : status.platform === 'Linux' ? (
             <>
               The studio will create “OpenVoiceChanger Microphone” with PipeWire/PulseAudio (nothing is installed;
               it disappears when the studio closes).
-              <button type="button" className="chip-button ml-2" onClick={install}>Create it</button>
+              <span className="mt-2 flex"><Button variant="primary" onClick={install}>Create it</Button></span>
             </>
           ) : (
             <>
@@ -96,8 +96,8 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
               vb-cable.com), and open its installer. Click <b>Install Driver</b> there and accept the administrator
               prompt. VB-Audio recommends restarting the computer afterwards.
               <span className="mt-2 flex gap-2">
-                <button type="button" className="chip-button" onClick={install}>Download and install</button>
-                <button type="button" className="chip-button" onClick={() => setConfirming(false)}>Cancel</button>
+                <Button variant="primary" onClick={install}>Download and install</Button>
+                <Button onClick={() => setConfirming(false)}>Cancel</Button>
               </span>
             </>
           )}
@@ -113,11 +113,11 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
       ) : null}
       {status?.installed && !cable ? (
         <p className="mt-3 text-[11px] text-warn-fg">
-          The virtual cable is installed but the browser does not list it yet: press Refresh above
+          The virtual cable is installed but the browser does not list it yet: press the refresh button
           {status.platform !== 'Linux' ? ' (or restart the computer, as VB-Audio recommends)' : ''}.
         </p>
       ) : null}
-      {error ? <p className="mt-3 text-[11px] text-danger-fg">{error}</p> : null}
+      {error ? <p className="mt-3 break-words text-[11px] text-danger-fg">{error}</p> : null}
 
       {enabled && ready ? (
         <div className="mt-4 space-y-3">
@@ -127,7 +127,7 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
             </label>
             <select id="call-monitor" value={monitorId} disabled={running}
               onChange={(event) => onMonitorChange(event.target.value)}
-              className="native-select-safe mt-2 w-full rounded-[var(--frost-radius)] border border-line bg-input px-3 py-2 text-sm text-fg">
+              className="native-select-safe field mt-2">
               <option value="">No (recommended in calls)</option>
               {devices.outputDevices.filter((device) => device.deviceId !== cable.deviceId).map((device) => (
                 <option key={device.deviceId} value={device.deviceId}>{device.label || 'Speaker'}</option>

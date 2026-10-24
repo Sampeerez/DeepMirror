@@ -37,6 +37,8 @@ from backend.inference.voice_model import VoiceModel
 
 logger = logging.getLogger(__name__)
 
+NEURAL_DENOISE_COST = 0.22   # DeepFilterNet's CPU time per second of audio (measured, 1-2 threads)
+
 MODEL_EXTENSIONS = {".pth", ".pt"}
 INDEX_EXTENSION = ".index"
 MAX_MODEL_BYTES = 4 * 1024**3
@@ -148,6 +150,24 @@ class ModelManager:
             self.activate(name)
         except Exception:
             logger.exception("Could not restore the last voice %s", name)
+
+    def denoiser_path(self) -> Path | None:
+        """DeepFilterNet weights once downloaded (the spectral gate stands in before)."""
+        return self.assets.path("denoiser") if self.assets.ready("denoiser") else None
+
+    def neural_denoise_fits(self, chunk_size: int, sample_rate: int) -> bool:
+        """Whether DeepFilterNet fits the realtime budget next to the voice model.
+
+        It costs about 0.2 s of CPU per second of audio, on top of the model's
+        measured render: both must stay under 90% of the chunk, or the light
+        spectral gate is used so the voice never stutters.
+        """
+        budget = chunk_size * 1000.0 / sample_rate
+        details = self._details.get(self.active_model_name or "", {})
+        render = (details.get("realtime_ms") or {}).get(self.default_f0_method())
+        if render is None:
+            return self.compute.is_accelerator
+        return render + NEURAL_DENOISE_COST * budget < 0.9 * budget
 
     def vad_path(self) -> Path | None:
         """Silero VAD weights once downloaded (the stream falls back to a level detector before)."""

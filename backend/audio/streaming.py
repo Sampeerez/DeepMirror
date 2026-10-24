@@ -44,6 +44,7 @@ import numpy as np
 
 from backend.audio.denoise import SpectralDenoiser
 from backend.audio.loudness import LoudnessMatcher, soft_limit
+from backend.audio.neural_denoise import UNLIMITED_DB, NeuralDenoiser, restore_voice
 from backend.audio.resampling import resample
 from backend.audio.voice_activity import LevelVad, SileroVad, SpeechTimeline
 
@@ -163,7 +164,7 @@ class StreamCleanup:
     """What happens around the model (all adjustable live)."""
 
     isolate_voice: bool = True      # convert speech only; the rest is ambience
-    noise_reduction_db: float = 12.0
+    noise_reduction_db: float = 60.0
     ambient_db: float = -60.0       # steady room noise mixed back (never the raw input); <= -60 is off
     match_loudness: bool = True
 
@@ -184,7 +185,8 @@ class RealtimeVoiceStream:
     """Converts fixed-size live chunks into output chunks of the same size."""
 
     def __init__(self, client_rate: int, render: WindowRenderer, timing: StreamTiming | None = None, *,
-                 vad: SileroVad | LevelVad | None = None, cleanup: StreamCleanup | None = None) -> None:
+                 vad: SileroVad | LevelVad | None = None, cleanup: StreamCleanup | None = None,
+                 neural: NeuralDenoiser | None = None) -> None:
         self.client_rate = int(client_rate)
         self.render = render
         self.timing = timing or StreamTiming()
@@ -192,7 +194,9 @@ class RealtimeVoiceStream:
         self.cleanup = cleanup or StreamCleanup(isolate_voice=vad is not None, noise_reduction_db=0.0,
                                                 ambient_db=-60.0, match_loudness=False)
         self.speech = SpeechTimeline(vad) if vad is not None else None
-        self.denoiser = SpectralDenoiser(self.client_rate, self.cleanup.noise_reduction_db)
+        # DeepFilterNet when available (removes clicks and breaths too); the spectral gate otherwise.
+        self.neural = neural
+        self.denoiser = SpectralDenoiser(self.client_rate, min(self.cleanup.noise_reduction_db, 24.0))
         self.loudness = LoudnessMatcher(self.client_rate)
         self.stats = StreamStats(neural_vad=bool(self.speech and self.speech.neural))
         self._crossfade = max(1, round(self.timing.crossfade_seconds * self.client_rate))
@@ -216,11 +220,34 @@ class RealtimeVoiceStream:
         if self.speech is not None:
             self.speech.reset()
         self.denoiser.reset()
+        if self.neural is not None:
+            self.neural.reset()
         self.loudness.reset()
 
     def set_cleanup(self, cleanup: StreamCleanup) -> None:
         self.cleanup = cleanup
-        self.denoiser.reduction_db = cleanup.noise_reduction_db
+        self.denoiser.reduction_db = min(cleanup.noise_reduction_db, 24.0)
+        if self.neural is not None:
+            # The slider's top end means "remove all the noise".
+            reduction = cleanup.noise_reduction_db
+            self.neural.attenuation_db = UNLIMITED_DB if reduction >= 60 else reduction
+
+    @property
+    def denoiser_kind(self) -> str:
+        if self.cleanup.noise_reduction_db <= 0:
+            return "off"
+        return "neural" if self.neural is not None else "spectral"
+
+    def _clean_history(self) -> np.ndarray | None:
+        """The input history with the noise removed (None when noise reduction is off or unready)."""
+        if self.cleanup.noise_reduction_db <= 0:
+            return None
+        if self.neural is not None:
+            cleaned = self.neural.history(len(self._history))
+            return restore_voice(self._history, cleaned, self.client_rate,
+                                 self.speech.noise_db if self.speech is not None else None)
+        cleaned = self.denoiser.apply(self._history, self._speech_gain)
+        return None if cleaned is self._history else cleaned
 
     def _history_length(self, chunk_length: int) -> int:
         t = self.timing
@@ -242,6 +269,8 @@ class RealtimeVoiceStream:
     def listen(self, chunk: np.ndarray) -> bool:
         """Add a chunk to the history and the voice detector; True if it contains speech."""
         self._push(chunk)
+        if self.neural is not None:
+            self.neural.feed(np.asarray(chunk, np.float32))   # every chunk, once: the filter is stateful
         if self.speech is None:
             self._speech_gain = np.ones(len(self._history), np.float32)
             return True
@@ -255,7 +284,7 @@ class RealtimeVoiceStream:
         start = self._total - len(self._history)
         self._speech_gain = self.speech.gain(start, len(self._history), self.client_rate)
         self.stats.speech_probability = round(self.speech.last_probability(), 2)
-        if self.cleanup.noise_reduction_db > 0:
+        if self.cleanup.noise_reduction_db > 0 and self.neural is None:
             # Learn the room from the newest audio that is certainly not speech (STFT context around it).
             recent = min(len(self._history), len(chunk) + 2 * self.denoiser.n_fft + round(0.35 * self.client_rate))
             noise_only = self.speech.noise_only(self._total - recent, recent, self.client_rate)
@@ -304,13 +333,13 @@ class RealtimeVoiceStream:
         if self.cleanup.ambient_gain <= 0 or self.cleanup.noise_reduction_db <= 0:
             self._ambient_tail = None
             return np.zeros(n, dtype=np.float32)
-        clean_history = self.denoiser.apply(self._history, self._speech_gain)
+        clean_history = self._clean_history()
 
         def span_of(values: np.ndarray) -> np.ndarray:
             part = values[max(0, end - span):end]
             return np.pad(part, (span - len(part), 0)) if len(part) < span else part
 
-        clean = span_of(clean_history) if clean_history is not self._history else None
+        clean = span_of(clean_history) if clean_history is not None else None
         out = self._join_ambience(self._ambience(span_of(self._history), clean), n, crossfade)
         return soft_limit(out.astype(np.float32, copy=False))
 
@@ -319,10 +348,7 @@ class RealtimeVoiceStream:
         n = self._chunk
         length = len(self._history)
         cleanup = self.cleanup
-        clean_history = (self.denoiser.apply(self._history, self._speech_gain)
-                         if cleanup.noise_reduction_db > 0 else None)
-        if clean_history is self._history:   # nothing learnt yet
-            clean_history = None
+        clean_history = self._clean_history()
         model_source = clean_history if clean_history is not None else self._history
 
         model_input = resample(model_source, self.client_rate, MODEL_RATE)

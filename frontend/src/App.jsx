@@ -8,7 +8,8 @@ import ModelManager from './components/ModelManager';
 import MonitorDisplay from './components/MonitorDisplay';
 import Visualizer from './components/Visualizer';
 import VoiceLab from './components/VoiceLab';
-import EffectsRack from './components/EffectsRack';
+import SoundCard from './components/SoundCard';
+import Button from './components/Button';
 import PresetBar from './components/PresetBar';
 import Recorder from './components/Recorder';
 import FileConverter from './components/FileConverter';
@@ -265,16 +266,7 @@ export default function App() {
 
   const headerActions = (
     <>
-      <button
-        onClick={openSettings}
-        /* frost-control owns the surface, border, radius, transition and focus
-           ring — the previous bg/border utilities would have overridden it. */
-        className="frost-control inline-flex h-8 w-8 items-center justify-center text-fg-muted hover:text-fg-secondary"
-        title="Session settings"
-        aria-label="Open settings"
-      >
-        <Settings2 className="h-4 w-4" aria-hidden="true" />
-      </button>
+      <Button icon={Settings2} onClick={openSettings} title="Settings and diagnostics" aria-label="Open settings" />
     </>
   );
 
@@ -303,71 +295,72 @@ export default function App() {
       )}
       headerActions={headerActions}
     >
-      <div {...panelProps('studio')} className="space-y-5 animate-fade-in-up">
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="space-y-5">
-            <Visualizer
-              getAnalysers={pipeline.getAnalysers}
-              isRunning={pipeline.isRunning}
-              theme={theme}
-              active={tab === 'studio'}
-            />
-            <AudioControls
-              devices={devices}
-              pipeline={pipeline}
-              wsStatus={wsStatus}
-              activeModel={activeModel}
-              bypass={bypass}
-              onBypassChange={setBypass}
-              onRetryConnection={retryNow}
-            />
-            <Recorder pipeline={pipeline} />
-            <PresetBar
-              refreshRevision={runtime.revision}
-              activePresetId={activePresetId}
-              onApplyPreset={applyPreset}
-              getCurrentSettings={getCurrentSettings}
-            />
-            <EffectsRack
-              effects={effects}
-              formantShift={voice.formant}
-              onEffectsChange={handleEffectsChange}
-            />
-          </div>
+      {/* Studio: a top bar, three cards of one fixed height (content scrolls
+          inside a card, never the page), and the presets row. On narrow screens
+          the cards stack at their natural height. */}
+      <div {...panelProps('studio')} className="space-y-4 animate-fade-in-up">
+        <AudioControls
+          devices={devices}
+          pipeline={pipeline}
+          wsStatus={wsStatus}
+          activeModel={activeModel}
+          bypass={bypass}
+          onBypassChange={setBypass}
+          onRetryConnection={retryNow}
+        />
 
-          <div className="space-y-5">
-            <MonitorDisplay
-              streamInfo={pipeline.streamInfo}
-              playbackStats={pipeline.playbackStats}
-              transport={wsHook.transport}
-              meters={pipeline.meters}
-              latency={latency}
-              latencyHistory={latencyHistory}
-              serverMs={serverMs}
-              serverStats={serverStats}
-              bypass={bypass}
-            />
-            <VoiceLab
-              voice={voice}
-              onChange={handleVoiceChange}
-              onRestoreRecommended={handleRestoreRecommended}
-              autoPitchAvailable={serverStats.autoPitchAvailable}
-              autoPitchShift={serverStats.autoPitchShift}
-              f0Pending={serverStats.f0Pending}
-              speakerProfile={serverStats.speakerProfile}
-              expressivenessApplied={serverStats.expressiveness}
-              onRecalibrate={() => {
-                removeStored(STORAGE_KEYS.speakerProfile);
-                wsHook.sendSettings({ recalibrate: true });
-              }}
-              tooSlow={pipeline.isRunning && !serverStats.inferenceSleeping && serverStats.modelMs > 0
-                && serverStats.modelMs > (runtimeConfig.chunkSize / runtimeConfig.sampleRate) * 1000 * 0.95}
-              hasModel={Boolean(activeModel)}
-              isRunning={pipeline.isRunning}
-              f0Methods={runtimeConfig.f0Methods}
-            />
-          </div>
+        <div className="grid grid-cols-1 gap-4 lg:h-[clamp(540px,calc(100svh-19rem),680px)] lg:grid-cols-3">
+          <VoiceLab
+            voice={voice}
+            onChange={handleVoiceChange}
+            autoPitchAvailable={serverStats.autoPitchAvailable}
+            autoPitchShift={serverStats.autoPitchShift}
+            f0Pending={serverStats.f0Pending}
+            speakerProfile={serverStats.speakerProfile}
+            expressivenessApplied={serverStats.expressiveness}
+            onRecalibrate={() => {
+              removeStored(STORAGE_KEYS.speakerProfile);
+              wsHook.sendSettings({ recalibrate: true });
+            }}
+            tooSlow={pipeline.isRunning && !serverStats.inferenceSleeping && serverStats.modelMs > 0
+              && serverStats.modelMs > (runtimeConfig.chunkSize / runtimeConfig.sampleRate) * 1000 * 0.95}
+            hasModel={Boolean(activeModel)}
+            isRunning={pipeline.isRunning}
+            f0Methods={runtimeConfig.f0Methods}
+          />
+          <SoundCard
+            voice={voice}
+            onChange={handleVoiceChange}
+            onRestoreRecommended={handleRestoreRecommended}
+            effects={effects}
+            onEffectsChange={handleEffectsChange}
+            denoiser={pipeline.isRunning ? serverStats.denoiser : null}
+          />
+          <MonitorDisplay
+            meters={pipeline.meters}
+            latency={latency}
+            latencyHistory={latencyHistory}
+            serverMs={serverMs}
+            serverStats={serverStats}
+            bypass={bypass}
+            visualizer={(
+              <Visualizer
+                getAnalysers={pipeline.getAnalysers}
+                isRunning={pipeline.isRunning}
+                theme={theme}
+                active={tab === 'studio'}
+              />
+            )}
+            recorder={<Recorder pipeline={pipeline} />}
+          />
         </div>
+
+        <PresetBar
+          refreshRevision={runtime.revision}
+          activePresetId={activePresetId}
+          onApplyPreset={applyPreset}
+          getCurrentSettings={getCurrentSettings}
+        />
       </div>
 
       <div {...panelProps('models')} className="mx-auto max-w-4xl animate-fade-in-up">
@@ -420,6 +413,9 @@ export default function App() {
               serverMs={serverMs}
               serverStats={serverStats}
               streamSampleRate={pipeline.streamInfo?.sampleRate}
+              streamInfo={pipeline.streamInfo}
+              playbackStats={pipeline.playbackStats}
+              transport={wsHook.transport}
             />
           </div>
         </div>

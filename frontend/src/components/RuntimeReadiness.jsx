@@ -1,11 +1,13 @@
 import React from 'react';
 import { Check, CircleAlert, Cpu, LoaderCircle, RefreshCw } from 'lucide-react';
 import { formatBytes } from '../lib/format';
+import Button from './Button';
 
 const ASSET_LABELS = {
   hubert: 'HuBERT content encoder',
   rmvpe: 'RMVPE pitch tracker',
   vad: 'Silero voice detector',
+  denoiser: 'DeepFilterNet noise filter',
 };
 
 function AssetRow({ asset }) {
@@ -27,7 +29,7 @@ function AssetRow({ asset }) {
     <li className="flex items-start gap-2 py-2 text-xs">
       {icon}
       <div className="min-w-0 flex-1">
-        <span className="text-fg-secondary">{label}</span>
+        <span className="break-words text-fg-secondary">{label}</span>
         <span className="ml-2 font-mono text-[11px] text-fg-faint">{formatBytes(asset.bytes)}</span>
         {asset.error ? <span className="mt-1 block break-words text-[11px] text-danger-fg">{asset.error}</span> : null}
         {downloading ? (
@@ -58,17 +60,15 @@ export default function RuntimeReadiness({ config, checking, error, onRefresh })
     <section className="min-w-0 py-4" aria-label="Voice conversion readiness">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-fg-secondary">Voice conversion</h3>
-        <button type="button" className="frost-control inline-flex h-9 w-9 shrink-0 items-center justify-center"
-          title="Recheck runtime" aria-label="Recheck runtime" onClick={onRefresh} disabled={checking}>
-          <RefreshCw className={`h-4 w-4 ${checking ? 'animate-spin' : ''}`} aria-hidden="true" />
-        </button>
+        <Button icon={RefreshCw} size="md" title="Recheck runtime" aria-label="Recheck runtime" onClick={onRefresh}
+          disabled={checking} className={checking ? '[&_svg]:animate-spin' : ''} />
       </div>
       <p role="status" className={`mt-2 text-xs ${error ? 'text-danger-fg' : 'text-fg-muted'}`}>{summary}</p>
       {device ? (
         <p className="mt-3 flex items-center gap-2 text-xs text-fg-secondary">
           <Cpu className="h-3.5 w-3.5 shrink-0 text-fg-subtle" aria-hidden="true" />
-          {device.name}
-          <span className="font-mono text-[11px] text-fg-faint">
+          <span className="min-w-0 truncate" title={device.name}>{device.name}</span>
+          <span className="shrink-0 font-mono text-[11px] text-fg-faint">
             {device.device} · {device.half_precision ? 'FP16' : 'FP32'}
             {device.memory_gb ? ` · ${device.memory_gb} GB` : ''}
           </span>

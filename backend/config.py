@@ -96,7 +96,8 @@ class Settings(BaseSettings):
     # model's input of room noise, optionally mix the steady room noise back at
     # AMBIENT_DB (-60 = off; never the raw input), and match the speaker's level.
     VOICE_ISOLATION: bool = True
-    NOISE_REDUCTION_DB: float = 12.0
+    # DeepFilterNet attenuation limit; 60 (the maximum) removes all the noise. 0 = off.
+    NOISE_REDUCTION_DB: float = 60.0
     AMBIENT_DB: float = -60.0
     MATCH_LOUDNESS: bool = True
 

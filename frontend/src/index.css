@@ -408,6 +408,19 @@
       var(--frost-shadow-selected);
   }
 
+  .frost-control.ghost-control {
+    --frost-bg: transparent;
+    --frost-border: transparent;
+    box-shadow: none;
+  }
+
+  /* Selects and text inputs: one height (36px) everywhere, long values cut. */
+  .field {
+    @apply h-9 w-full min-w-0 truncate rounded-[var(--frost-radius)] border border-line bg-input px-3 text-sm text-fg;
+    @apply placeholder:text-fg-faint focus:border-line-hover disabled:cursor-not-allowed disabled:opacity-50;
+    @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)];
+  }
+
   .toggle-switch {
     position: relative;
     flex-shrink: 0;

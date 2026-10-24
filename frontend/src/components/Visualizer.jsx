@@ -149,31 +149,20 @@ function Visualizer({ getAnalysers, isRunning, theme, active = true }) {
     };
   }, [getAnalysers, active]);
 
+  // Compact, inside the Monitor card: the spectrum with its legend in a corner.
   return (
-    <section className="panel relative overflow-hidden p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="panel-kicker">Spectrum</p>
-          <h2 className="panel-title">Live signal</h2>
-        </div>
-        <div className="flex items-center gap-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-subtle">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 bg-fg-faint" />
-            Input
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 bg-ok-solid" />
-            Output
-          </span>
-        </div>
+    <div className="relative overflow-hidden rounded-md border border-line bg-raised">
+      <div className="absolute right-2 top-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
+        <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 bg-fg-faint" />In</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 bg-ok-solid" />Out</span>
       </div>
-      <canvas ref={canvasRef} className="mt-3 h-28 w-full sm:h-32" aria-hidden="true" />
+      <canvas ref={canvasRef} className="h-20 w-full" aria-hidden="true" />
       {!isRunning && (
-        <p className="pointer-events-none absolute inset-x-0 bottom-[38%] text-center text-xs font-medium uppercase tracking-[0.2em] text-fg-faint">
-          Start routing to see the live spectrum
+        <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate px-3 text-center text-[11px] font-medium uppercase tracking-[0.16em] text-fg-faint">
+          Press Start to see the spectrum
         </p>
       )}
-    </section>
+    </div>
   );
 }
 

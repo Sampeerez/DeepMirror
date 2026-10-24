@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+const DENOISER_LABELS = { neural: 'DeepFilterNet', spectral: 'Spectral', off: 'Off' };
+
 export default function StreamDiagnostics({ streamInfo, playbackStats, transport = {}, serverMs = 0, serverStats = {} }) {
   const previous = useRef(0);
   const [recentIssue, setRecentIssue] = useState(false);
@@ -31,15 +33,20 @@ export default function StreamDiagnostics({ streamInfo, playbackStats, transport
       : `${Math.round(serverStats.inputLevelDb)} / ${Math.round(serverStats.silenceThresholdDb ?? -60)} dB`],
     ['Voice detector / speech now', serverStats.voiceDetector == null ? '--'
       : `${serverStats.voiceDetector === 'neural' ? 'Silero VAD' : 'Level'} / ${Math.round((serverStats.speechProbability || 0) * 100)}%`],
-    ['Noise removed / volume match', serverStats.voiceDetector == null ? '--'
-      : `${serverStats.noiseReducedDb ?? 0} dB / ${(serverStats.loudnessGainDb ?? 0) > 0 ? '+' : ''}${serverStats.loudnessGainDb ?? 0} dB`],
+    ['Noise filter / removed', serverStats.voiceDetector == null ? '--'
+      : `${DENOISER_LABELS[serverStats.denoiser] || '--'} / ${serverStats.noiseReducedDb ?? 0} dB`],
+    ['Volume match', serverStats.voiceDetector == null ? '--'
+      : `${(serverStats.loudnessGainDb ?? 0) > 0 ? '+' : ''}${serverStats.loudnessGainDb ?? 0} dB`],
+    ['Model / effects time', rate ? `${serverStats.modelMs > 0 ? Math.round(serverStats.modelMs) : '--'} / ${
+      serverStats.dspMs > 0 ? Math.max(1, Math.round(serverStats.dspMs)) : '--'} ms` : '--'],
   ];
   return (
-    <details className="mt-4 border-t border-line pt-3">
-      <summary className="cursor-pointer text-xs font-medium text-fg-secondary">Stream diagnostics</summary>
+    <section className="border-t border-line pt-4" aria-label="Stream diagnostics">
+      <h3 className="text-sm font-semibold text-fg-secondary">Stream diagnostics</h3>
+      {!running ? <p className="mt-1 text-xs text-fg-faint">Live values appear while the voice changer runs.</p> : null}
       <dl className="mt-3 space-y-2 text-xs">
         {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-3">
-          <dt className="text-fg-subtle">{label}</dt><dd className="shrink-0 font-mono tabular-nums text-fg-secondary">{value}</dd>
+          <dt className="min-w-0 truncate text-fg-subtle">{label}</dt><dd className="shrink-0 font-mono tabular-nums text-fg-secondary">{value}</dd>
         </div>)}
       </dl>
       {streamInfo && (recentIssue || serverMs > chunkMs) && <p role="status" className="mt-3 text-xs text-warn-fg">
@@ -51,6 +58,6 @@ export default function StreamDiagnostics({ streamInfo, playbackStats, transport
               ? 'Playback ran out of converted audio. Try the Stable profile; check the output device if it persists.'
               : 'Recent audio discontinuities detected. Check the output device and browser audio load.'}
       </p>}
-    </details>
+    </section>
   );
 }

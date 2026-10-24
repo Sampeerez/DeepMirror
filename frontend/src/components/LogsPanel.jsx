@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Download, Pause, Play, Trash2 } from 'lucide-react';
 import { fetchLogs, fetchTrainingJobs, fetchTrainingLog } from '../lib/api';
+import Button from './Button';
 
 const LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
 const LEVEL_CLASS = {
@@ -131,36 +132,27 @@ function LogsPanel({ active }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Log source" value={source} onChange={(event) => { setLines([]); setSource(event.target.value); }}
-            className="native-select-safe rounded-md border border-line-strong bg-input px-2 py-1.5 text-xs text-fg">
+            className="native-select-safe field h-8 w-44 text-xs">
             <option value="server">Server</option>
             {jobs.map((job) => <option key={job.id} value={job.id}>Training: {job.name}</option>)}
           </select>
           {source === 'server' ? (
             <select aria-label="Minimum level" value={minimum} onChange={(event) => setMinimum(event.target.value)}
-              className="native-select-safe rounded-md border border-line-strong bg-input px-2 py-1.5 text-xs text-fg">
+              className="native-select-safe field h-8 w-40 text-xs">
               {LEVELS.slice(0, 4).map((level) => <option key={level} value={level}>{level.toLowerCase()} and above</option>)}
             </select>
           ) : null}
           <input aria-label="Search the log" value={query} onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search" className="w-36 rounded-md border border-line-strong bg-input px-2 py-1.5 text-xs text-fg" />
-          <button type="button" className="chip-button inline-flex items-center gap-1.5" onClick={() => setPaused((p) => !p)}>
-            {paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}
+            placeholder="Search" className="field h-8 w-36 text-xs" />
+          <Button icon={paused ? Play : Pause} onClick={() => setPaused((p) => !p)} className="w-24">
             {paused ? 'Resume' : 'Pause'}
-          </button>
-          <button type="button" className="chip-button inline-flex items-center gap-1.5"
-            onClick={() => navigator.clipboard?.writeText(asText())}>
-            <Copy className="h-3.5 w-3.5" aria-hidden="true" /> Copy
-          </button>
-          <button type="button" className="chip-button inline-flex items-center gap-1.5" onClick={download}>
-            <Download className="h-3.5 w-3.5" aria-hidden="true" /> Download
-          </button>
-          <button type="button" className="chip-button inline-flex items-center gap-1.5" onClick={() => setLines([])}
-            aria-label="Clear the view">
-            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
+          </Button>
+          <Button icon={Copy} onClick={() => navigator.clipboard?.writeText(asText())}>Copy</Button>
+          <Button icon={Download} onClick={download}>Download</Button>
+          <Button icon={Trash2} onClick={() => setLines([])} aria-label="Clear the view" title="Clear the view" />
         </div>
       </div>
-      {error ? <p className="mt-3 text-xs text-danger-fg">{error}</p> : null}
+      {error ? <p className="mt-3 break-words text-xs text-danger-fg">{error}</p> : null}
       <div className="relative mt-4 min-h-0 flex-1">
       <div ref={listRef} role="log" aria-live="off" onScroll={onScroll}
         className="h-full overflow-y-auto overscroll-contain rounded-md border border-line bg-raised p-3 font-mono text-[11px] leading-5">
@@ -173,10 +165,9 @@ function LogsPanel({ active }) {
         ))}
       </div>
       {!following ? (
-        <button type="button" onClick={jumpToLatest}
-          className="chip-button absolute bottom-3 right-5 shadow-md">
+        <Button onClick={jumpToLatest} className="absolute bottom-3 right-5 shadow-md">
           Jump to latest{unseen ? ` (${unseen} new)` : ''}
-        </button>
+        </Button>
       ) : null}
       </div>
     </section>

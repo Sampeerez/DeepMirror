@@ -9,8 +9,10 @@ import pytest
 
 from backend.audio.denoise import SpectralDenoiser
 from backend.audio.loudness import CEILING, KNEE, LoudnessMatcher, soft_limit
+from backend.audio.neural_denoise import load_neural_denoiser, restore_voice
 from backend.audio.streaming import RealtimeVoiceStream, StreamCleanup, StreamTiming
 from backend.audio.voice_activity import FRAME, RATE, SpeechTimeline
+from tests.conftest import GOLDEN, ROOT
 
 CLIENT = 48000
 
@@ -158,3 +160,70 @@ class TestReadyOnlyActivation:
         release.set()
         worker.join(5)
         assert manager.converter is new_voice and manager.loading is None
+
+
+class TestRestoreVoice:
+    def test_pitched_voice_the_filter_removed_comes_back_noise_does_not(self):
+        rng = np.random.default_rng(3)
+        t = np.arange(CLIENT) / CLIENT
+        voice = sum(np.sin(2 * np.pi * 220 * k * t) / k for k in range(1, 6)).astype(np.float32) * 0.05
+        noise = (0.05 * rng.standard_normal(CLIENT)).astype(np.float32)
+        silent = np.zeros(CLIENT, np.float32)
+        restored = restore_voice(voice, silent, CLIENT, -70.0)
+        assert abs(10 * np.log10(np.mean(restored[2000:-2000] ** 2) / np.mean(voice[2000:-2000] ** 2))) < 0.5
+        assert np.abs(restore_voice(noise, silent, CLIENT, -70.0)).max() == 0
+        assert restore_voice(voice, silent, CLIENT, None) is silent      # room not learnt yet
+
+
+DENOISER = ROOT / "models" / "assets" / "deepfilternet3_streaming.onnx"
+
+
+@pytest.mark.skipif(not DENOISER.exists() or not (GOLDEN / "speech_16k.npy").exists(),
+                    reason="DeepFilterNet weights or the golden speech are not available")
+class TestNeuralDenoiser:
+    @staticmethod
+    def speech(level_db: float) -> np.ndarray:
+        from backend.audio.resampling import resample
+
+        audio = resample(np.load(GOLDEN / "speech_16k.npy").astype(np.float32), 16000, CLIENT)
+        return (audio * 10 ** ((level_db - 10 * np.log10(np.mean(audio ** 2))) / 20)).astype(np.float32)
+
+    @staticmethod
+    def clean(audio: np.ndarray) -> np.ndarray:
+        denoiser = load_neural_denoiser(DENOISER, CLIENT)
+        assert denoiser is not None
+        for i in range(0, len(audio), 4096):
+            denoiser.feed(audio[i:i + 4096])
+        return denoiser.history(len(audio))[: len(audio) - 4096]   # the newest samples are not out yet
+
+    def test_the_cleaned_history_lines_up_with_the_input(self):
+        audio = self.speech(-30)
+        cleaned = self.clean(audio)
+        lags = range(-96, 97, 4)
+        scores = [np.dot(cleaned[200:-200], audio[200 + lag:len(cleaned) - 200 + lag]) for lag in lags]
+        assert list(lags)[int(np.argmax(scores))] == 0
+        assert np.corrcoef(cleaned, audio[:len(cleaned)])[0, 1] > 0.95
+
+    @pytest.mark.parametrize("level_db", [-25.0, -60.0])
+    def test_speech_survives_at_any_level(self, level_db):
+        audio = self.speech(level_db)
+        cleaned = self.clean(audio)
+        assert abs(10 * np.log10(np.mean(cleaned ** 2) / np.mean(audio[:len(cleaned)] ** 2))) < 1.5
+
+    def test_keyboard_clicks_are_removed(self):
+        rng = np.random.default_rng(5)
+        clicks = np.zeros(3 * CLIENT, np.float32)
+        for start in rng.integers(0, len(clicks) - 400, 18):
+            clicks[start:start + 300] += (0.05 * rng.standard_normal(300) * np.exp(-np.arange(300) / 40))
+        cleaned = self.clean(clicks)
+        assert 10 * np.log10(np.mean(cleaned ** 2) / np.mean(clicks[:len(cleaned)] ** 2)) < -20
+
+    def test_the_stream_reports_which_filter_it_uses(self):
+        render = lambda w: (w, 16000)  # noqa: E731
+        neural = load_neural_denoiser(DENOISER, CLIENT)
+        on, off = StreamCleanup(noise_reduction_db=60.0), StreamCleanup(noise_reduction_db=0.0)
+        assert RealtimeVoiceStream(CLIENT, render, cleanup=on, neural=neural).denoiser_kind == "neural"
+        assert RealtimeVoiceStream(CLIENT, render, cleanup=on).denoiser_kind == "spectral"
+        assert RealtimeVoiceStream(CLIENT, render, cleanup=off, neural=neural).denoiser_kind == "off"
+        assert load_neural_denoiser(None, CLIENT) is None
+        assert load_neural_denoiser(ROOT / "missing.onnx", CLIENT) is None

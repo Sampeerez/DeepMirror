@@ -32,7 +32,7 @@ class TestSystem:
         assert config["sample_rate"] == 48000 and config["chunk_size"] == 16384
         assert config["stream"]["lookahead_seconds"] == 0.1 and config["stream"]["lookback_seconds"] == 0.5
         assert config["device"]["device"] == "cpu"
-        assert {asset["id"] for asset in config["assets"]} == {"hubert", "rmvpe", "vad"}
+        assert {asset["id"] for asset in config["assets"]} == {"hubert", "rmvpe", "vad", "denoiser"}
         assert config["default_f0_method"] == "pm"  # no accelerator and no RMVPE weights here
         assert any(method["id"] == "rmvpe" for method in config["f0_methods"])
 

@@ -44,7 +44,8 @@ to keep open: the server runs in the background, its log is in the **Logs** tab,
 finishes on its own). On Windows the first run also adds an **OpenVoiceChanger** shortcut
 to the Desktop and Start menu that starts it with no window at all; on Linux an app-menu
 entry is added. On the first run the shared model assets (HuBERT, ~190 MB, RMVPE,
-~180 MB, and the Silero voice detector, 2 MB) are downloaded and verified by SHA-256.
+~180 MB, the Silero voice detector, 2 MB, and the DeepFilterNet3 noise filter, 16 MB) are
+downloaded and verified by SHA-256.
 The web UI is built automatically with a bundled Node.js.
 
 Then open **Models**, drop in an RVC `.pth` voice (and its `.index` if it has one),
@@ -75,13 +76,13 @@ OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OV
 - **No invented sounds on quiet speech**: voicing must be audible and periodic at its own pitch, so a soft "no, no" does not turn fricatives or room noise into sung vowels, and the converted voice can never be louder than what you actually said around speech
 - **Logs** tab: the server's output live (filter, search, pause, copy, download) and each training run's log
 - **Speech-only conversion**: a neural voice detector (Silero VAD) converts only speech. Room noise, breaths and clicks are never sent through the voice model; nothing of your microphone is ever played unconverted (no breaths, no background noise, never your own voice), and what a model renders over bare room noise at the end of a phrase is faded out. An optional, off-by-default ambience slider adds back only the steady room noise
-- **Noise reduction** for what the model hears, learnt from the pauses, gentle while you speak so soft word endings survive
+- **Neural noise removal** (DeepFilterNet3, streaming ONNX) in front of the model: room noise, keyboard clicks, traffic and breaths are removed before RVC hears them, so they are not turned into strange voice-like sounds. A slow automatic gain keeps whispers above the filter's floor, and clearly pitched voice the filter mistakes for noise (a high laugh, singing) is put back. Where it does not fit the realtime budget (slow CPU-only machines), a light spectral filter stands in
 - **Match my volume**: the converted voice comes out as loud as you speak, whatever the model's own level, with a soft limiter against clipping
 - **Export voices**: every model, including the ones trained in the studio, downloads as a `.zip` with its `.pth` and `.index` (Models and Train tabs)
 - **Silence Saver** pauses inference when nobody speaks without cutting the end of the last word, wakes on a single quiet syllable and keeps listening while asleep, so the next word starts with real context
 - Switching voices is seamless: the previous voice keeps converting until the new one is fully loaded and warm, and only then is it shown as active
 - **Auto pitch**: voices trained in the studio store their pitch range, and the live stream moves your register onto the voice's (for example about +12 semitones from a low voice to a high one) while keeping your intonation. Pitch and formant start at 0, and every RVC control starts at its recommended value until you change it
-- Spectrum, meters, latency history, server timing (model/DSP/network) and stream diagnostics
+- Studio in one screen: a top bar (start, devices, call mode, A/B) and three equal cards (Voice, Sound with Clean-up / Effects / Advanced tabs, Monitor with spectrum, meters, latency and the recorder); nothing grows the page, long content scrolls inside its card. Stream diagnostics are in Settings
 - Output recorder (<kbd>R</kbd>) with a take library stored in the browser; <kbd>B</kbd> toggles an A/B bypass
 - Model-free DSP mode: pitch shifting and effects with no voice loaded
 
@@ -145,8 +146,9 @@ intonation at every chunk boundary and the seams click. For every chunk, the eng
 3. **Joins renders with SOLA.** The tail held back from the previous render is matched against the new one within ±6 ms, then crossfaded at the best-correlated offset. Windows join without clicks or phasing.
 4. **Resamples with soxr.** soxr is a band-limited resampler, unlike FFT resampling, which wraps the end of each window into its start.
 5. **Applies a shift-invariant loudness envelope.** The RMS mix envelope is computed with a sliding window, so overlapping renders agree on the level they apply.
-6. **Converts speech only.** Silero VAD marks speech every 32 ms, with pre-roll and hang-over so attacks and endings are kept, and a minimum of confident frames so a breath is not taken for speech. Outside speech the output is your room, unconverted, at the ambience level; under speech, the noise the reducer removed plays back too, so there are no holes in the room sound.
-7. **Matches your level.** The converted voice is measured against your voice over the same speech frames and a slow gain (about 0.5 s) brings it to your loudness.
+6. **Removes the noise before the model.** DeepFilterNet3 filters every chunk once, in 10 ms hops, and its output (30 ms late) is kept aligned with the input history; the newest samples it has not output yet lie in the lookahead, which is never played. HuBERT and RMVPE only hear the cleaned voice. In a noisy-room test (room noise, 6 key presses per second, breaths), sound outside speech fell from about -35 dB to about -63 dB below the voice, with the same articulation and level.
+7. **Converts speech only.** Silero VAD marks speech every 32 ms, with pre-roll and hang-over so attacks and endings are kept, and a minimum of confident frames so a breath is not taken for speech. Outside speech the output is your room, unconverted, at the ambience level; under speech, the noise the reducer removed plays back too, so there are no holes in the room sound.
+8. **Matches your level.** The converted voice is measured against your voice over the same speech frames and a slow gain (about 0.5 s) brings it to your loudness.
 
 Only the end of each window is vocoded (the content encoder and flow still see the whole
 window), and on CPU the vocoder runs on ONNX Runtime. On a GTX 1660 SUPER the Quality
@@ -181,7 +183,7 @@ project folder. Common ones:
 | `OVC_SILENCE_THRESHOLD_DB` | `-60` | Level (loudest 10 ms of a chunk) below which Silence Saver pauses inference |
 | `OVC_RESTORE_LAST_VOICE` | `true` | Load the voice that was active when the studio last closed |
 | `OVC_VOICE_ISOLATION` | `true` | Convert speech only; noise and breaths play as unconverted ambience |
-| `OVC_NOISE_REDUCTION_DB` | `12` | Room noise removed from what the model hears (0 = off) |
+| `OVC_NOISE_REDUCTION_DB` | `60` | Noise removed from what the model hears (60 = all of it, 0 = off) |
 | `OVC_AMBIENT_DB` | `-60` | Steady room noise mixed back around the voice (-60 = off; never the raw input) |
 | `OVC_MATCH_LOUDNESS` | `true` | Bring the converted voice to the speaker's own level |
 | `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See [Security](#security) |

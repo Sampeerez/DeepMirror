@@ -1,7 +1,7 @@
 import React, { memo, useCallback } from 'react';
+import Button from './Button';
 import Toggle from './Toggle';
 import { EFFECT_DEFS, countActiveEffects, defaultEffects } from '../lib/effects';
-import Collapsible from './Collapsible';
 
 function formatValue(param, value) {
   const num = Number(value);
@@ -10,61 +10,41 @@ function formatValue(param, value) {
 }
 
 // Memoized so dragging one card's slider repaints that card only, not the
-// other eleven.
+// other eleven. Parameters show only while the effect is on, so the list of
+// effects stays short and scannable.
 const EffectCard = memo(function EffectCard({ def, state, onChange }) {
   const enabled = Boolean(state?.enabled);
 
   return (
-    <div
-      className={`rounded-md border p-3.5 transition-colors duration-150 ${
-        enabled
-          ? 'border-ok-line bg-ok-bg'
-          : 'border-line bg-raised hover:border-line-hover'
-      }`}
-    >
+    <div className={`rounded-md border px-3 py-2.5 transition-colors duration-150 ${
+      enabled ? 'border-ok-line bg-ok-bg' : 'border-line bg-raised hover:border-line-hover'}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className={`truncate text-sm font-semibold ${enabled ? 'text-fg' : 'text-fg-muted'}`}>
-            {def.label}
-          </p>
-          <p className="mt-0.5 text-[11px] leading-4 text-fg-faint">{def.tagline}</p>
+          <p className={`truncate text-xs font-semibold ${enabled ? 'text-fg' : 'text-fg-muted'}`}>{def.label}</p>
+          <p className="truncate text-[11px] leading-4 text-fg-faint" title={def.tagline}>{def.tagline}</p>
         </div>
-        <Toggle
-          checked={enabled}
-          label={`Toggle ${def.label}`}
-          onChange={(next) => onChange(def.key, { ...state, enabled: next })}
-        />
+        <Toggle checked={enabled} label={`Toggle ${def.label}`}
+          onChange={(next) => onChange(def.key, { ...state, enabled: next })} />
       </div>
 
-      {def.params.length > 0 && (
-        <div className={`mt-3 space-y-2.5 ${enabled ? '' : 'pointer-events-none opacity-35'}`}>
+      {enabled && def.params.length > 0 ? (
+        <div className="mt-2.5 space-y-2">
           {def.params.map((param) => (
             <div key={param.key}>
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-fg-subtle">
-                  {param.label}
-                </span>
-                <span className="font-mono text-[11px] tabular-nums text-fg-muted">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-[11px] font-medium text-fg-subtle">{param.label}</span>
+                <span className="shrink-0 font-mono text-[11px] tabular-nums text-fg-muted">
                   {formatValue(param, state?.[param.key] ?? param.default)}
                 </span>
               </div>
-              <input
-                type="range"
-                aria-label={`${def.label} ${param.label}`}
-                disabled={!enabled}
-                min={param.min}
-                max={param.max}
-                step={param.step}
-                value={state?.[param.key] ?? param.default}
-                onChange={(event) =>
-                  onChange(def.key, { ...state, [param.key]: Number(event.target.value) })
-                }
-                className="fx-slider mt-1 w-full"
-              />
+              <input type="range" aria-label={`${def.label} ${param.label}`} min={param.min} max={param.max}
+                step={param.step} value={state?.[param.key] ?? param.default}
+                onChange={(event) => onChange(def.key, { ...state, [param.key]: Number(event.target.value) })}
+                className="fx-slider mt-1 w-full" />
             </div>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 });
@@ -79,34 +59,23 @@ function EffectsRack({ effects, formantShift = 0, onEffectsChange }) {
     onEffectsChange((previous) => ({ ...previous, [key]: entry }));
   }, [onEffectsChange]);
 
-  const handleBypassAll = () => {
-    onEffectsChange(defaultEffects());
-  };
-
   return (
-    <section id="effects" className="panel scroll-mt-20 p-4">
-      <Collapsible id="effects-rack" title="Effects Rack"
-        summary={activeCount > 0 ? `${activeCount} effect${activeCount === 1 ? '' : 's'} on` : 'No effects on'}
-        actions={activeCount > 0 ? (
-          <button onClick={handleBypassAll} className="chip-button">Bypass all</button>
-        ) : null}>
-      <p className="text-xs text-fg-subtle">
-        Runs on the server after model inference — works with or without a voice model.
-        The noise gate runs on the mic signal before conversion.
-      </p>
-
-      <div className="mt-4 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+    <div id="effects" className="space-y-3">
+      <div className="flex h-8 items-center justify-between gap-3">
+        <p className="min-w-0 truncate text-[11px] text-fg-subtle">
+          {activeCount > 0 ? `${activeCount} effect${activeCount === 1 ? '' : 's'} on` : 'No effects on'}
+          {' · '}applied after the voice model
+        </p>
+        <Button onClick={() => onEffectsChange(defaultEffects())} disabled={activeCount === 0} className="w-24">
+          Bypass all
+        </Button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
         {EFFECT_DEFS.map((def) => (
-          <EffectCard
-            key={def.key}
-            def={def}
-            state={effects[def.key]}
-            onChange={handleChange}
-          />
+          <EffectCard key={def.key} def={def} state={effects[def.key]} onChange={handleChange} />
         ))}
       </div>
-      </Collapsible>
-    </section>
+    </div>
   );
 }
 

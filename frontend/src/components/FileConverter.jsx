@@ -4,6 +4,7 @@ import { convertFile, isAbortError } from '../lib/api';
 import { countActiveEffects } from '../lib/effects';
 import { FALLBACK_F0_METHODS, findF0Method, groupedMethods } from '../lib/f0Methods';
 import { formatBytes } from '../lib/format';
+import Button from './Button';
 
 const ACCEPTED = '.wav,.mp3,.flac,.ogg,.m4a,.aiff';
 
@@ -122,7 +123,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
           value={f0Override}
           disabled={converting}
           onChange={(event) => setF0Override(event.target.value)}
-          className="native-select-safe mt-2 w-full rounded-lg border border-line-strong bg-input px-3 py-2.5 text-sm text-fg focus:border-line-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="native-select-safe field mt-2"
         >
           <option value="studio">Studio setting — {findF0Method(f0Methods, voice.f0Method).label}</option>
           {offlineGroups.map((group) => (
@@ -216,26 +217,11 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
         </label>
 
         {converting ? (
-          <button
-            type="button"
-            onClick={handleCancel}
-            data-tone="danger"
-            className="frost-control inline-flex min-h-11 items-center justify-center gap-2 px-6 py-2.5 text-sm font-semibold"
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-            Cancel
-          </button>
+          <Button variant="danger" size="lg" icon={X} onClick={handleCancel} className="w-40">Cancel</Button>
         ) : (
-          <button
-            type="button"
-            onClick={handleConvert}
-            disabled={!file}
-            data-tone="primary"
-            className="frost-control inline-flex min-h-11 items-center justify-center gap-2 px-6 py-2.5 text-sm font-semibold"
-          >
-            <AudioLines className="h-4 w-4" aria-hidden="true" />
+          <Button variant="primary" size="lg" icon={AudioLines} onClick={handleConvert} disabled={!file} className="w-40">
             Convert
-          </button>
+          </Button>
         )}
       </div>
 
@@ -252,7 +238,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
 
       {error && (
         <div className="mt-4 rounded-md border border-danger-line bg-danger-bg p-4" role="alert">
-          <p className="text-sm text-danger-fg">{error}</p>
+          <p className="break-words text-sm text-danger-fg">{error}</p>
         </div>
       )}
 
@@ -262,15 +248,10 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             <p className="min-w-0 break-all text-sm font-medium text-ok-fg">
               {result.name} <span className="text-xs text-ok-fg-soft">({formatBytes(result.size)})</span>
             </p>
-            <a
-              href={result.url}
-              download={result.name}
-              onClick={() => setResult((current) => current?.url === result.url ? { ...current, downloaded: true } : current)}
-              className="chip-button inline-flex items-center gap-1.5"
-            >
-              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            <Button href={result.url} download={result.name} icon={Download}
+              onClick={() => setResult((current) => current?.url === result.url ? { ...current, downloaded: true } : current)}>
               Download WAV
-            </a>
+            </Button>
           </div>
           <audio controls src={result.url} className="mt-3 h-9 w-full" />
         </div>

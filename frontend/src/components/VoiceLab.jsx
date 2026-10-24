@@ -1,84 +1,27 @@
 import React, { memo } from 'react';
-import { RotateCcw } from 'lucide-react';
 import { FALLBACK_F0_METHODS, findF0Method, groupedMethods } from '../lib/f0Methods';
-import { isRecommendedVoice } from '../lib/voice';
+import Button from './Button';
 import Toggle from './Toggle';
-import Collapsible from './Collapsible';
-
-function BigSlider({ label, value, min, max, step, unit, onChange, onReset, resetDisabled, accessory, hint }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <p className="text-xs font-medium text-fg-muted">{label}</p>
-          {accessory}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`font-mono text-xl font-semibold tabular-nums tracking-normal ${value === 0 ? 'text-fg-subtle' : 'text-fg'}`}>
-            {value > 0 ? '+' : ''}{Number(value).toFixed(1)}{unit}
-          </span>
-          <button
-            onClick={onReset}
-            disabled={resetDisabled ?? value === 0}
-            className="chip-button inline-flex h-8 w-8 items-center justify-center !p-0"
-            aria-label={`Reset ${label}`}
-            title={`Reset ${label}`}
-          >
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-      <input
-        type="range"
-        aria-label={label}
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="mt-3 w-full"
-      />
-      <div className="mt-1.5 flex items-center justify-between text-[10px] font-medium text-fg-faint">
-        <span>{min}</span>
-        <span>0</span>
-        <span>+{max}</span>
-      </div>
-      {hint ? <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">{hint}</p> : null}
-    </div>
-  );
-}
-
-function MiniSlider({ label, value, min, max, step, onChange, format = (v) => v.toFixed(2) }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-fg-muted">{label}</span>
-        <span className="font-mono text-xs tabular-nums text-fg-secondary">{format(Number(value))}</span>
-      </div>
-      <input
-        type="range"
-        aria-label={label}
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="fx-slider mt-2 w-full"
-      />
-    </div>
-  );
-}
+import { BigSlider, MiniSlider } from './Sliders';
 
 function pitchHint(voice, autoPitchAvailable, autoPitchShift, isRunning) {
   if (!voice.autoPitch) return 'Manual shift. Turn Auto on to match the voice register.';
-  if (!isRunning) return 'Auto: matches your register to the voice once you speak (voices trained here).';
-  if (!autoPitchAvailable) return 'Auto needs a voice trained in this studio; this voice keeps your pitch (0).';
+  if (!isRunning) return 'Auto: matches your register to the voice once you speak.';
+  if (!autoPitchAvailable) return 'Auto needs a voice trained in this studio; this one keeps your pitch.';
   if (autoPitchShift === null) return 'Auto: listening to your voice…';
-  return 'Auto: your register is matched to the voice. Move the slider to choose a shift yourself.';
+  return 'Auto: your register is matched to the voice.';
 }
 
+function calibrationText(isRunning, speakerProfile) {
+  if (!isRunning) return 'Calibrates to you as you speak.';
+  if (!speakerProfile) return 'Learning your voice: keep talking…';
+  if (speakerProfile.calibration < 1) return `Learning your voice… ${Math.round(speakerProfile.calibration * 100)}%`;
+  return `Calibrated: ${Math.round(speakerProfile.median_hz)} Hz, range ±${speakerProfile.range_semitones} st`;
+}
+
+/** The Voice card: pitch, melody, timbre and the pitch tracker. */
 function VoiceLab({
-  voice, onChange, onRestoreRecommended, hasModel, isRunning, autoPitchAvailable = false, autoPitchShift = null,
+  voice, onChange, hasModel, isRunning, autoPitchAvailable = false, autoPitchShift = null,
   f0Pending = null, tooSlow = false, speakerProfile = null, expressivenessApplied = null, onRecalibrate,
   f0Methods = FALLBACK_F0_METHODS,
 }) {
@@ -86,27 +29,26 @@ function VoiceLab({
   const shownPitch = autoActive ? autoPitchShift : voice.pitch;
   const selectedMethod = findF0Method(f0Methods, voice.f0Method);
   const liveGroups = groupedMethods(f0Methods, 'realtime');
+  const trackerState = tooSlow ? 'Too slow here'
+    : !selectedMethod.available ? selectedMethod.reason
+      : f0Pending === selectedMethod.id ? 'Loading…' : 'Ready';
 
   return (
-    <section className="panel p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="panel-kicker">Voice Lab</p>
-          <h2 className="panel-title">Pitch & timbre</h2>
+    <section className="panel flex h-full min-h-0 flex-col p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="panel-kicker">Voice</p>
+          <h2 className="panel-title truncate">Pitch & timbre</h2>
         </div>
-        <span className={`rounded-sm border px-2 py-1 text-[11px] font-medium ${
-          isRunning
-            ? 'border-ok-line bg-ok-bg text-ok-fg'
-            : 'border-line-strong bg-control text-fg-subtle'
-        }`}
-        >
+        <span className={`shrink-0 rounded-sm border px-2 py-1 text-[11px] font-medium ${
+          isRunning ? 'border-ok-line bg-ok-bg text-ok-fg' : 'border-line-strong bg-control text-fg-subtle'}`}>
           {isRunning ? 'Live' : 'Applies on start'}
         </span>
       </div>
 
-      <div className="mt-4 space-y-5">
+      <div className="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
         <BigSlider
-          label="Pitch Shift"
+          label="Pitch"
           value={shownPitch}
           min={-12}
           max={12}
@@ -116,12 +58,8 @@ function VoiceLab({
           onReset={() => onChange({ pitch: 0, autoPitch: true })}
           resetDisabled={voice.autoPitch && voice.pitch === 0}
           accessory={(
-            <span className="inline-flex items-center gap-2 text-[11px] font-medium text-fg-subtle">
-              <Toggle
-                checked={voice.autoPitch}
-                onChange={(autoPitch) => onChange({ autoPitch })}
-                label="Automatic pitch"
-              />
+            <span className="inline-flex shrink-0 items-center gap-2 text-[11px] font-medium text-fg-subtle">
+              <Toggle checked={voice.autoPitch} onChange={(autoPitch) => onChange({ autoPitch })} label="Automatic pitch" />
               Auto
             </span>
           )}
@@ -130,35 +68,27 @@ function VoiceLab({
 
         <div>
           <MiniSlider
-            label="Expressiveness (melody)"
+            label="Expressiveness"
             value={voice.expressiveness}
             min={0.5}
             max={2}
             step={0.05}
             onChange={(value) => onChange({ expressiveness: value })}
             format={(v) => `×${v.toFixed(2)}`}
+            hint={voice.autoPitch && autoPitchAvailable && expressivenessApplied != null
+              ? `Auto: ×${expressivenessApplied.toFixed(2)}, the voice's own melodic range.`
+              : 'Above 1 widens your rises and falls in pitch: a livelier voice.'}
           />
-          <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">
-            {voice.autoPitch && autoPitchAvailable && expressivenessApplied != null
-              ? `Auto: ×${expressivenessApplied.toFixed(2)}, the trained voice's own melodic range.`
-              : 'Above 1 widens your rises and falls in pitch for a livelier, less monotone voice.'}
-          </p>
-          <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-fg-subtle">
-            <span>
-              {!isRunning ? 'Your voice is calibrated in the first seconds you speak.'
-                : !speakerProfile ? 'Learning your voice: keep talking…'
-                  : speakerProfile.calibration < 1
-                    ? `Learning your voice… ${Math.round(speakerProfile.calibration * 100)}%`
-                    : `Calibrated to your voice: ${Math.round(speakerProfile.median_hz)} Hz, range ±${speakerProfile.range_semitones} st`}
+          <div className="mt-2 flex h-8 items-center justify-between gap-3">
+            <span className="min-w-0 truncate text-[11px] text-fg-subtle" title={calibrationText(isRunning, speakerProfile)}>
+              {calibrationText(isRunning, speakerProfile)}
             </span>
-            {isRunning && onRecalibrate ? (
-              <button type="button" className="chip-button" onClick={onRecalibrate}>Recalibrate</button>
-            ) : null}
+            <Button onClick={onRecalibrate} disabled={!isRunning || !onRecalibrate} className="w-28">Recalibrate</Button>
           </div>
         </div>
 
         <BigSlider
-          label="Formant Shift"
+          label="Formant"
           value={voice.formant}
           min={-12}
           max={12}
@@ -167,158 +97,33 @@ function VoiceLab({
           onChange={(value) => onChange({ formant: value })}
           onReset={() => onChange({ formant: 0 })}
         />
-      </div>
 
-      <div className="mt-5 space-y-2 border-t border-line pt-4">
-      <Collapsible id="voice-f0" title="Pitch tracker"
-        summary={`${selectedMethod.label} · ${tooSlow ? 'too slow for live audio' : f0Pending === selectedMethod.id
-          ? 'loading…' : selectedMethod.available ? 'ready' : selectedMethod.reason}`}>
-        <label htmlFor="voice-f0-method" className="block text-xs font-medium text-fg-muted">
-          F0 Method {hasModel ? '' : '· needs an RVC model'}
-        </label>
-        <select
-          id="voice-f0-method"
-          value={selectedMethod.id}
-          onChange={(event) => onChange({ f0Method: event.target.value })}
-          className="native-select-safe mt-3 w-full rounded-lg border border-line-strong bg-input px-3 py-2.5 text-sm text-fg focus:border-line-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]"
-        >
-          {liveGroups.map((group) => (
-            <optgroup key={group.section} label={group.section}>
-              {group.methods.map((method) => (
-                <option key={method.id} value={method.id} disabled={!method.available}>
-                  {method.label}{method.available ? '' : ' — unavailable'}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        <div className="mt-2 flex items-start justify-between gap-3">
-          <p className="text-[11px] leading-4 text-fg-subtle">
-            {selectedMethod.description}
-            {tooSlow ? (
-              <span className="mt-1 block text-warn-fg">
-                Too slow for live audio on this device: the voice will stutter. RMVPE (or a larger buffer) keeps up.
-              </span>
-            ) : null}
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="voice-f0-method" className="min-w-0 truncate text-xs font-medium text-fg-muted">
+              Pitch tracker{hasModel ? '' : ' · needs a voice'}
+            </label>
+            <span className={`shrink-0 text-[11px] font-medium ${tooSlow || !selectedMethod.available ? 'text-warn-fg' : 'text-ok-fg'}`}>
+              {trackerState}
+            </span>
+          </div>
+          <select id="voice-f0-method" value={selectedMethod.id} onChange={(event) => onChange({ f0Method: event.target.value })}
+            className="native-select-safe field mt-2">
+            {liveGroups.map((group) => (
+              <optgroup key={group.section} label={group.section}>
+                {group.methods.map((method) => (
+                  <option key={method.id} value={method.id} disabled={!method.available}>
+                    {method.label}{method.available ? '' : ' — unavailable'}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <p className={`mt-1.5 text-[11px] leading-4 ${tooSlow ? 'text-warn-fg' : 'text-fg-subtle'}`}>
+            {tooSlow ? 'Too slow for live audio on this device: the voice will stutter. RMVPE or a larger buffer keeps up.'
+              : selectedMethod.description}
           </p>
-          <span className={`shrink-0 text-[11px] font-medium ${selectedMethod.available ? 'text-ok-fg' : 'text-warn-fg'}`}>
-            {!selectedMethod.available ? selectedMethod.reason
-              : f0Pending === selectedMethod.id ? 'Loading… (the previous one keeps working)' : 'Ready'}
-          </span>
         </div>
-      </Collapsible>
-
-      <Collapsible id="voice-cleanup" title="Voice clean-up"
-        summary={[voice.isolateVoice ? 'Speech only' : 'Everything converted',
-          voice.noiseReductionDb > 0 ? `noise −${Math.round(voice.noiseReductionDb)} dB` : 'no noise reduction',
-          voice.matchLoudness ? 'your volume' : 'model volume',
-          voice.ambientDb <= -60 ? 'no ambience' : `ambience ${Math.round(voice.ambientDb)} dB`].join(' · ')}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-medium text-fg-muted">Convert speech only</p>
-            <p className="mt-1 text-[11px] leading-4 text-fg-subtle">
-              Only your voice is converted and played: noise, breaths, clicks and your unconverted voice never are.
-            </p>
-          </div>
-          <Toggle checked={voice.isolateVoice} onChange={(isolateVoice) => onChange({ isolateVoice })}
-            label="Convert speech only" />
-        </div>
-        <div className={`mt-4 space-y-4 ${voice.isolateVoice ? '' : 'opacity-60'}`}>
-          <MiniSlider
-            label="Room ambience (steady background only)"
-            value={voice.ambientDb}
-            min={-60}
-            max={0}
-            step={1}
-            onChange={(value) => onChange({ ambientDb: value })}
-            format={(v) => (v <= -60 ? 'Off' : `${Math.round(v)} dB`)}
-          />
-        </div>
-        <div className="mt-4">
-          <MiniSlider
-            label="Noise reduction (what the model hears)"
-            value={voice.noiseReductionDb}
-            min={0}
-            max={24}
-            step={1}
-            onChange={(value) => onChange({ noiseReductionDb: value })}
-            format={(v) => (v <= 0 ? 'Off' : `${Math.round(v)} dB`)}
-          />
-        </div>
-        <div className="mt-4 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-medium text-fg-muted">Match my volume</p>
-            <p className="mt-1 text-[11px] leading-4 text-fg-subtle">The converted voice is as loud as you speak.</p>
-          </div>
-          <Toggle checked={voice.matchLoudness} onChange={(matchLoudness) => onChange({ matchLoudness })}
-            label="Match my volume" />
-        </div>
-      </Collapsible>
-
-      <Collapsible id="voice-advanced" title="RVC Advanced"
-        summary={`Index ${voice.indexRate.toFixed(2)} · Protect ${voice.protect.toFixed(2)} · RMS ${voice.rmsMixRate.toFixed(2)}${
-          isRecommendedVoice(voice) ? ' · recommended' : ''}`}>
-          <div id="rvc-advanced-controls" className="space-y-4">
-            <MiniSlider
-              label="Index Rate"
-              value={voice.indexRate}
-              min={0}
-              max={1}
-              step={0.05}
-              onChange={(value) => onChange({ indexRate: value })}
-            />
-            <MiniSlider
-              label="Filter Radius"
-              value={voice.filterRadius}
-              min={0}
-              max={7}
-              step={1}
-              onChange={(value) => onChange({ filterRadius: value })}
-              format={(v) => (v >= 3 ? String(Math.round(v)) : `${Math.round(v)} · off`)}
-            />
-            <MiniSlider
-              label="RMS Mix"
-              value={voice.rmsMixRate}
-              min={0}
-              max={1}
-              step={0.05}
-              onChange={(value) => onChange({ rmsMixRate: value })}
-            />
-            <MiniSlider
-              label="Protect"
-              value={voice.protect}
-              min={0}
-              max={0.5}
-              step={0.01}
-              onChange={(value) => onChange({ protect: value })}
-            />
-            {voice.f0Method?.startsWith('mangio-crepe') ? (
-              <MiniSlider
-                label="Crepe Hop Length"
-                value={voice.crepeHopLength}
-                min={64}
-                max={512}
-                step={16}
-                onChange={(value) => onChange({ crepeHopLength: value })}
-                format={(value) => `${Math.round(value)} samples`}
-              />
-            ) : null}
-            <p className="text-[11px] leading-4 text-fg-faint">
-              Index rate blends retrieval features, RMS mix follows input loudness,
-              protect preserves breaths and consonants. Filter radius median-smooths
-              the Harvest and DIO pitch tracks — values below 3 disable it.
-            </p>
-            <button
-              type="button"
-              onClick={onRestoreRecommended}
-              disabled={isRecommendedVoice(voice)}
-              className="chip-button inline-flex items-center gap-2"
-            >
-              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-              {isRecommendedVoice(voice) ? 'Using recommended settings' : 'Restore recommended settings'}
-            </button>
-          </div>
-      </Collapsible>
       </div>
     </section>
   );
