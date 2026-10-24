@@ -1,6 +1,7 @@
 import React, { memo, useCallback } from 'react';
 import Toggle from './Toggle';
 import { EFFECT_DEFS, countActiveEffects, defaultEffects } from '../lib/effects';
+import Collapsible from './Collapsible';
 
 function formatValue(param, value) {
   const num = Number(value);
@@ -83,28 +84,13 @@ function EffectsRack({ effects, formantShift = 0, onEffectsChange }) {
   };
 
   return (
-    <section id="effects" className="panel scroll-mt-20 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="panel-kicker">Effects Rack</p>
-          <h2 className="panel-title">DSP chain</h2>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`rounded-sm border px-2.5 py-1 text-[11px] font-medium ${
-            activeCount > 0
-              ? 'border-ok-line bg-ok-bg text-ok-fg'
-              : 'border-line-strong bg-control text-fg-subtle'
-          }`}
-          >
-            {activeCount} active
-          </span>
-          <button onClick={handleBypassAll} className="chip-button">
-            Bypass all
-          </button>
-        </div>
-      </div>
-
-      <p className="mt-2 text-xs text-fg-subtle">
+    <section id="effects" className="panel scroll-mt-20 p-4">
+      <Collapsible id="effects-rack" title="Effects Rack"
+        summary={activeCount > 0 ? `${activeCount} effect${activeCount === 1 ? '' : 's'} on` : 'No effects on'}
+        actions={activeCount > 0 ? (
+          <button onClick={handleBypassAll} className="chip-button">Bypass all</button>
+        ) : null}>
+      <p className="text-xs text-fg-subtle">
         Runs on the server after model inference — works with or without a voice model.
         The noise gate runs on the mic signal before conversion.
       </p>
@@ -119,6 +105,7 @@ function EffectsRack({ effects, formantShift = 0, onEffectsChange }) {
           />
         ))}
       </div>
+      </Collapsible>
     </section>
   );
 }

@@ -105,22 +105,36 @@ class TestLoudness:
 
 
 class TestAmbience:
-    def test_pauses_play_the_room_unconverted(self):
-        # The renderer negates: anything negated in the output went through the "model".
+    @staticmethod
+    def run(ambient_db: float, noise_reduction_db: float, audio: np.ndarray) -> np.ndarray:
         speaking = lambda k: 0.97 if k < frames(1.5) else 0.01  # noqa: E731
         stream = RealtimeVoiceStream(CLIENT, lambda w: (-w, 16000), StreamTiming(),
                                      vad=ScriptedDetector(speaking))  # type: ignore[arg-type]
-        stream.set_cleanup(StreamCleanup(isolate_voice=True, noise_reduction_db=0.0, ambient_db=0.0,
-                                         match_loudness=False))
+        stream.set_cleanup(StreamCleanup(isolate_voice=True, noise_reduction_db=noise_reduction_db,
+                                         ambient_db=ambient_db, match_loudness=False))
+        return np.concatenate([stream.process(audio[i:i + 4096]) for i in range(0, len(audio) - 4096 + 1, 4096)])
+
+    def test_the_raw_input_never_reaches_the_output_outside_speech(self):
         rng = np.random.default_rng(1)
+        t = np.arange(4 * CLIENT) / CLIENT
+        # A loud breath the speech detector does not call speech, over room noise.
+        from scipy import signal
+
+        breath = signal.lfilter(*signal.butter(2, [300, 2500], btype="band", fs=CLIENT), rng.standard_normal(len(t)))
+        audio = (0.003 * rng.standard_normal(len(t)) + 0.05 * breath * (t > 2.4)).astype(np.float32)
+        for ambient_db, reduction in ((-60.0, 12.0), (0.0, 0.0), (0.0, 12.0)):
+            late = self.run(ambient_db, reduction, audio)[int(2.8 * CLIENT):int(3.6 * CLIENT)]
+            # The test renderer negates: converted sound correlates negatively, the raw
+            # input positively. Only the raw input is forbidden.
+            scores = [np.corrcoef(late, audio[int(2.8 * CLIENT) - d:int(3.6 * CLIENT) - d])[0, 1]
+                      if late.std() > 0 else 0.0 for d in range(0, int(0.4 * CLIENT), 48)]
+            assert max(scores) < 0.1, (ambient_db, reduction)
+
+    def test_the_default_is_silence_between_words(self):
+        rng = np.random.default_rng(2)
         room = (0.01 * rng.standard_normal(4 * CLIENT)).astype(np.float32)
-        out = np.concatenate([stream.process(room[i:i + 4096]) for i in range(0, len(room) - 4096 + 1, 4096)])
-        late = out[int(2.6 * CLIENT):int(3.6 * CLIENT)]
-        # Correlation with the input at every plausible stream delay: +1 means the room
-        # itself plays (time-aligned), -1 would mean it went through the "model".
-        scores = [np.corrcoef(late, room[int(2.6 * CLIENT) - d:int(3.6 * CLIENT) - d])[0, 1]
-                  for d in range(0, int(0.4 * CLIENT), 24)]
-        assert max(scores) > 0.99 and min(scores) > -0.2
+        late = self.run(-60.0, 12.0, room)[int(2.8 * CLIENT):int(3.6 * CLIENT)]
+        assert np.abs(late).max() < 1e-6
 
 
 class TestReadyOnlyActivation:

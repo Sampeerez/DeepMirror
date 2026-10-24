@@ -135,3 +135,21 @@ class TestPresets:
         assert [p["id"] for p in listed["user"]] == ["user-mine"] and listed["builtin"]
         assert client.delete("/api/presets/user-mine").status_code == 200
         assert client.delete("/api/presets/user-mine").status_code == 404
+
+
+class TestModelExport:
+    def test_download_zips_the_voice_and_its_index(self, client, settings):
+        import zipfile as zf
+
+        (settings.MODELS_DIR / "Mi_Voz.pth").write_bytes(b"weights")
+        (settings.MODELS_DIR / "Mi_Voz.index").write_bytes(b"index")
+        response = client.get("/api/models/Mi_Voz.pth/download")
+        assert response.status_code == 200 and response.headers["content-type"] == "application/zip"
+        assert "Mi_Voz.zip" in response.headers["content-disposition"]
+        with zf.ZipFile(io.BytesIO(response.content)) as archive:
+            assert sorted(archive.namelist()) == ["Mi_Voz.index", "Mi_Voz.pth"]
+            assert archive.read("Mi_Voz.pth") == b"weights"
+
+    def test_unknown_or_path_like_names_are_404(self, client):
+        assert client.get("/api/models/missing.pth/download").status_code == 404
+        assert client.get("/api/models/..%2F..%2Fpyproject.toml/download").status_code == 404

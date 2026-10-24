@@ -116,18 +116,17 @@ class TestEnvelopeCeiling:
         assert np.abs(out[rate // 2 + 2000:]).max() < 0.002
 
 
-class TestEnvelopeFloor:
-    def test_a_dip_inside_speech_is_filled_and_pauses_are_not(self):
-        from backend.audio.streaming import envelope_floor
+class TestSnrGate:
+    def test_converted_sound_over_bare_room_noise_is_faded_and_voice_is_kept(self):
+        from backend.audio.streaming import snr_gate
 
         rate = 48000
-        t = np.arange(rate) / rate
-        voice = (0.1 * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
-        dipped = voice.copy()
-        dipped[24000:25920] *= 0.1                       # a 40 ms, 20 dB dip mid-word
-        heard = np.ones(rate, bool)
-        filled = envelope_floor(dipped, voice, rate, heard)
-        assert np.abs(filled[24480:25440]).max() > 0.04  # back within 6 dB (+-) of the speaker
-        quiet = np.zeros(rate, bool)
-        np.testing.assert_array_equal(envelope_floor(dipped, voice, rate, quiet), dipped)
-        np.testing.assert_array_equal(envelope_floor(dipped, voice, rate, None), dipped)
+        rng = np.random.default_rng(0)
+        room = (10 ** (-60 / 20) * rng.standard_normal(rate)).astype(np.float32)
+        dry = room.copy()
+        dry[: rate // 2] += (0.05 * np.sin(2 * np.pi * 200 * np.arange(rate // 2) / rate)).astype(np.float32)
+        converted = (0.05 * np.sin(2 * np.pi * 150 * np.arange(rate) / rate)).astype(np.float32)
+        out = snr_gate(converted, dry, rate, -60.0)
+        assert np.abs(out[: rate // 2 - 2000]).max() > 0.049      # voice untouched
+        assert np.abs(out[rate // 2 + 3000:]).max() < 1e-3         # invented tail removed
+        np.testing.assert_array_equal(snr_gate(converted, dry, rate, None), converted)

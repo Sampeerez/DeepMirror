@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from backend.inference.checkpoints import CheckpointError
 from backend.model_manager import ModelManager, ModelNotFoundError
@@ -45,6 +48,18 @@ async def delete_model(request: Request, name: str) -> dict:
     except ModelNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "deleted", "name": name}
+
+
+@router.get("/{name}/download")
+async def download_model(request: Request, name: str) -> FileResponse:
+    """The voice as a ``.zip`` with its ``.pth`` and (when there is one) its ``.index``."""
+    try:
+        archive, filename = await asyncio.to_thread(_manager(request).export_archive, name)
+    except ModelNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    disposition = f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename, safe='')}"
+    return FileResponse(archive, media_type="application/zip", headers={"Content-Disposition": disposition},
+                        background=BackgroundTask(archive.unlink, missing_ok=True))
 
 
 @router.post("/{name}/activate")

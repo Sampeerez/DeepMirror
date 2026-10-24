@@ -126,35 +126,35 @@ def envelope_ceiling(converted: np.ndarray, reference: np.ndarray, rate: int,
     return (converted * curve).astype(np.float32)
 
 
-# The other side: inside continuous speech the converted voice may not drop far
-# below the speaker. Some models (measured: Pedro_Sanchez) let a syllable fall
-# almost silent for 20-80 ms in the middle of a word, so "hola" sounds like
-# "ho... la"; those dips are lifted back to within FLOOR_DB of the speaker.
-FLOOR_DB = -6.0
-FLOOR_MAX_BOOST_DB = 18.0
+# Below this distance from the room's noise floor the input holds no voice, so
+# whatever the model renders there (the tail of a phrase, a breath next to
+# speech) is invented noise and is faded out.
+SNR_GATE_DB = 6.0
+SNR_GATE_WIDTH_DB = 6.0
 
 
-def envelope_floor(converted: np.ndarray, reference: np.ndarray, rate: int, heard: np.ndarray | None) -> np.ndarray:
-    """Lift 20 ms dips of ``converted`` inside continuously heard speech up to ``reference`` + FLOOR_DB."""
-    if heard is None:
-        return converted
+def above_room(dry: np.ndarray, rate: int, noise_db: float) -> np.ndarray:
+    """0..1 per sample: how clearly the input stands out from the room noise (smooth, 20 ms frames)."""
     frame = max(1, round(CEILING_FRAME_SECONDS * rate))
-    count = min(len(converted), len(reference), len(heard)) // frame
+    count = len(dry) // frame
     if count < 3:
-        return converted
-    shape = (count, frame)
-    have = np.sqrt(np.mean(np.square(converted[: count * frame].reshape(shape), dtype=np.float64), axis=1))
-    want = np.sqrt(np.mean(np.square(reference[: count * frame].reshape(shape), dtype=np.float64), axis=1))
-    speaking = heard[: count * frame].reshape(shape).all(axis=1)
-    padded = np.pad(speaking, 1, mode="edge")
-    speaking &= padded[:-2] & padded[2:]          # the frame and both neighbours: never at a speech edge
-    target = want * 10 ** (FLOOR_DB / 20)
-    boost = np.where(speaking & (have < target),
-                     np.minimum(target / np.maximum(have, 1e-9), 10 ** (FLOOR_MAX_BOOST_DB / 20)), 1.0)
-    if boost.max() <= 1.001:
-        return converted
+        return np.ones(len(dry), np.float32)
+    power = np.mean(np.square(dry[: count * frame].reshape(count, frame), dtype=np.float64), axis=1)
+    level = 10 * np.log10(np.maximum(power, 1e-14))
+    gains = np.clip((level - (noise_db + SNR_GATE_DB)) / SNR_GATE_WIDTH_DB, 0.0, 1.0)
+    padded = np.pad(gains, 1, mode="edge")
+    gains = np.maximum(gains, np.maximum(padded[:-2], padded[2:]))   # never clip an onset or ending frame
     centres = (np.arange(count) + 0.5) * frame
-    curve = np.interp(np.arange(len(converted)), centres, boost).astype(np.float32)
+    return np.interp(np.arange(len(dry)), centres, gains).astype(np.float32)
+
+
+def snr_gate(converted: np.ndarray, dry: np.ndarray, rate: int, noise_db: float | None) -> np.ndarray:
+    """Fade ``converted`` where ``dry`` (the input) is within SNR_GATE_DB of the room noise."""
+    if noise_db is None:
+        return converted
+    curve = above_room(dry[: len(converted)], rate, noise_db)
+    if len(curve) < len(converted):
+        curve = np.pad(curve, (0, len(converted) - len(curve)), mode="edge")
     return (converted * curve).astype(np.float32)
 
 
@@ -164,7 +164,7 @@ class StreamCleanup:
 
     isolate_voice: bool = True      # convert speech only; the rest is ambience
     noise_reduction_db: float = 12.0
-    ambient_db: float = -6.0        # level of the unconverted room; <= -60 mutes it
+    ambient_db: float = -60.0       # steady room noise mixed back (never the raw input); <= -60 is off
     match_loudness: bool = True
 
     @property
@@ -266,15 +266,20 @@ class RealtimeVoiceStream:
         """History index where the emitted region ends (``lookahead`` before the newest sample)."""
         return len(self._history) - round(self.timing.lookahead_seconds * self.client_rate)
 
-    def _ambience(self, dry: np.ndarray, clean: np.ndarray | None, speech: np.ndarray) -> np.ndarray:
-        """The room, unconverted: the input where nobody speaks, the removed noise under speech."""
+    def _ambience(self, dry: np.ndarray, clean: np.ndarray | None) -> np.ndarray:
+        """The steady room noise only (what the reducer removed), never the raw input.
+
+        Breaths, clicks and your own voice are not steady noise, so they never
+        reach the output this way, not even when the detector misses a word.
+        """
         level = self.cleanup.ambient_gain
-        if level <= 0:
+        noise_db = self.speech.noise_db if self.speech is not None else None
+        if level <= 0 or clean is None or noise_db is None:
             return np.zeros_like(dry)
-        room = dry * (1.0 - speech)
-        if clean is not None:
-            room = room + (dry - clean) * speech
-        return (level * room).astype(np.float32)
+        # Only where the input is nothing but room: anything louder (voice, a breath, a
+        # click) silences the ambience, so a sound the detector missed cannot leak through it.
+        only_room = 1.0 - above_room(dry, self.client_rate, noise_db)
+        return (level * (dry - clean) * only_room).astype(np.float32)
 
     def _join_ambience(self, ambience: np.ndarray, n: int, crossfade: int) -> np.ndarray:
         # Always the nominal (centre) offset: consecutive spans are contiguous in time.
@@ -294,16 +299,19 @@ class RealtimeVoiceStream:
         crossfade = min(self._crossfade, n)
         span = n + crossfade + self._search
         end = self._emitted_end()
-        dry = self._history[max(0, end - span):end]
-        speech = self._speech_gain[max(0, end - span):end]
-        if len(dry) < span:
-            dry = np.pad(dry, (span - len(dry), 0))
-            speech = np.pad(speech, (span - len(speech), 0))
         self._tail = None
         self._resuming = True
-        if not self.cleanup.isolate_voice:
-            speech = np.zeros_like(speech)
-        out = self._join_ambience(self._ambience(dry, None, speech), n, crossfade)
+        if self.cleanup.ambient_gain <= 0 or self.cleanup.noise_reduction_db <= 0:
+            self._ambient_tail = None
+            return np.zeros(n, dtype=np.float32)
+        clean_history = self.denoiser.apply(self._history, self._speech_gain)
+
+        def span_of(values: np.ndarray) -> np.ndarray:
+            part = values[max(0, end - span):end]
+            return np.pad(part, (span - len(part), 0)) if len(part) < span else part
+
+        clean = span_of(clean_history) if clean_history is not self._history else None
+        out = self._join_ambience(self._ambience(span_of(self._history), clean), n, crossfade)
         return soft_limit(out.astype(np.float32, copy=False))
 
     def convert(self, fade_out: bool = False) -> np.ndarray:
@@ -353,11 +361,10 @@ class RealtimeVoiceStream:
             region = region * level
             self.stats.loudness_gain_db = round(self.loudness.gain_db, 1)
             region = envelope_ceiling(region, reference, self.client_rate, heard)
-            region = envelope_floor(region, reference, self.client_rate, heard)
         else:
-            matched = reference / max(level, 1e-6)
-            region = envelope_floor(envelope_ceiling(region, matched, self.client_rate, heard), matched,
-                                    self.client_rate, heard)
+            region = envelope_ceiling(region, reference / max(level, 1e-6), self.client_rate, heard)
+        if cleanup.isolate_voice and self.speech is not None:
+            region = snr_gate(region, dry, self.client_rate, self.speech.noise_db)
         voice = (region * speech).astype(np.float32)
 
         if self._tail is None or len(self._tail) != crossfade:
@@ -377,10 +384,7 @@ class RealtimeVoiceStream:
         if fade_out:  # last render before sleeping: the voice fades out, the room carries on
             output *= np.linspace(1.0, 0.0, n, dtype=np.float32)
 
-        room_speech = speech if cleanup.isolate_voice else np.ones(span, np.float32)
-        if not cleanup.isolate_voice and clean is None:
-            room_speech = np.ones(span, np.float32)  # no detector, no reducer: no ambience to add
-        output = output + self._join_ambience(self._ambience(dry, clean, room_speech), n, crossfade)
+        output = output + self._join_ambience(self._ambience(dry, clean), n, crossfade)
         return soft_limit(output.astype(np.float32, copy=False))
 
     # --- One-call helpers ---------------------------------------------------

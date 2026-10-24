@@ -156,6 +156,7 @@ class SpeechTimeline:
         self._fed = 0                  # 16 kHz samples fed so far
         self._pending = np.zeros(0, np.float32)
         self._noise_db = -70.0         # room level, learnt from non-speech frames
+        self._noise_heard = False
 
     @property
     def frames_known(self) -> int:
@@ -170,8 +171,17 @@ class SpeechTimeline:
         if count and len(audio) >= count * FRAME:
             periodic, level = vocal_frames(audio[: count * FRAME].reshape(count, FRAME).astype(np.float64))
             quiet = fresh < 0.2
-            if quiet.any():   # follow the room slowly
-                self._noise_db = 0.9 * self._noise_db + 0.1 * float(np.median(level[quiet]))
+            if quiet.any():
+                # Minimum tracking: the room is the quietest the input gets. Follow it down
+                # quickly, up only slowly, so a long breath or hum is never taken for the room.
+                heard = float(np.percentile(level[quiet], 20))
+                if not self._noise_heard:
+                    self._noise_db = heard
+                elif heard < self._noise_db:
+                    self._noise_db = 0.5 * self._noise_db + 0.5 * heard
+                else:
+                    self._noise_db = 0.98 * self._noise_db + 0.02 * heard
+                self._noise_heard = True
             vocal = (periodic >= VOCAL_PERIODICITY) & (level >= self._noise_db + VOCAL_ABOVE_NOISE_DB)
             fresh = np.where(vocal, np.maximum(fresh, VOCAL_PROBABILITY), fresh).astype(np.float32)
         self._pending = audio[count * FRAME:]
@@ -182,6 +192,11 @@ class SpeechTimeline:
             self._probabilities = self._probabilities[drop:]
             self._first_frame += drop
         return fresh
+
+    @property
+    def noise_db(self) -> float | None:
+        """The room's level (dBFS) learnt from non-speech frames, once some were heard."""
+        return self._noise_db if self._noise_heard else None
 
     def last_probability(self) -> float:
         return float(self._probabilities[-1]) if len(self._probabilities) else 0.0

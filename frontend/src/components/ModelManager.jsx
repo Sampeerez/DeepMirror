@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { CircleX, LoaderCircle, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { CircleX, Download, LoaderCircle, RefreshCw, Trash2, Upload } from 'lucide-react';
 import {
+  modelDownloadUrl,
   fetchModels,
   uploadModel,
   deleteModel,
@@ -351,6 +352,16 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
                         {isOperating ? 'Loading… (warming up)' : 'Activate'}
                       </button>
                     )}
+
+                    <a
+                      href={modelDownloadUrl(name)}
+                      download
+                      aria-label={`Download ${name} with its index`}
+                      title="Download the voice (.pth and .index in a .zip)"
+                      className="frost-control inline-flex min-h-8 items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-fg-muted"
+                    >
+                      <Download className="h-3.5 w-3.5" aria-hidden="true" /> Download
+                    </a>
 
                     <button
                       onClick={() => handleDelete(name)}

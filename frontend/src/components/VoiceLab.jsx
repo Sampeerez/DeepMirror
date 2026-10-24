@@ -1,8 +1,9 @@
-import React, { memo, useState } from 'react';
-import { ChevronDown, RotateCcw } from 'lucide-react';
+import React, { memo } from 'react';
+import { RotateCcw } from 'lucide-react';
 import { FALLBACK_F0_METHODS, findF0Method, groupedMethods } from '../lib/f0Methods';
 import { isRecommendedVoice } from '../lib/voice';
 import Toggle from './Toggle';
+import Collapsible from './Collapsible';
 
 function BigSlider({ label, value, min, max, step, unit, onChange, onReset, resetDisabled, accessory, hint }) {
   return (
@@ -81,7 +82,6 @@ function VoiceLab({
   f0Pending = null, tooSlow = false, speakerProfile = null, expressivenessApplied = null, onRecalibrate,
   f0Methods = FALLBACK_F0_METHODS,
 }) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const autoActive = voice.autoPitch && autoPitchAvailable && autoPitchShift !== null;
   const shownPitch = autoActive ? autoPitchShift : voice.pitch;
   const selectedMethod = findF0Method(f0Methods, voice.f0Method);
@@ -104,7 +104,7 @@ function VoiceLab({
         </span>
       </div>
 
-      <div className="mt-5 space-y-6">
+      <div className="mt-4 space-y-5">
         <BigSlider
           label="Pitch Shift"
           value={shownPitch}
@@ -169,7 +169,10 @@ function VoiceLab({
         />
       </div>
 
-      <div className="mt-6 border-t border-line pt-5">
+      <div className="mt-5 space-y-2 border-t border-line pt-4">
+      <Collapsible id="voice-f0" title="Pitch tracker"
+        summary={`${selectedMethod.label} · ${tooSlow ? 'too slow for live audio' : f0Pending === selectedMethod.id
+          ? 'loading…' : selectedMethod.available ? 'ready' : selectedMethod.reason}`}>
         <label htmlFor="voice-f0-method" className="block text-xs font-medium text-fg-muted">
           F0 Method {hasModel ? '' : '· needs an RVC model'}
         </label>
@@ -203,14 +206,18 @@ function VoiceLab({
               : f0Pending === selectedMethod.id ? 'Loading… (the previous one keeps working)' : 'Ready'}
           </span>
         </div>
-      </div>
+      </Collapsible>
 
-      <div className="mt-6 border-t border-line pt-5">
+      <Collapsible id="voice-cleanup" title="Voice clean-up"
+        summary={[voice.isolateVoice ? 'Speech only' : 'Everything converted',
+          voice.noiseReductionDb > 0 ? `noise −${Math.round(voice.noiseReductionDb)} dB` : 'no noise reduction',
+          voice.matchLoudness ? 'your volume' : 'model volume',
+          voice.ambientDb <= -60 ? 'no ambience' : `ambience ${Math.round(voice.ambientDb)} dB`].join(' · ')}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-medium text-fg-muted">Convert speech only</p>
             <p className="mt-1 text-[11px] leading-4 text-fg-subtle">
-              Noise, breaths and clicks are not converted; the room stays audible as it is.
+              Only your voice is converted and played: noise, breaths, clicks and your unconverted voice never are.
             </p>
           </div>
           <Toggle checked={voice.isolateVoice} onChange={(isolateVoice) => onChange({ isolateVoice })}
@@ -218,7 +225,7 @@ function VoiceLab({
         </div>
         <div className={`mt-4 space-y-4 ${voice.isolateVoice ? '' : 'opacity-60'}`}>
           <MiniSlider
-            label="Room ambience"
+            label="Room ambience (steady background only)"
             value={voice.ambientDb}
             min={-60}
             max={0}
@@ -246,24 +253,12 @@ function VoiceLab({
           <Toggle checked={voice.matchLoudness} onChange={(matchLoudness) => onChange({ matchLoudness })}
             label="Match my volume" />
         </div>
-      </div>
+      </Collapsible>
 
-      <div className="mt-5 border-t border-line pt-4">
-        <button
-          onClick={() => setShowAdvanced((v) => !v)}
-          aria-expanded={showAdvanced}
-          aria-controls="rvc-advanced-controls"
-          className="frost-control flex min-h-9 w-full items-center justify-between px-3 py-2 text-xs font-medium text-fg-muted hover:text-fg"
-        >
-          RVC Advanced
-          <ChevronDown
-            className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? 'rotate-180' : ''}`}
-            aria-hidden="true"
-          />
-        </button>
-
-        {showAdvanced && (
-          <div id="rvc-advanced-controls" className="mt-4 space-y-4">
+      <Collapsible id="voice-advanced" title="RVC Advanced"
+        summary={`Index ${voice.indexRate.toFixed(2)} · Protect ${voice.protect.toFixed(2)} · RMS ${voice.rmsMixRate.toFixed(2)}${
+          isRecommendedVoice(voice) ? ' · recommended' : ''}`}>
+          <div id="rvc-advanced-controls" className="space-y-4">
             <MiniSlider
               label="Index Rate"
               value={voice.indexRate}
@@ -323,7 +318,7 @@ function VoiceLab({
               {isRecommendedVoice(voice) ? 'Using recommended settings' : 'Restore recommended settings'}
             </button>
           </div>
-        )}
+      </Collapsible>
       </div>
     </section>
   );

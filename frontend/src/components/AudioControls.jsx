@@ -1,6 +1,7 @@
 import React, { memo, useState } from 'react';
 import { LoaderCircle, Pause, Play, RefreshCw } from 'lucide-react';
 import CallMode from './CallMode';
+import Collapsible from './Collapsible';
 import { findCableOutput, isCableMicrophone } from '../lib/callMode';
 import { readStored, writeStored } from '../lib/storage';
 
@@ -148,8 +149,11 @@ function AudioControls({
         </p>
       )}
 
-      <CallMode devices={devices} enabled={callMode} onEnabledChange={changeCallMode} monitorId={monitorId}
-        onMonitorChange={setMonitorId} running={pipeline.isRunning} />
+      <Collapsible id="call-mode" className="mt-4 border-t border-line pt-4" title="Call mode (Discord, Teams, Meet…)"
+        summary={inCall ? 'On: your voice goes to the virtual microphone' : 'Off'}>
+        <CallMode devices={devices} enabled={callMode} onEnabledChange={changeCallMode} monitorId={monitorId}
+          onMonitorChange={setMonitorId} running={pipeline.isRunning} />
+      </Collapsible>
 
       {/* True A/B: keeps the mic, the WebSocket and the output routing live and
           returns the raw input instead of the converted signal. */}

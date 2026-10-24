@@ -296,3 +296,6 @@ export const installVirtualMic = () => request('/virtual-mic/install', { method:
 export const fetchLogs = (after = 0, level = null) =>
   request(`/logs?after=${after}${level ? `&level=${encodeURIComponent(level)}` : ''}&limit=2000`);
 export const fetchTrainingLog = (jobId, lines = 800) => request(`/training/jobs/${jobId}/log?lines=${lines}`);
+
+/** Direct link to a voice as a .zip (its .pth plus its .index). */
+export const modelDownloadUrl = (name) => `${API_BASE}/models/${encodeURIComponent(name)}/download`;

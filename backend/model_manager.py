@@ -12,9 +12,12 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
+import tempfile
 import threading
 import time
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -213,6 +216,27 @@ class ModelManager:
         logger.info("Uploaded %s (%d bytes)", safe_name, written)
         kind = "index" if extension == INDEX_EXTENSION else "rvc"
         return {"name": safe_name, "type": kind, "size_bytes": written, "active": False}
+
+    def export_archive(self, name: str) -> tuple[Path, str]:
+        """``(temporary zip, download name)`` with the voice's ``.pth`` and its ``.index``.
+
+        Indexes can be hundreds of MB, so the archive is written to a temporary
+        file (the caller deletes it) and stored without recompression.
+        """
+        path = self._path_of(name)
+        handle, temporary = tempfile.mkstemp(suffix=".zip", prefix="ovc-export-")
+        os.close(handle)
+        target = Path(temporary)
+        try:
+            with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_STORED) as archive:
+                archive.write(path, path.name)
+                index = self.find_index(path.name)
+                if index is not None:
+                    archive.write(index, f"{path.stem}.index")
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+        return target, f"{path.stem}.zip"
 
     def delete(self, name: str) -> None:
         path = self._path_of(name)

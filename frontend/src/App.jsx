@@ -322,6 +322,17 @@ export default function App() {
               onRetryConnection={retryNow}
             />
             <Recorder pipeline={pipeline} />
+            <PresetBar
+              refreshRevision={runtime.revision}
+              activePresetId={activePresetId}
+              onApplyPreset={applyPreset}
+              getCurrentSettings={getCurrentSettings}
+            />
+            <EffectsRack
+              effects={effects}
+              formantShift={voice.formant}
+              onEffectsChange={handleEffectsChange}
+            />
           </div>
 
           <div className="space-y-5">
@@ -357,19 +368,6 @@ export default function App() {
             />
           </div>
         </div>
-
-        <PresetBar
-          refreshRevision={runtime.revision}
-          activePresetId={activePresetId}
-          onApplyPreset={applyPreset}
-          getCurrentSettings={getCurrentSettings}
-        />
-
-        <EffectsRack
-          effects={effects}
-          formantShift={voice.formant}
-          onEffectsChange={handleEffectsChange}
-        />
       </div>
 
       <div {...panelProps('models')} className="mx-auto max-w-4xl animate-fade-in-up">

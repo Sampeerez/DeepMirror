@@ -21,7 +21,7 @@ export const DEFAULT_VOICE = {
   // what the model hears, keep the room audible unconverted, match your volume.
   isolateVoice: true,
   noiseReductionDb: 12,
-  ambientDb: -6,
+  ambientDb: -60,   // off: nothing of your raw microphone is ever played
   matchLoudness: true,
   customized: [],
 };

@@ -1,9 +1,9 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CircleX, Cpu, GraduationCap, LoaderCircle, Play, RotateCcw, Square, Trash2, Upload, Wand2,
+  CircleX, Cpu, Download, GraduationCap, LoaderCircle, Play, RotateCcw, Square, Trash2, Upload, Wand2,
 } from 'lucide-react';
 import {
-  activateModel, createTrainingJob, deleteTrainingJob, fetchTrainingInfo, fetchTrainingJobs,
+  activateModel, createTrainingJob, deleteTrainingJob, fetchTrainingInfo, fetchTrainingJobs, modelDownloadUrl,
   resumeTrainingJob, stopTrainingJob,
 } from '../lib/api';
 import { formatBytes } from '../lib/format';
@@ -125,6 +125,12 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
             onClick={() => onUse(job)} disabled={busy}>
             <Wand2 className="h-3.5 w-3.5" aria-hidden="true" /> Use this voice
           </button>
+        ) : null}
+        {job.exported_epoch && !active ? (
+          <a href={modelDownloadUrl(jobModelFile(job))} download className="chip-button inline-flex items-center gap-1.5"
+            title="The trained voice is already saved in Models; this downloads a copy (.pth and .index)">
+            <Download className="h-3.5 w-3.5" aria-hidden="true" /> Download voice (.zip)
+          </a>
         ) : null}
         {canResume(job) ? (
           <>

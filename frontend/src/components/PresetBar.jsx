@@ -91,12 +91,9 @@ function PresetBar({ activePresetId, onApplyPreset, getCurrentSettings, refreshR
   };
 
   return (
-    <section id="presets" className="panel scroll-mt-20 p-5">
+    <section id="presets" className="panel scroll-mt-20 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="panel-kicker">Presets</p>
-          <h2 className="panel-title">One-click voices</h2>
-        </div>
+        <p className="text-xs font-medium text-fg-secondary">Presets</p>
 
         <div className="flex items-center gap-2">
           {showSave ? (
@@ -138,7 +135,7 @@ function PresetBar({ activePresetId, onApplyPreset, getCurrentSettings, refreshR
 
       {error && <p className="mt-2 text-xs text-danger-fg" role="alert">{error}</p>}
 
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-2 pt-2">
+      <div className="mt-2 flex gap-2 overflow-x-auto pb-1 pt-1">
         {presets.builtin.map((preset) => (
           <PresetChip
             key={preset.id}

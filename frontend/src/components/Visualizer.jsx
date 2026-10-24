@@ -167,7 +167,7 @@ function Visualizer({ getAnalysers, isRunning, theme, active = true }) {
           </span>
         </div>
       </div>
-      <canvas ref={canvasRef} className="mt-4 h-44 w-full sm:h-52" aria-hidden="true" />
+      <canvas ref={canvasRef} className="mt-3 h-28 w-full sm:h-32" aria-hidden="true" />
       {!isRunning && (
         <p className="pointer-events-none absolute inset-x-0 bottom-[38%] text-center text-xs font-medium uppercase tracking-[0.2em] text-fg-faint">
           Start routing to see the live spectrum

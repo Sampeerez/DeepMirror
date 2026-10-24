@@ -55,7 +55,7 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
   };
 
   return (
-    <div className="mt-5 border-t border-line pt-4">
+    <div>
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <PhoneCall className="h-4 w-4 shrink-0 text-fg-subtle" aria-hidden="true" />

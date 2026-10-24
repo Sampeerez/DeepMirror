@@ -71,12 +71,13 @@ OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OV
 - **13-effect DSP rack**: noise gate, robot, whisper, telephone, distortion, bitcrush, chorus, echo, reverb, EQ, compressor, output gain, limiter
 - **16 built-in presets** plus your own, saving the whole Voice Lab state
 - **Calls (Discord, Teams, Meet…)**: call mode sends the converted voice to a virtual microphone and you stop hearing yourself (optional headphone monitor). On Windows and macOS the studio downloads the official VB-CABLE package by VB-Audio (free donationware) and opens its installer for you; on Linux it creates a PipeWire/PulseAudio microphone with nothing to install. Then pick "CABLE Output" (or "OpenVoiceChanger Microphone") as the microphone in the call app
-- **Natural, melodic voice**: Expressiveness (default ×1.25) widens the melody of your speech so the voice is less monotone, leaving the fine detail alone; held notes stay exactly in tune and laughs or high notes are left as you make them, so singing and laughing stay stable. Voices trained in the studio use their own melodic range. Inside words the converted voice never drops far below yours, so a model's brief dropouts do not split a word ("ho… la"). Your pitch centre and range are learnt in the first seconds you speak and remembered for the next session (Recalibrate any time). Laughs, humming and other pitched sounds are converted as voice
+- **Natural, melodic voice**: Expressiveness (default ×1.25) widens the melody of your speech so the voice is less monotone, leaving the fine detail alone; held notes stay exactly in tune and laughs or high notes are left as you make them, so singing and laughing stay stable. Voices trained in the studio use their own melodic range. Your pitch centre and range are learnt in the first seconds you speak and remembered for the next session (Recalibrate any time). Laughs, humming and other pitched sounds are converted as voice
 - **No invented sounds on quiet speech**: voicing must be audible and periodic at its own pitch, so a soft "no, no" does not turn fricatives or room noise into sung vowels, and the converted voice can never be louder than what you actually said around speech
 - **Logs** tab: the server's output live (filter, search, pause, copy, download) and each training run's log
-- **Speech-only conversion**: a neural voice detector (Silero VAD) converts only speech. Room noise, breaths and clicks are never sent through the voice model; the room stays audible, unconverted and time-aligned (Room ambience slider)
+- **Speech-only conversion**: a neural voice detector (Silero VAD) converts only speech. Room noise, breaths and clicks are never sent through the voice model; nothing of your microphone is ever played unconverted (no breaths, no background noise, never your own voice), and what a model renders over bare room noise at the end of a phrase is faded out. An optional, off-by-default ambience slider adds back only the steady room noise
 - **Noise reduction** for what the model hears, learnt from the pauses, gentle while you speak so soft word endings survive
 - **Match my volume**: the converted voice comes out as loud as you speak, whatever the model's own level, with a soft limiter against clipping
+- **Export voices**: every model, including the ones trained in the studio, downloads as a `.zip` with its `.pth` and `.index` (Models and Train tabs)
 - **Silence Saver** pauses inference when nobody speaks without cutting the end of the last word, wakes on a single quiet syllable and keeps listening while asleep, so the next word starts with real context
 - Switching voices is seamless: the previous voice keeps converting until the new one is fully loaded and warm, and only then is it shown as active
 - **Auto pitch**: voices trained in the studio store their pitch range, and the live stream moves your register onto the voice's (for example about +12 semitones from a low voice to a high one) while keeping your intonation. Pitch and formant start at 0, and every RVC control starts at its recommended value until you change it
@@ -181,7 +182,7 @@ project folder. Common ones:
 | `OVC_RESTORE_LAST_VOICE` | `true` | Load the voice that was active when the studio last closed |
 | `OVC_VOICE_ISOLATION` | `true` | Convert speech only; noise and breaths play as unconverted ambience |
 | `OVC_NOISE_REDUCTION_DB` | `12` | Room noise removed from what the model hears (0 = off) |
-| `OVC_AMBIENT_DB` | `-6` | Level of the unconverted room around the voice (-60 = off) |
+| `OVC_AMBIENT_DB` | `-60` | Steady room noise mixed back around the voice (-60 = off; never the raw input) |
 | `OVC_MATCH_LOUDNESS` | `true` | Bring the converted voice to the speaker's own level |
 | `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See [Security](#security) |
 | `OVC_CORS_ORIGINS` | local origins | Extra origins allowed to use the API |
