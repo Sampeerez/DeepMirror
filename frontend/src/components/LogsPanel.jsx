@@ -81,12 +81,34 @@ function LogsPanel({ active }) {
       && (!needle || `${line.logger} ${line.message}`.toLowerCase().includes(needle)));
   }, [lines, minimum, query]);
 
-  // Follow the newest line unless the user scrolled up to read.
+  // The box has a fixed size and scrolls inside. It follows the newest line only
+  // while you are at the bottom; scroll up to read and it stays put, counting new lines.
+  const [following, setFollowing] = useState(true);
+  const [unseen, setUnseen] = useState(0);
+  const seenCountRef = useRef(0);
+  const onScroll = () => {
+    const list = listRef.current;
+    if (!list) return;
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 24;
+    setFollowing(atBottom);
+    if (atBottom) setUnseen(0);
+  };
   useEffect(() => {
     const list = listRef.current;
-    if (!list || paused) return;
-    if (list.scrollHeight - list.scrollTop - list.clientHeight < 120) list.scrollTop = list.scrollHeight;
-  }, [visible, paused]);
+    if (!list) return;
+    if (following && !paused) {
+      list.scrollTop = list.scrollHeight;
+    } else {
+      setUnseen((count) => count + Math.max(0, visible.length - seenCountRef.current));
+    }
+    seenCountRef.current = visible.length;
+  }, [visible, following, paused]);
+  const jumpToLatest = () => {
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+    setFollowing(true);
+    setUnseen(0);
+  };
 
   const asText = useCallback(() => visible.map((line) => (line.time
     ? `${formatTime(line.time)} [${line.level}] ${line.logger}: ${line.message}` : line.message)).join('\n'), [visible]);
@@ -101,7 +123,7 @@ function LogsPanel({ active }) {
   };
 
   return (
-    <section className="panel flex min-h-[70vh] flex-col p-5">
+    <section className="panel flex h-[calc(100dvh-14rem)] min-h-[420px] flex-col p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="panel-kicker">Logs</p>
@@ -139,8 +161,9 @@ function LogsPanel({ active }) {
         </div>
       </div>
       {error ? <p className="mt-3 text-xs text-danger-fg">{error}</p> : null}
-      <div ref={listRef} role="log" aria-live="polite"
-        className="mt-4 h-[62vh] flex-1 overflow-auto rounded-md border border-line bg-raised p-3 font-mono text-[11px] leading-5">
+      <div className="relative mt-4 min-h-0 flex-1">
+      <div ref={listRef} role="log" aria-live="off" onScroll={onScroll}
+        className="h-full overflow-y-auto overscroll-contain rounded-md border border-line bg-raised p-3 font-mono text-[11px] leading-5">
         {visible.length === 0 ? <p className="text-fg-faint">Nothing to show yet.</p> : visible.map((line) => (
           <div key={`${line.id}-${line.time}`} className={`whitespace-pre-wrap break-words ${LEVEL_CLASS[line.level] || ''}`}>
             {line.time ? <span className="text-fg-faint">{formatTime(line.time)} </span> : null}
@@ -148,6 +171,13 @@ function LogsPanel({ active }) {
             {line.message}
           </div>
         ))}
+      </div>
+      {!following ? (
+        <button type="button" onClick={jumpToLatest}
+          className="chip-button absolute bottom-3 right-5 shadow-md">
+          Jump to latest{unseen ? ` (${unseen} new)` : ''}
+        </button>
+      ) : null}
       </div>
     </section>
   );

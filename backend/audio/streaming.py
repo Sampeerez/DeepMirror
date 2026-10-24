@@ -126,6 +126,38 @@ def envelope_ceiling(converted: np.ndarray, reference: np.ndarray, rate: int,
     return (converted * curve).astype(np.float32)
 
 
+# The other side: inside continuous speech the converted voice may not drop far
+# below the speaker. Some models (measured: Pedro_Sanchez) let a syllable fall
+# almost silent for 20-80 ms in the middle of a word, so "hola" sounds like
+# "ho... la"; those dips are lifted back to within FLOOR_DB of the speaker.
+FLOOR_DB = -6.0
+FLOOR_MAX_BOOST_DB = 18.0
+
+
+def envelope_floor(converted: np.ndarray, reference: np.ndarray, rate: int, heard: np.ndarray | None) -> np.ndarray:
+    """Lift 20 ms dips of ``converted`` inside continuously heard speech up to ``reference`` + FLOOR_DB."""
+    if heard is None:
+        return converted
+    frame = max(1, round(CEILING_FRAME_SECONDS * rate))
+    count = min(len(converted), len(reference), len(heard)) // frame
+    if count < 3:
+        return converted
+    shape = (count, frame)
+    have = np.sqrt(np.mean(np.square(converted[: count * frame].reshape(shape), dtype=np.float64), axis=1))
+    want = np.sqrt(np.mean(np.square(reference[: count * frame].reshape(shape), dtype=np.float64), axis=1))
+    speaking = heard[: count * frame].reshape(shape).all(axis=1)
+    padded = np.pad(speaking, 1, mode="edge")
+    speaking &= padded[:-2] & padded[2:]          # the frame and both neighbours: never at a speech edge
+    target = want * 10 ** (FLOOR_DB / 20)
+    boost = np.where(speaking & (have < target),
+                     np.minimum(target / np.maximum(have, 1e-9), 10 ** (FLOOR_MAX_BOOST_DB / 20)), 1.0)
+    if boost.max() <= 1.001:
+        return converted
+    centres = (np.arange(count) + 0.5) * frame
+    curve = np.interp(np.arange(len(converted)), centres, boost).astype(np.float32)
+    return (converted * curve).astype(np.float32)
+
+
 @dataclass(slots=True)
 class StreamCleanup:
     """What happens around the model (all adjustable live)."""
@@ -321,8 +353,11 @@ class RealtimeVoiceStream:
             region = region * level
             self.stats.loudness_gain_db = round(self.loudness.gain_db, 1)
             region = envelope_ceiling(region, reference, self.client_rate, heard)
+            region = envelope_floor(region, reference, self.client_rate, heard)
         else:
-            region = envelope_ceiling(region, reference / max(level, 1e-6), self.client_rate, heard)
+            matched = reference / max(level, 1e-6)
+            region = envelope_floor(envelope_ceiling(region, matched, self.client_rate, heard), matched,
+                                    self.client_rate, heard)
         voice = (region * speech).astype(np.float32)
 
         if self._tail is None or len(self._tail) != crossfade:

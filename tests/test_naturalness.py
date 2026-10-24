@@ -44,12 +44,29 @@ class TestVoicing:
 
 
 class TestIntonation:
-    def test_widens_the_melody_around_the_centre(self):
+    @staticmethod
+    def spread(f0, centre=150.0):
+        voiced = f0 > 0
+        return np.std(12 * np.log2(f0[voiced] / centre))
+
+    def test_widens_speech_melody_around_the_centre(self):
+        frames = np.arange(400)
+        f0 = (150 * 2 ** (2.5 * np.sin(frames / 6) / 12)).astype(np.float32)   # a fast, speech-like glide
+        assert self.spread(expand_intonation(f0, 1.5, 150.0)) / self.spread(f0) == pytest.approx(1.5, rel=0.08)
+
+    def test_sung_notes_keep_their_pitch(self):
+        notes = np.repeat([0, 4, 7, 12, 7, 4, 0], 55)                   # 550 ms per note
+        vibrato = 0.35 * np.sin(2 * np.pi * 5.5 * np.arange(len(notes)) / 100)
+        f0 = (150 * 2 ** ((notes + vibrato) / 12)).astype(np.float32)
+        out = expand_intonation(f0, 1.25, 150.0)
+        cents = 1200 * np.log2(out / f0)
+        middle = np.concatenate([np.arange(k * 55 + 12, k * 55 + 43) for k in range(7)])
+        assert np.median(np.abs(cents[middle])) < 10
+
+    def test_a_laugh_far_above_the_speaking_pitch_is_untouched(self):
         frames = np.arange(300)
-        f0 = (150 * 2 ** (np.sin(frames / 30) * 3 / 12)).astype(np.float32)   # +-3 semitones
-        wider = expand_intonation(f0, 1.5, 150.0)
-        spread = lambda x: np.std(12 * np.log2(x / 150))  # noqa: E731
-        assert spread(wider) / spread(f0) == pytest.approx(1.5, rel=0.05)
+        f0 = (150 * 2 ** ((10 + 2 * np.sin(frames / 4)) / 12)).astype(np.float32)   # ~10 semitones up
+        np.testing.assert_allclose(expand_intonation(f0, 1.25, 150.0), f0, rtol=2e-3)
 
     def test_unvoiced_frames_and_factor_one_are_untouched(self):
         f0 = np.array([0, 140, 150, 160, 0, 155, 150], np.float32)
@@ -97,3 +114,20 @@ class TestEnvelopeCeiling:
         out = envelope_ceiling(voice, reference, rate)
         assert np.abs(out[: rate // 2 - 2000]).max() == pytest.approx(0.1, rel=0.01)
         assert np.abs(out[rate // 2 + 2000:]).max() < 0.002
+
+
+class TestEnvelopeFloor:
+    def test_a_dip_inside_speech_is_filled_and_pauses_are_not(self):
+        from backend.audio.streaming import envelope_floor
+
+        rate = 48000
+        t = np.arange(rate) / rate
+        voice = (0.1 * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
+        dipped = voice.copy()
+        dipped[24000:25920] *= 0.1                       # a 40 ms, 20 dB dip mid-word
+        heard = np.ones(rate, bool)
+        filled = envelope_floor(dipped, voice, rate, heard)
+        assert np.abs(filled[24480:25440]).max() > 0.04  # back within 6 dB (+-) of the speaker
+        quiet = np.zeros(rate, bool)
+        np.testing.assert_array_equal(envelope_floor(dipped, voice, rate, quiet), dipped)
+        np.testing.assert_array_equal(envelope_floor(dipped, voice, rate, None), dipped)

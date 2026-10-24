@@ -241,27 +241,47 @@ def clean_voicing(f0: np.ndarray, audio: np.ndarray, noise_floor_db: float | Non
     return f0
 
 
-def expand_intonation(f0: np.ndarray, factor: float, centre_hz: float | None = None) -> np.ndarray:
-    """Widen (factor > 1) or narrow the pitch movement around ``centre_hz``.
+# Expressiveness widens the melody of *speech*. Singing and laughter need the
+# opposite: a held note stretched by 25% is out of tune (measured: 35% of sung
+# frames more than a semitone off), and a laugh that already sits far above the
+# speaking pitch pushed further sounds broken (96-98% of frames off).
+SPEECH_RANGE_SEMITONES = 4.0     # fully widened within this distance of the centre,
+FADE_OUT_SEMITONES = 8.0         # fading to no change at this distance (laughs, shouts, high notes)
+HELD_NOTE_SLOPE = 0.12           # semitones per frame: steadier than this ...
+HELD_NOTE_SECONDS = 0.2          # ... for this long is a held note, kept exactly in tune
 
-    Only the smoothed melody of log-F0 is scaled; the fast
-    frame-to-frame detail is kept as it is, so a livelier intonation does not
-    turn into a wobbly or robotic one.
+
+def expand_intonation(f0: np.ndarray, factor: float, centre_hz: float | None = None) -> np.ndarray:
+    """Widen (factor > 1) or narrow the melody of speech around ``centre_hz``.
+
+    * Only the smoothed melody is scaled; the fast frame-to-frame detail is
+      kept, so a livelier intonation does not turn wobbly or robotic.
+    * Movements within +-4 semitones of the centre (speech) are scaled fully;
+      the extra width fades to nothing at +-8 (laughs, shouts, high notes).
+    * Held notes (singing, sustained vowels) keep their exact pitch, vibrato included.
     """
     f0 = np.asarray(f0, dtype=np.float32)
     voiced = f0 > 0
     if abs(factor - 1.0) < 1e-3 or voiced.sum() < 3:
         return f0
-    log_f0 = np.log(np.where(voiced, f0, 1.0))
-    indices = np.flatnonzero(voiced)
-    filled = np.interp(np.arange(len(f0)), indices, log_f0[indices])
     from scipy import ndimage
 
+    semitones = 12.0 * np.log2(np.where(voiced, f0, 1.0))
+    indices = np.flatnonzero(voiced)
+    filled = np.interp(np.arange(len(f0)), indices, semitones[indices])
     # Melody: a 5-frame median (drops single-frame errors) then a ~30 ms Gaussian.
     smooth = ndimage.gaussian_filter1d(ndimage.median_filter(filled, size=5, mode="nearest"), 3.0, mode="nearest")
-    centre = math.log(centre_hz) if centre_hz and centre_hz > 0 else float(np.median(log_f0[voiced]))
-    shaped = centre + factor * (smooth - centre) + (log_f0 - smooth)
-    out = np.where(voiced, np.exp(np.clip(shaped, math.log(F0_MIN), math.log(F0_MAX))), 0.0)
+    centre = 12.0 * math.log2(centre_hz) if centre_hz and centre_hz > 0 else float(np.median(semitones[voiced]))
+    deviation = smooth - centre
+    size = np.abs(deviation)
+    fade = np.clip((FADE_OUT_SEMITONES - size) / (FADE_OUT_SEMITONES - SPEECH_RANGE_SEMITONES), 0.0, 1.0)
+    extra = (factor - 1.0) * np.where(size <= SPEECH_RANGE_SEMITONES, deviation,
+                                      np.sign(deviation) * SPEECH_RANGE_SEMITONES * fade)
+    steady = np.abs(np.gradient(smooth)) < HELD_NOTE_SLOPE
+    held = ndimage.uniform_filter1d(steady.astype(float), max(1, int(HELD_NOTE_SECONDS * 100))) > 0.8
+    speaking = 1.0 - ndimage.uniform_filter1d(held.astype(float), 9)    # soft transitions
+    shaped = semitones + speaking * extra
+    out = np.where(voiced, 2.0 ** (np.clip(shaped, 12 * math.log2(F0_MIN), 12 * math.log2(F0_MAX)) / 12.0), 0.0)
     return out.astype(np.float32)
 
 
