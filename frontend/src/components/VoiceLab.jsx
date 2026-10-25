@@ -87,6 +87,17 @@ function VoiceLab({
           </div>
         </div>
 
+        <MiniSlider
+          label="Pitch correction"
+          value={voice.pitchCorrection}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(value) => onChange({ pitchCorrection: value })}
+          format={(v) => (v <= 0 ? 'Off' : `${Math.round(v * 100)}%`)}
+          hint="Autotune: pulls each note in tune. For singing; leave it off to speak naturally."
+        />
+
         <BigSlider
           label="Formant"
           value={voice.formant}

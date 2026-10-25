@@ -6,9 +6,12 @@ records from its output.
 
 * Windows and macOS: VB-CABLE (VB-Audio, donationware). Its licence allows
   sharing the official package as is but not folding it into another
-  program's installer, so the studio downloads the official package
-  (checksum-verified) and opens VB-Audio's own installer for the user, who
-  confirms it and the administrator prompt.
+  program's installer, so the studio downloads the newest package listed on
+  VB-Audio's own page and opens VB-Audio's installer for the user, who
+  confirms it and the administrator prompt. The version known when this was
+  written is checked by SHA-256; a newer one by the installer's digital
+  signature (Windows: Authenticode, signed by VB-Audio's author), so an
+  update never needs a change here and a tampered file is never run.
 * Linux: PipeWire/PulseAudio create virtual devices without installing
   anything; the studio adds a null sink plus a microphone fed from it while
   call mode is on, and removes them on exit.
@@ -18,16 +21,19 @@ from __future__ import annotations
 
 import logging
 import platform
+import re
 import shutil
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from backend.assets import Asset, download_verified
+from backend.config import APP_NAME, APP_SLUG
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,10 @@ WINDOWS_PACKAGE = Asset("vbcable-windows", "VBCABLE_Driver_Pack45.zip",
 MAC_PACKAGE = Asset("vbcable-macos", "VBCable_MACDriver_Pack108.zip",
                     "https://download.vb-audio.com/Download_MAC/VBCable_MACDriver_Pack108.zip",
                     "e46b41c6876995403cb1da37d7c0d566f59edd83aa9fcbcdc3a205eb0b6e05c7", 4544257, False)
+VBCABLE_PAGE = "https://vb-audio.com/Cable/"
+PACKAGE_LINK = re.compile(r"https://download\.vb-audio\.com/Download_(?:CABLE|MAC)/"
+                          r"(VBCABLE_Driver_Pack(\d+)\.zip|VBCable_MACDriver_Pack(\d+)\.zip)")
+SIGNER = "BUREL VINCENT"       # VB-Audio's author, in the Authenticode certificate of its installers
 LINUX_SINK = "ovc_voice"
 LINUX_SOURCE = "ovc_mic"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0  # type: ignore[attr-defined]
@@ -57,6 +67,42 @@ class VirtualMicStatus:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def newest_package(page_html: str, known: Asset) -> Asset:
+    """The newest package of ``known``'s kind linked from VB-Audio's page (``known`` itself if none is newer).
+
+    Only links to download.vb-audio.com count. A newer package has no known
+    checksum (empty ``sha256``): its installer's signature is checked instead.
+    """
+    windows = known.filename.startswith("VBCABLE_Driver_Pack")
+    best, best_number = known, int(re.sub(r"\D", "", known.filename))
+    for match in PACKAGE_LINK.finditer(page_html):
+        name, win_number, mac_number = match.group(1), match.group(2), match.group(3)
+        number = win_number if windows else mac_number
+        if number is None or int(number) <= best_number:
+            continue
+        best, best_number = Asset(known.name, name, match.group(0), "", 0, False), int(number)
+    return best
+
+
+def latest_package(known: Asset) -> Asset:
+    try:
+        request = urllib.request.Request(VBCABLE_PAGE, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            page = response.read(2_000_000).decode("utf-8", "replace")
+    except OSError as exc:
+        logger.warning("Could not read VB-Audio's page (%s); using %s", exc, known.filename)
+        return known
+    return newest_package(page, known)
+
+
+def signed_by_vb_audio(path: Path) -> bool:
+    """True when ``path`` carries a valid Authenticode signature from VB-Audio's author (Windows)."""
+    script = (f"$s = Get-AuthenticodeSignature -LiteralPath '{path}'; "
+              "Write-Output $s.Status; Write-Output $s.SignerCertificate.Subject")
+    lines = _run(["powershell", "-NoProfile", "-Command", script], 60.0).splitlines()
+    return len(lines) >= 2 and lines[0].strip() == "Valid" and SIGNER in lines[1]
 
 
 def _run(command: list[str], timeout: float = 20.0) -> str:
@@ -100,7 +146,7 @@ class VirtualMic:
         names = {
             "Windows": ("CABLE Input (VB-Audio Virtual Cable)", "CABLE Output (VB-Audio Virtual Cable)"),
             "Darwin": ("VB-Cable", "VB-Cable"),
-            "Linux": ("OpenVoiceChanger Output", "OpenVoiceChanger Microphone"),
+            "Linux": (f"{APP_NAME} Output", f"{APP_NAME} Microphone"),
         }
         output, call_input = names.get(self.system, ("", ""))
         supported = self.system in names and (self.system != "Linux" or shutil.which("pactl") is not None)
@@ -142,9 +188,10 @@ class VirtualMic:
                 "Created, but the system did not list it yet."
         logger.info("Virtual microphone: %s", self._message)
 
-    def _package(self, asset: Asset) -> Path:
+    def _package(self, known: Asset) -> Path:
+        asset = latest_package(known)
         target = self.downloads / asset.filename
-        if not target.is_file() or target.stat().st_size != asset.size:
+        if not target.is_file() or (asset.size and target.stat().st_size != asset.size):
             logger.info("Downloading %s from VB-Audio...", asset.filename)
             download_verified(asset, target)
         folder = self.downloads / target.stem
@@ -157,6 +204,10 @@ class VirtualMic:
     def _install_windows(self) -> None:
         folder = self._package(WINDOWS_PACKAGE)
         setup = folder / ("VBCABLE_Setup_x64.exe" if platform.machine().endswith("64") else "VBCABLE_Setup.exe")
+        if not setup.is_file():
+            raise RuntimeError(f"{setup.name} is not in the VB-CABLE package")
+        if not signed_by_vb_audio(setup):
+            raise RuntimeError(f"{setup.name} is not signed by VB-Audio: it was not opened.")
         self._state = "installing"
         self._message = "Click 'Install Driver' in the VB-CABLE window and allow the administrator prompt."
         logger.info("Opening the VB-CABLE installer (%s)", setup.name)
@@ -169,7 +220,10 @@ class VirtualMic:
 
     def _install_macos(self) -> None:
         folder = self._package(MAC_PACKAGE)
-        dmg = folder / "VBCable_MACDriver_Pack108.dmg"
+        dmg = next(folder.rglob("*.dmg"), None)
+        if dmg is None:
+            raise RuntimeError("The VB-CABLE package has no installer image")
+        # macOS checks the signed, notarised VB-Audio installer itself when it opens.
         self._state = "installing"
         self._message = "Follow the VB-CABLE installer that just opened."
         subprocess.run(["open", "-W", str(dmg)], check=False)
@@ -177,10 +231,10 @@ class VirtualMic:
     def _create_linux(self) -> None:
         self._state = "installing"
         sink = _run(["pactl", "load-module", "module-null-sink", f"sink_name={LINUX_SINK}",
-                     "sink_properties=device.description=OpenVoiceChanger_Output"]).strip()
+                     f"sink_properties=device.description={APP_SLUG}_Output"]).strip()
         source = _run(["pactl", "load-module", "module-remap-source", f"master={LINUX_SINK}.monitor",
                        f"source_name={LINUX_SOURCE}",
-                       "source_properties=device.description=OpenVoiceChanger_Microphone"]).strip()
+                       f"source_properties=device.description={APP_SLUG}_Microphone"]).strip()
         self._linux_modules = [m for m in (source, sink) if m.isdigit()]
         if len(self._linux_modules) < 2:
             raise RuntimeError("PulseAudio/PipeWire refused to create the virtual devices (is pactl working?)")

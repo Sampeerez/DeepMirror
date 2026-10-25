@@ -6,11 +6,12 @@ steady noise; DeepFilterNet3 (Schröter et al., MIT/Apache-2.0), the reference
 open real-time suppressor, also removes keyboard clicks, breaths, traffic and
 other changing noise while leaving the voice intact. Measured on synthetic
 material: room noise -33 dB, keyboard clicks -71 dB, breaths -98 dB, clean
-speech changed by -32 dB (inaudible), at 1.9 ms of CPU per 10 ms of audio.
+speech changed by -32 dB (inaudible), at under 1 ms of CPU per 10 ms of audio.
 
-The model is the torchDF streaming export: one ONNX graph that takes one
-10 ms hop (480 samples at 48 kHz) plus its recurrent state and returns the
-enhanced hop, 30 ms late. Every chunk is filtered exactly once, and the
+The model is the official DeepFilterNet3 checkpoint exported here (see
+backend.audio.deepfilter) to one ONNX graph that takes one 10 ms hop (480
+samples at 48 kHz) plus its recurrent state and returns the enhanced hop,
+30 ms late. Every chunk is filtered exactly once, and the
 output is kept on the same timeline as the raw input history.
 
 DeepFilterNet removes everything below about -50 dBFS, quiet speech
@@ -32,6 +33,7 @@ from pathlib import Path
 
 import numpy as np
 
+from backend.audio.deepfilter.network import initial_state
 from backend.audio.resampling import resample
 from backend.audio.voice_activity import FRAME as VAD_FRAME
 from backend.audio.voice_activity import RATE as VAD_RATE
@@ -39,8 +41,7 @@ from backend.audio.voice_activity import VOCAL_ABOVE_NOISE_DB, VOCAL_PERIODICITY
 
 RATE = 48000
 HOP = 480
-STATE_SIZE = 45304
-DELAY = 1440              # output lags input by 30 ms (measured)
+DELAY = 1440              # output lags input by 30 ms: half a window plus two hops of lookahead
 UNLIMITED_DB = 100.0      # attenuation limit meaning "remove all the noise"
 TARGET_DB = -30.0         # quieter speech peaks are raised to this level before the filter
 MAX_GAIN_DB = 40.0
@@ -108,7 +109,7 @@ class NeuralDenoiser:
         self.reset()
 
     def reset(self) -> None:
-        self._state = np.zeros(STATE_SIZE, np.float32)
+        self._state = initial_state()
         self._pending = np.zeros(0, np.float32)       # 48 kHz input not yet a whole hop
         self._aligned = np.zeros(0, np.float32)       # cleaned audio, aligned with the input (recent part)
         self._fed = 0                                 # 48 kHz input samples fed

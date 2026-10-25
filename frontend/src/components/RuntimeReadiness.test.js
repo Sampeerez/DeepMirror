@@ -16,7 +16,7 @@ it('reports readiness and the inference device once the encoder is present', () 
     },
     onRefresh: () => {},
   }));
-  expect(html).toContain('Ready. Load a voice');
+  expect(html).toContain('Ready. Activate a voice');
   expect(html).toContain('cuda:0 · FP32 · 6 GB');
   expect(html).toContain('Recheck runtime');
 });

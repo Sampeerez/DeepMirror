@@ -1,4 +1,4 @@
-# OpenVoiceChanger
+# Voice Studio
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" alt="Python 3.13" />
@@ -20,8 +20,7 @@
   <a href="#how-the-realtime-engine-works">Realtime engine</a> •
   <a href="#configuration">Configuration</a> •
   <a href="#development">Development</a> •
-  <a href="README_KR.md">한국어</a> •
-  <a href="README_JP.md">日本語</a>
+  <a href="#credits">Credits</a>
 </p>
 
 ---
@@ -101,8 +100,8 @@ OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OV
 ### Studio
 ![Studio — realtime workspace, streaming](docs/images/main-ui.png)
 
-### Presets & effects rack
-![Voice presets and DSP effects rack](docs/images/effects-rack.png)
+### Train
+![Training a voice from your recordings](docs/images/training.png)
 
 ### Models
 ![Model bay](docs/images/models.png)
@@ -146,9 +145,10 @@ intonation at every chunk boundary and the seams click. For every chunk, the eng
 3. **Joins renders with SOLA.** The tail held back from the previous render is matched against the new one within ±6 ms, then crossfaded at the best-correlated offset. Windows join without clicks or phasing.
 4. **Resamples with soxr.** soxr is a band-limited resampler, unlike FFT resampling, which wraps the end of each window into its start.
 5. **Applies a shift-invariant loudness envelope.** The RMS mix envelope is computed with a sliding window, so overlapping renders agree on the level they apply.
-6. **Removes the noise before the model.** DeepFilterNet3 filters every chunk once, in 10 ms hops, and its output (30 ms late) is kept aligned with the input history; the newest samples it has not output yet lie in the lookahead, which is never played. HuBERT and RMVPE only hear the cleaned voice. In a noisy-room test (room noise, 6 key presses per second, breaths), sound outside speech fell from about -35 dB to about -63 dB below the voice, with the same articulation and level.
+6. **Removes the noise before the model.** DeepFilterNet3 (the official checkpoint, exported on your computer to a single streaming ONNX graph by `backend/audio/deepfilter`, about 0.08 s of CPU per second of audio) filters every chunk once, in 10 ms hops, and its output (30 ms late) is kept aligned with the input history; the newest samples it has not output yet lie in the lookahead, which is never played. HuBERT and RMVPE only hear the cleaned voice. In a noisy-room test (room noise, 6 key presses per second, breaths), sound outside speech fell from about -35 dB to about -63 dB below the voice, with the same articulation and level.
 7. **Converts speech only.** Silero VAD marks speech every 32 ms, with pre-roll and hang-over so attacks and endings are kept, and a minimum of confident frames so a breath is not taken for speech. Outside speech the output is your room, unconverted, at the ambience level; under speech, the noise the reducer removed plays back too, so there are no holes in the room sound.
 8. **Matches your level.** The converted voice is measured against your voice over the same speech frames and a slow gain (about 0.5 s) brings it to your loudness.
+9. **Keeps your articulation.** HuBERT describes the input 50 times a second, so the model alone cannot reproduce faster movements: a rolled "rrrr" (tongue closures 20-30 times a second) came out as a steady "eeee" and short stops were smeared. The fast part of your loudness envelope (8 ms against 60 ms) is put back on the converted voice, which keeps its own level. On a synthetic trill the 20-35 Hz movement went from 1-12% of the envelope's modulation to 72-98%, and articulation in noisy speech improved for every voice tested.
 
 Only the end of each window is vocoded (the content encoder and flow still see the whole
 window), and on CPU the vocoder runs on ONNX Runtime. On a GTX 1660 SUPER the Quality
@@ -235,7 +235,22 @@ server answers every frame with a converted frame of the same length. Its reserv
 carries the server time in 1/100 ms. JSON messages update settings at any time, and
 the server sends a `status` message about once a second.
 
+## Credits
+
+This project started as a fork of [OpenVoiceChanger](https://github.com/sioaeko/OpenVoiceChanger)
+by Sioaeko (MIT) and has since been rewritten. It builds on:
+
+| Component | Use | License |
+|---|---|---|
+| [RVC](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion) | Voice conversion network (ported) | MIT |
+| [fairseq HuBERT](https://github.com/facebookresearch/fairseq) | Content encoder (ported) | MIT |
+| [RMVPE](https://github.com/Dream-High/RMVPE) | Pitch tracker | MIT |
+| [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | Noise removal (re-implemented, official weights) | MIT / Apache-2.0 |
+| [Silero VAD](https://github.com/snakers4/silero-vad) | Voice activity detection | MIT |
+| [Applio](https://github.com/IAHispano/Applio) | Ideas for realtime conversion (pitch correction) | MIT |
+| [VB-CABLE](https://vb-audio.com/Cable/) | Virtual microphone, downloaded from VB-Audio and installed by you | Donationware |
+
 ## License
 
-MIT. The inference networks are ports of MIT-licensed RVC code and of fairseq's HuBERT
-(MIT).
+MIT, see [LICENSE](LICENSE). The DeepFilterNet re-implementation keeps its authors' notice in
+[backend/audio/deepfilter/LICENSE-DeepFilterNet](backend/audio/deepfilter/LICENSE-DeepFilterNet).

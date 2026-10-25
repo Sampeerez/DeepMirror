@@ -7,11 +7,13 @@ import threading
 import numpy as np
 import pytest
 
+from backend.audio.deepfilter import EXPORT_VERSION
 from backend.audio.denoise import SpectralDenoiser
 from backend.audio.loudness import CEILING, KNEE, LoudnessMatcher, soft_limit
 from backend.audio.neural_denoise import load_neural_denoiser, restore_voice
 from backend.audio.streaming import RealtimeVoiceStream, StreamCleanup, StreamTiming
 from backend.audio.voice_activity import FRAME, RATE, SpeechTimeline
+from backend.inference.pipeline import transfer_articulation
 from tests.conftest import GOLDEN, ROOT
 
 CLIENT = 48000
@@ -175,7 +177,7 @@ class TestRestoreVoice:
         assert restore_voice(voice, silent, CLIENT, None) is silent      # room not learnt yet
 
 
-DENOISER = ROOT / "models" / "assets" / "deepfilternet3_streaming.onnx"
+DENOISER = ROOT / "models" / "assets" / f"deepfilternet3_stream_v{EXPORT_VERSION}.onnx"
 
 
 @pytest.mark.skipif(not DENOISER.exists() or not (GOLDEN / "speech_16k.npy").exists(),
@@ -227,3 +229,39 @@ class TestNeuralDenoiser:
         assert RealtimeVoiceStream(CLIENT, render, cleanup=off, neural=neural).denoiser_kind == "off"
         assert load_neural_denoiser(None, CLIENT) is None
         assert load_neural_denoiser(ROOT / "missing.onnx", CLIENT) is None
+
+
+class TestArticulation:
+    """A rolled "rrrr" closes the tongue ~25 times a second; the model alone smooths that into a vowel."""
+
+    @staticmethod
+    def trill(rate=16000, seconds=1.0):
+        t = np.arange(int(rate * seconds)) / rate
+        voice = sum(np.sin(2 * np.pi * 120 * k * t) / k for k in range(1, 8))
+        gate = np.clip((0.5 + 0.5 * np.cos(2 * np.pi * 25 * t) - 0.35) / 0.3, 0, 1)
+        return (0.1 * voice * (0.12 + 0.88 * gate)).astype(np.float32), (0.1 * voice).astype(np.float32)
+
+    @staticmethod
+    def modulation(x, rate):
+        hop = rate // 400
+        env = np.sqrt(np.convolve(x.astype(np.float64) ** 2, np.ones(2 * hop) / (2 * hop), mode="same")[::hop])
+        spec = np.abs(np.fft.rfft((env - env.mean()) * np.hanning(len(env)))) ** 2
+        freqs = np.fft.rfftfreq(len(env), 1 / 400)
+        return spec[(freqs >= 18) & (freqs <= 35)].sum() / spec[(freqs >= 2) & (freqs <= 60)].sum()
+
+    def test_the_trill_of_the_speaker_is_put_back_on_a_steady_voice(self):
+        source, steady = self.trill()
+        converted = np.repeat(steady, 3)[: len(steady) * 3]   # 48 kHz "model output" without the closures
+        restored = transfer_articulation(source, 16000, converted, 48000)
+        assert self.modulation(converted, 48000) < 0.2
+        assert self.modulation(restored, 48000) > 0.8
+        # The voice keeps its own level (60 ms average): only the fast movement is the speaker's.
+        assert abs(10 * np.log10(np.mean(restored ** 2) / np.mean(converted ** 2))) < 1.0
+
+    def test_a_steady_sound_is_left_alone(self):
+        _, steady = self.trill()
+        converted = np.repeat(steady, 3)
+        restored = transfer_articulation(steady, 16000, converted, 48000)
+        assert np.max(np.abs(20 * np.log10(np.abs(restored[2000:-2000]) + 1e-9)
+                             - 20 * np.log10(np.abs(converted[2000:-2000]) + 1e-9))) < 1.0
+        assert transfer_articulation(steady, 16000, converted, 48000, strength=0.0) is converted

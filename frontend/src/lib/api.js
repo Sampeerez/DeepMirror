@@ -223,6 +223,7 @@ export async function convertFile(file, {
   useModel = true,
   autoPitch = false,
   expressiveness,
+  pitchCorrection,
   indexRate,
   filterRadius,
   rmsMixRate,
@@ -249,6 +250,7 @@ export async function convertFile(file, {
     ['protect', protect],
     ['crepe_hop_length', crepeHopLength],
     ['pitch_expressiveness', expressiveness],
+    ['pitch_correction', pitchCorrection],
   ]) {
     if (Number.isFinite(Number(value)) && value !== null && value !== '') {
       formData.append(field, String(value));

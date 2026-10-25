@@ -10,6 +10,7 @@ export const DEFAULT_VOICE = {
   autoPitch: true,
   // > 1 widens your melody (livelier, less monotone); voices trained here use their own range.
   expressiveness: 1.25,
+  pitchCorrection: 0,   // autotune: 0 natural, 1 every note in tune
   formant: 0,
   f0Method: DEFAULT_F0_METHOD,
   indexRate: 0.75,
@@ -121,6 +122,7 @@ export function streamSettingsPayload(voice, effects, bypass, runtimeConfig) {
     pitch_shift: voice.pitch,
     pitch_mode: voice.autoPitch ? 'auto' : 'manual',
     pitch_expressiveness: voice.expressiveness,
+    pitch_correction: voice.pitchCorrection,
     formant_shift: voice.formant,
     f0_method: voice.f0Method,
     index_rate: voice.indexRate,

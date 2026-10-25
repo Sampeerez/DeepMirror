@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { Copy, Download, Pause, Play, Trash2 } from 'lucide-react';
 import { fetchLogs, fetchTrainingJobs, fetchTrainingLog } from '../lib/api';
 import Button from './Button';
+import { APP_SLUG } from '../lib/brand';
 
 const LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
 const LEVEL_CLASS = {
@@ -118,13 +119,13 @@ function LogsPanel({ active }) {
     const url = URL.createObjectURL(new Blob([asText()], { type: 'text/plain' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = source === 'server' ? 'openvoicechanger-server.log' : `training-${source}.log`;
+    link.download = source === 'server' ? `${APP_SLUG}-server.log` : `training-${source}.log`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
   return (
-    <section className="panel flex h-[calc(100dvh-14rem)] min-h-[420px] flex-col p-5">
+    <section className="panel flex h-[75svh] min-h-[420px] flex-col p-5 lg:h-auto lg:min-h-0 lg:flex-1">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="panel-kicker">Logs</p>

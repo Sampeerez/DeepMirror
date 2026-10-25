@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
-import { Boxes, FileDown, GraduationCap, Mic2, ScrollText } from 'lucide-react';
+import { AudioWaveform, Boxes, FileDown, GraduationCap, Mic2, ScrollText } from 'lucide-react';
+import { APP_NAME, APP_TAGLINE } from '../lib/brand';
 
 // Ids match lib/navigation TAB_IDS; the matching panels in App carry
 // id="panel-<id>" and aria-labelledby="tab-<id>".
@@ -97,47 +98,44 @@ function TabList({ tab, onTabChange }) {
   );
 }
 
+/**
+ * The page frame. On desktop it is exactly one screen tall: the header, then
+ * the active tab, which fills the rest and scrolls inside its own panels if
+ * it must, never the page. Narrow screens stack and scroll normally.
+ */
 export default function Layout({ children, tab, onTabChange, statusSlot = null, headerActions = null }) {
   return (
-    <div className="min-h-screen text-fg">
-      <div className="flex min-h-screen flex-col">
-        <header className="sticky top-0 z-40 border-b border-line bg-header backdrop-blur-xs">
-          <div className="mx-auto flex w-full max-w-[1560px] flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6 lg:px-8">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md border border-line-strong bg-control-hover">
-                <Mic2 className="h-4 w-4 text-fg-secondary" aria-hidden="true" />
-              </div>
-              <div className="leading-tight">
-                <h1 className="text-sm font-semibold tracking-normal text-fg">
-                  OpenVoiceChanger
-                </h1>
-                <p className="text-[11px] font-medium text-fg-subtle">
-                  Realtime Voice Studio
-                </p>
-              </div>
+    <div className="flex min-h-svh flex-col text-fg lg:h-svh lg:overflow-hidden">
+      <a href="#main"
+        className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-fg focus:not-sr-only focus:absolute focus:left-4 focus:top-3">
+        Skip to content
+      </a>
+      <header className="sticky top-0 z-40 shrink-0 border-b border-line bg-header backdrop-blur-xs">
+        <div className="mx-auto flex w-full max-w-[1560px] flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-ok-line bg-ok-bg" aria-hidden="true">
+              <AudioWaveform className="h-5 w-5 text-ok-fg" />
             </div>
-
-            <TabList tab={tab} onTabChange={onTabChange} />
-
-            <div className="ml-auto flex items-center gap-3">
-              {statusSlot}
-              {headerActions}
+            <div className="leading-tight">
+              <h1 className="text-sm font-semibold tracking-normal text-fg">{APP_NAME}</h1>
+              <p className="text-[11px] font-medium text-fg-subtle">{APP_TAGLINE}</p>
             </div>
           </div>
-        </header>
 
-        <main className="flex-1">
-          <div className="mx-auto w-full max-w-[1560px] px-4 py-5 sm:px-6 lg:px-8">
-            {children}
+          <TabList tab={tab} onTabChange={onTabChange} />
+
+          <div className="ml-auto flex items-center gap-3">
+            {statusSlot}
+            {headerActions}
           </div>
-        </main>
+        </div>
+      </header>
 
-        <footer className="border-t border-line py-3">
-          <p className="mx-auto w-full max-w-[1560px] px-4 text-[11px] text-fg-faint sm:px-6 lg:px-8">
-            Local realtime RVC · DSP voice studio
-          </p>
-        </footer>
-      </div>
+      <main id="main" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
+        <div className="mx-auto flex min-h-0 w-full max-w-[1560px] flex-1 flex-col px-4 py-4 sm:px-6 lg:px-8">
+          {children}
+        </div>
+      </main>
     </div>
   );
 }

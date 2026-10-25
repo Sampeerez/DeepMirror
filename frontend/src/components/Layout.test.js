@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import Layout from './Layout';
 import { TAB_IDS } from '../lib/navigation';
+import { APP_NAME } from '../lib/brand';
 
 function render(tab) {
   return renderToStaticMarkup(React.createElement(Layout, { tab }, 'content'));
@@ -28,12 +29,13 @@ describe('Layout tab list', () => {
     expect(html).toContain('aria-selected="true"');
     expect(html.match(/aria-selected="true"/g)).toHaveLength(1);
     expect(html.match(/tabindex="0"/g)).toHaveLength(1);
-    expect(html.match(/tabindex="-1"/g)).toHaveLength(TAB_IDS.length - 1);
+    expect(html.match(/role="tab"[^>]*tabindex="-1"/g)).toHaveLength(TAB_IDS.length - 1);
     // The selected one is the converter.
     expect(html).toMatch(/id="tab-converter"[^>]*aria-selected="true"/);
   });
 
   it('gives the page a top-level heading', () => {
-    expect(render('studio')).toMatch(/<h1[^>]*>OpenVoiceChanger<\/h1>/);
+    expect(render('studio')).toContain(`>${APP_NAME}</h1>`);
+    expect(render('studio')).toContain('Skip to content');
   });
 });

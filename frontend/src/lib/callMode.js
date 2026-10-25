@@ -1,7 +1,10 @@
+import { APP_SLUG } from './brand';
 // Call mode: which audio devices are the virtual cable.
 
-const CABLE_PATTERNS = [/cable input/i, /vb-audio virtual cable/i, /vb-cable/i, /openvoicechanger/i];
-const CABLE_MIC_PATTERNS = [/cable output/i, /vb-cable/i, /openvoicechanger/i];
+// The Linux device the studio creates is named after the app (older versions: OpenVoiceChanger).
+const APP_DEVICE = new RegExp(`${APP_SLUG}|openvoicechanger`, 'i');
+const CABLE_PATTERNS = [/cable input/i, /vb-audio virtual cable/i, /vb-cable/i, APP_DEVICE];
+const CABLE_MIC_PATTERNS = [/cable output/i, /vb-cable/i, APP_DEVICE];
 
 /** The output device the studio should play into during a call (the cable's input). */
 export function findCableOutput(outputDevices = []) {

@@ -13,7 +13,7 @@ import webbrowser
 import uvicorn
 
 from backend.app import create_app
-from backend.config import ROOT, Settings
+from backend.config import APP_NAME, ROOT, Settings
 from backend.frontend_build import ensure_frontend
 from backend.lifecycle import Lifecycle
 from backend.logbook import configure_logging
@@ -42,7 +42,7 @@ def force_exit_later(seconds: float) -> None:
 
 
 def studio_running(url: str) -> bool:
-    """Whether an OpenVoiceChanger server already answers at ``url``."""
+    """Whether the studio already answers at ``url``."""
     try:
         with urllib.request.urlopen(f"{url}/health", timeout=1.5) as response:
             return response.status == 200 and b'"ok"' in response.read()
@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
     url = f"http://{'127.0.0.1' if settings.HOST in {'0.0.0.0', '::'} else settings.HOST}:{settings.PORT}"
     if studio_running(url):
         # Started again (shortcut, start script) while it is open: show it instead of failing quietly.
-        logging.getLogger(__name__).info("OpenVoiceChanger is already running; opening %s", url)
+        logging.getLogger(__name__).info("%s is already running; opening %s", APP_NAME, url)
         if not args.no_browser:
             webbrowser.open(url)
         return

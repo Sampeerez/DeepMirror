@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Headphones, LoaderCircle, PhoneCall } from 'lucide-react';
 import Button from './Button';
+import { APP_NAME } from '../lib/brand';
 import Toggle from './Toggle';
 import { fetchVirtualMic, installVirtualMic } from '../lib/api';
 import { findCableOutput } from '../lib/callMode';
@@ -86,7 +87,7 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
             </>
           ) : status.platform === 'Linux' ? (
             <>
-              The studio will create “OpenVoiceChanger Microphone” with PipeWire/PulseAudio (nothing is installed;
+              The studio will create “{APP_NAME} Microphone” with PipeWire/PulseAudio (nothing is installed;
               it disappears when the studio closes).
               <span className="mt-2 flex"><Button variant="primary" onClick={install}>Create it</Button></span>
             </>

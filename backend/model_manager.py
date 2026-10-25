@@ -37,7 +37,7 @@ from backend.inference.voice_model import VoiceModel
 
 logger = logging.getLogger(__name__)
 
-NEURAL_DENOISE_COST = 0.22   # DeepFilterNet's CPU time per second of audio (measured, 1-2 threads)
+NEURAL_DENOISE_COST = 0.1    # DeepFilterNet3 (own export): 0.07-0.09 s of CPU per second of audio, measured
 
 MODEL_EXTENSIONS = {".pth", ".pt"}
 INDEX_EXTENSION = ".index"
@@ -158,7 +158,7 @@ class ModelManager:
     def neural_denoise_fits(self, chunk_size: int, sample_rate: int) -> bool:
         """Whether DeepFilterNet fits the realtime budget next to the voice model.
 
-        It costs about 0.2 s of CPU per second of audio, on top of the model's
+        It costs about 0.1 s of CPU per second of audio, on top of the model's
         measured render: both must stay under 90% of the chunk, or the light
         spectral gate is used so the voice never stutters.
         """

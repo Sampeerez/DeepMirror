@@ -22,6 +22,9 @@ function AssetRow({ asset }) {
   } else if (downloading) {
     icon = <LoaderCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-fg-subtle" aria-hidden="true" />;
     state = `Downloading ${percent}%`;
+  } else if (asset.state === 'preparing' || asset.state === 'downloaded') {
+    icon = <LoaderCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-fg-subtle" aria-hidden="true" />;
+    state = 'Preparing…';
   } else if (asset.state === 'error') {
     state = 'Download failed';
   }
@@ -51,7 +54,7 @@ export default function RuntimeReadiness({ config, checking, error, onRefresh })
   const ready = required.length > 0 && required.every((asset) => asset.state === 'ready');
   const summary = error
     || (checking && !assets.length ? 'Checking runtime...'
-      : ready ? 'Ready. Load a voice in the Models tab to convert.'
+      : ready ? 'Ready. Activate a voice to convert.'
         : assets.some((asset) => asset.state === 'downloading')
           ? 'Downloading model assets (first run only). DSP effects work meanwhile.'
           : 'Model assets are missing. Check the network connection, then retry.');

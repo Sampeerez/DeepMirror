@@ -251,6 +251,24 @@ HELD_NOTE_SLOPE = 0.12           # semitones per frame: steadier than this ...
 HELD_NOTE_SECONDS = 0.2          # ... for this long is a held note, kept exactly in tune
 
 
+def correct_pitch(f0: np.ndarray, strength: float, shift_semitones: float = 0.0) -> np.ndarray:
+    """Pull every voiced frame towards the nearest note of the voice's output (Applio's autotune).
+
+    ``strength`` 0 leaves the pitch alone, 1 snaps it to the equal-tempered
+    note (A4 = 440 Hz) the converted voice will sing. Notes are judged after
+    the pitch shift, so the result is in tune whatever the shift.
+    """
+    f0 = np.asarray(f0, np.float32)
+    if strength <= 0:
+        return f0
+    voiced = f0 > 0
+    out = f0.copy()
+    note = 12 * np.log2(f0[voiced] / 440.0) + shift_semitones
+    corrected = note + min(strength, 1.0) * (np.round(note) - note)
+    out[voiced] = 440.0 * 2 ** ((corrected - shift_semitones) / 12)
+    return out
+
+
 def expand_intonation(f0: np.ndarray, factor: float, centre_hz: float | None = None) -> np.ndarray:
     """Widen (factor > 1) or narrow the melody of speech around ``centre_hz``.
 

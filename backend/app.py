@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from backend import lifecycle as presence
 from backend.api import convert, logs, models, presets, stream, system, training
 from backend.assets import AssetStore, legacy_asset_directories
-from backend.config import ROOT, Settings
+from backend.config import APP_NAME, ROOT, Settings
 from backend.config import settings as default_settings
 from backend.frontend_build import MISSING_UI_PAGE
 from backend.lifecycle import Lifecycle
@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
             logger.warning("OVC_ALLOW_ANY_ORIGIN is on: any website may use this API. Trusted networks only.")
         if settings.HOST not in {"127.0.0.1", "localhost", "::1"}:
             logger.warning("Listening on %s: anyone who can reach it can upload and run models.", settings.HOST)
-        logger.info("OpenVoiceChanger %s ready on http://%s:%d", app.version, settings.HOST, settings.PORT)
+        logger.info("%s %s ready on http://%s:%d", APP_NAME, app.version, settings.HOST, settings.PORT)
         if settings.RESTORE_LAST_VOICE:
             threading.Thread(target=app.state.model_manager.restore_last_voice, name="restore-voice",
                              daemon=True).start()
@@ -71,7 +71,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
             app.state.virtual_mic.close()
             app.state.model_manager.close()
 
-    app = FastAPI(title="OpenVoiceChanger", version=app_version(), lifespan=lifespan)
+    app = FastAPI(title=APP_NAME, version=app_version(), lifespan=lifespan)
     app.state.settings = settings
     app.state.assets = assets
     app.state.model_manager = manager or ModelManager(settings, assets)

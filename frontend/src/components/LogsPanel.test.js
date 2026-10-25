@@ -28,5 +28,6 @@ it('keeps a fixed-size box that scrolls inside instead of growing the page', asy
   expect(box.className).toContain('overflow-y-auto');
   expect(box.className).toContain('h-full');
   expect(box.parentElement.className).toContain('min-h-0');
-  expect(box.closest('section').className).toMatch(/h-\[calc\(100dvh/);
+  // The panel fills the screen below the header (flex-1), never more.
+  expect(box.closest('section').className).toContain('lg:flex-1');
 });

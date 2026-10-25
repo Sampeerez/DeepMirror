@@ -241,23 +241,23 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
   })), [files]);
 
   return (
-    <div className="space-y-5">
-      <section className="panel p-5 sm:p-6" aria-labelledby="training-title">
+    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="training-title">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="panel-kicker">Voice Lab training</p>
+          <div className="min-w-0">
+            <p className="panel-kicker">Train</p>
             <h2 id="training-title" className="panel-title">Create a voice</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-fg-muted">
-              Upload recordings of one speaker. The studio cleans and slices them, learns the voice on your
-              GPU starting from the official RVC v2 base models, builds its retrieval index, and saves a voice
-              you can use live or in the converter.
+            <p className="mt-1.5 text-xs leading-5 text-fg-muted">
+              Recordings of one speaker become a voice you can use live or in the converter: cleaned, sliced,
+              learnt on your GPU from the official RVC v2 base models, with its retrieval index.
             </p>
           </div>
-          <GraduationCap className="hidden h-8 w-8 shrink-0 text-fg-subtle sm:block" strokeWidth={1.5} aria-hidden="true" />
+          <GraduationCap className="hidden h-7 w-7 shrink-0 text-fg-subtle sm:block" strokeWidth={1.5} aria-hidden="true" />
         </div>
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
 
         {info?.device ? (
-          <p className="mt-4 flex items-center gap-2 text-xs text-fg-secondary">
+          <p className="flex items-center gap-2 text-xs text-fg-secondary">
             <Cpu className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
             Trains on {info.device.name}
             {info.device.device === 'cpu' ? <span className="text-warn-fg"> — no GPU found: training will be very slow</span> : null}
@@ -277,16 +277,16 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             event.preventDefault();
             fileInputRef.current?.click();
           }}
-          className={`mt-5 cursor-pointer rounded-lg border border-dashed p-6 text-center transition-colors duration-150 ${
+          className={`mt-3 cursor-pointer rounded-lg border border-dashed p-5 text-center transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] ${
             dragActive ? 'border-line-hover bg-control-hover' : 'border-line-strong bg-raised hover:border-line-hover hover:bg-control'
           }`}
         >
           <input ref={fileInputRef} type="file" accept={ACCEPTED} multiple className="hidden"
             onChange={(event) => { addFiles(event.target.files); event.target.value = ''; }} />
-          <Upload className="mx-auto mb-3 h-8 w-8 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
+          <Upload className="mx-auto mb-2 h-7 w-7 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
           <p className="text-sm font-medium text-fg-secondary">Drop recordings or click to choose</p>
           <p className="mt-1 text-xs text-fg-faint">
-            One speaker, dry and clean: no music, no reverb, no other voices. 5 minutes trains well; 10–30 minutes is ideal.
+            One speaker, dry and clean (no music, reverb or other voices). 5 min trains well; 10–30 min is ideal.
           </p>
         </div>
 
@@ -308,12 +308,12 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           {totalSeconds ? `${formatDuration(totalSeconds)} in total. ` : ''}{quality.text}
         </p>
 
-        <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="Voice name" htmlFor="training-name" hint="Saved as <name>.pth and <name>.index in Models.">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <Field label="Voice name" htmlFor="training-name" hint="Saved in Models as <name>.pth.">
             <input id="training-name" className={inputClass} value={name} maxLength={60}
               onChange={(event) => setName(event.target.value)} placeholder="my_voice" />
           </Field>
-          <Field label="Sample rate" htmlFor="training-rate" hint="40 kHz suits most microphones; 48 kHz for studio recordings.">
+          <Field label="Sample rate" htmlFor="training-rate" hint="40 kHz for most microphones.">
             <select id="training-rate" className={`native-select-safe ${inputClass}`} value={sampleRate}
               onChange={(event) => setSampleRate(Number(event.target.value))}>
               {(info?.sample_rates || [40000, 48000]).map((rate) => (
@@ -323,8 +323,8 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           </Field>
           <Field label={autoPlan ? 'Epochs: automatic' : `Epochs: ${epochs}`} htmlFor="training-epochs"
             hint={autoPlan
-              ? 'Planned from your audio and GPU. Training stops when the voice stops improving and keeps the best epoch.'
-              : 'Upper limit; the best epoch is still the one kept. Stop any time: it saves.'}>
+              ? 'Planned from your audio and GPU; the best epoch is kept.'
+              : 'Upper limit; the best epoch is kept. Stop any time: it saves.'}>
             <label className="mb-2 flex items-center gap-2 text-xs text-fg-secondary">
               <input type="checkbox" checked={autoPlan} onChange={(event) => setAutoPlan(event.target.checked)} />
               Automatic (recommended)
@@ -335,11 +335,11 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             ) : null}
           </Field>
           <Field label="Batch size" htmlFor="training-batch"
-            hint={autoPlan ? 'Automatic: fits your GPU memory and the amount of audio.' : 'Empty = automatic from free GPU memory.'}>
+            hint={autoPlan ? 'Fits your GPU memory.' : 'Empty = automatic.'}>
             <input id="training-batch" type="number" min={1} max={32} className={inputClass} value={autoPlan ? '' : batchSize}
               disabled={autoPlan} onChange={(event) => setBatchSize(event.target.value)} placeholder="Auto" />
           </Field>
-          <Field label="Save every N epochs" htmlFor="training-save" hint="Checkpoint and update the usable voice this often.">
+          <Field label="Save every N epochs" htmlFor="training-save" hint="Updates the usable voice.">
             <input id="training-save" type="number" min={1} max={500} className={inputClass} value={saveEvery}
               onChange={(event) => setSaveEvery(Number(event.target.value) || 25)} />
           </Field>
@@ -348,7 +348,8 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
         {error ? <p className="mt-4 break-words rounded-md border border-danger-line bg-danger-bg p-3 text-sm text-danger-fg" role="alert">{error}</p> : null}
         {notice ? <p className="mt-4 rounded-md border border-ok-line bg-ok-bg p-3 text-sm text-ok-fg" role="status">{notice}</p> : null}
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
           <Button variant="primary" size="lg" icon={Play} onClick={start} disabled={!canStart}
             loading={uploadProgress !== null} className="w-48">
             {uploadProgress !== null ? `Uploading ${uploadProgress}%` : 'Start training'}
@@ -357,17 +358,22 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
         </div>
       </section>
 
-      <section className="panel p-5 sm:p-6" aria-labelledby="training-jobs-title">
+      <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="training-jobs-title">
         <p className="panel-kicker">Progress</p>
         <h2 id="training-jobs-title" className="panel-title">Trained voices</h2>
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {jobs.length ? jobs.map((job) => (
             <JobCard key={job.id} job={job} busy={busy}
               onStop={(target) => act(() => stopTrainingJob(target.id))}
               onResume={(target, total) => act(() => resumeTrainingJob(target.id, total))}
               onDelete={(target) => act(() => deleteTrainingJob(target.id))}
               onUse={useVoice} />
-          )) : <p className="py-6 text-center text-sm text-fg-subtle">No voices trained yet.</p>}
+          )) : (
+            <div className="flex flex-col items-center gap-2 py-12 text-center text-sm text-fg-subtle">
+              <GraduationCap className="h-8 w-8 text-fg-faint" strokeWidth={1.5} aria-hidden="true" />
+              No voices trained yet: add recordings on the left and press Start training.
+            </div>
+          )}
         </div>
       </section>
     </div>

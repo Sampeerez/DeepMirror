@@ -1,14 +1,16 @@
 @echo off
-rem OpenVoiceChanger launcher for Windows. Double-click it.
+rem Voice Studio launcher for Windows. Double-click it.
 rem It installs uv (per user, no admin) if needed and prepares Python and every
 rem dependency in .venv (visible here, the first time it takes a few minutes).
 rem The studio then starts WITHOUT a console window and opens in the browser;
 rem its log is in the Logs tab. Closing the studio page stops it.
-rem A Desktop and Start-menu shortcut "OpenVoiceChanger" is created, which
+rem A Desktop and Start-menu shortcut named after the app is created, which
 rem starts it directly with no window at all.
 rem Extra arguments are passed through, e.g.  start.bat --port 8080
 setlocal
 cd /d "%~dp0"
+rem The app's name (scripts\rename_project.py changes it everywhere).
+set "APP_NAME=Voice Studio"
 
 where uv >nul 2>nul
 if errorlevel 1 (
@@ -29,7 +31,7 @@ if not defined OVC_TORCH (
   where nvidia-smi >nul 2>nul && (set "OVC_TORCH=cuda") || (set "OVC_TORCH=cpu")
 )
 
-echo Preparing OpenVoiceChanger (%OVC_TORCH%)...
+echo Preparing %APP_NAME% (%OVC_TORCH%)...
 uv sync --extra %OVC_TORCH% --extra neural-f0
 if errorlevel 1 (
   echo.
@@ -44,9 +46,10 @@ if defined UVW (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$s = New-Object -ComObject WScript.Shell;" ^
     "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {" ^
-    "  $l = $s.CreateShortcut((Join-Path $dir 'OpenVoiceChanger.lnk'));" ^
+    "  Remove-Item -LiteralPath (Join-Path $dir 'OpenVoiceChanger.lnk') -ErrorAction SilentlyContinue;" ^
+    "  $l = $s.CreateShortcut((Join-Path $dir '%APP_NAME%.lnk'));" ^
     "  $l.TargetPath = '%UVW%'; $l.Arguments = 'run --no-sync openvoicechanger';" ^
-    "  $l.WorkingDirectory = '%~dp0'; $l.Description = 'OpenVoiceChanger studio';" ^
+    "  $l.WorkingDirectory = '%~dp0'; $l.Description = '%APP_NAME%';" ^
     "  $l.IconLocation = 'shell32.dll,168'; $l.Save() }" >nul 2>nul
   start "" "%UVW%" run --no-sync openvoicechanger %*
 ) else (

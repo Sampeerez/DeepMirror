@@ -35,6 +35,7 @@ from backend.inference.pitch import (
     HOP,
     SAMPLE_RATE,
     PitchExtractor,
+    correct_pitch,
     expand_intonation,
     normalize_method,
     to_rvc_pitch,
@@ -61,6 +62,11 @@ class ConversionSettings:
     # Melody: 1 keeps the speaker's pitch movement, > 1 widens it around the centre.
     pitch_expressiveness: float = 1.0
     pitch_center_hz: float | None = None   # the speaker's typical pitch (None: the clip's median)
+    # Fast loudness movement of the input (trills, closures, stops) put back on the
+    # voice: 0 = off, 1 = all of it. See transfer_articulation.
+    articulation: float = 1.0
+    # Autotune: 0 = natural pitch, 1 = every note snapped in tune.
+    pitch_correction: float = 0.0
 
     def with_payload(self, payload: dict[str, Any]) -> ConversionSettings:
         """Apply the valid, clamped fields of a client payload; ignore the rest.
@@ -91,6 +97,8 @@ CONTROL_RANGES: dict[str, tuple[type, float, float]] = {
     "crepe_hop_length": (int, 64, 512),
     "speaker_id": (int, 0, 10_000),
     "pitch_expressiveness": (float, 0.5, 2.0),
+    "articulation": (float, 0.0, 1.0),
+    "pitch_correction": (float, 0.0, 1.0),
 }
 
 
@@ -148,6 +156,53 @@ def mix_rms(source: np.ndarray, source_rate: int, converted: np.ndarray, convert
     converted_env = torch.clamp_min(converted_env, 1e-6)
     gain = torch.pow(source_env, 1 - rate) * torch.pow(converted_env, rate - 1)
     return (converted * gain.numpy()).astype(np.float32)
+
+
+# Articulation transfer: envelopes on a 2.5 ms grid, fast (8 ms) against slow (60 ms).
+ARTICULATION_GRID_HZ = 400
+ARTICULATION_FAST_SECONDS = 0.008
+ARTICULATION_SLOW_SECONDS = 0.06
+ARTICULATION_CUT_DB, ARTICULATION_BOOST_DB = -30.0, 6.0
+ARTICULATION_FLOOR_DB = 45.0          # below the loudest moment: the room, left alone
+
+
+def _fast_and_slow(audio: np.ndarray, rate: int, frames: int) -> tuple[np.ndarray, np.ndarray]:
+    hop = rate // ARTICULATION_GRID_HZ
+    power = audio.astype(np.float64) ** 2
+    fast = ndimage.uniform_filter1d(power, max(1, round(ARTICULATION_FAST_SECONDS * rate)), mode="nearest")
+    slow = ndimage.uniform_filter1d(power, max(1, round(ARTICULATION_SLOW_SECONDS * rate)), mode="nearest")
+    fast, slow = np.sqrt(fast[::hop] + 1e-14), np.sqrt(slow[::hop] + 1e-14)
+    if len(fast) < frames:
+        fast, slow = np.pad(fast, (0, frames - len(fast)), mode="edge"), np.pad(slow, (0, frames - len(slow)), mode="edge")
+    return fast[:frames], slow[:frames]
+
+
+def transfer_articulation(source: np.ndarray, source_rate: int, converted: np.ndarray, converted_rate: int,
+                          strength: float = 1.0) -> np.ndarray:
+    """Put the source's fast loudness movement (trills, closures, stops) back on the voice.
+
+    HuBERT describes the input 50 times a second, so the model cannot reproduce
+    an amplitude movement faster than about 25 Hz: a rolled "rrrr" (closures
+    at 20-30 Hz) comes out as a steady vowel, and short stops are smeared. The
+    model keeps its own loudness (slow envelope); only the ratio of fast to
+    slow envelope is taken from the source, limited to -30..+6 dB.
+    """
+    if strength <= 0 or len(converted) == 0 or len(source) == 0:
+        return converted
+    frames = len(converted) // (converted_rate // ARTICULATION_GRID_HZ)
+    if frames < 4:
+        return converted
+    in_fast, in_slow = _fast_and_slow(source, source_rate, frames)
+    out_fast, out_slow = _fast_and_slow(converted, converted_rate, frames)
+    gain_db = 20 * np.log10((in_fast / in_slow) / (out_fast / out_slow))
+    gain_db = np.clip(gain_db * strength, ARTICULATION_CUT_DB, ARTICULATION_BOOST_DB)
+    loud = 20 * np.log10(in_slow)
+    gain_db[loud < loud.max() - ARTICULATION_FLOOR_DB] = 0.0
+    gain_db = ndimage.uniform_filter1d(gain_db, 3, mode="nearest")
+    hop = converted_rate // ARTICULATION_GRID_HZ
+    positions = (np.arange(len(converted)) - hop / 2) / hop
+    gain = 10 ** (np.interp(positions, np.arange(frames), gain_db) / 20)
+    return (converted * gain).astype(np.float32)
 
 
 class VoiceConverter:
@@ -211,6 +266,7 @@ class VoiceConverter:
                 pad_frames = t_pad // HOP
                 on_f0(f0[pad_frames:frames - pad_frames])
             f0 = expand_intonation(f0, settings.pitch_expressiveness, settings.pitch_center_hz)
+            f0 = correct_pitch(f0, settings.pitch_correction, settings.pitch_shift)
             coarse, shifted = to_rvc_pitch(f0, settings.pitch_shift)
             pitch = torch.from_numpy(coarse[:frames]).to(self.compute.device)[None]
             pitchf = torch.from_numpy(shifted[:frames]).to(self.compute.device)[None]
@@ -235,6 +291,8 @@ class VoiceConverter:
         if settings.rms_mix_rate != 1:
             output = mix_rms(audio, SAMPLE_RATE, output, voice.sample_rate, settings.rms_mix_rate,
                              rms_frame_seconds)
+        if settings.articulation > 0:
+            output = transfer_articulation(audio, SAMPLE_RATE, output, voice.sample_rate, settings.articulation)
         return output
 
     def _split_points(self, audio: np.ndarray) -> list[int]:

@@ -23,6 +23,7 @@ import useAudioDevices from './hooks/useAudioDevices';
 import useRuntimeConfig from './hooks/useRuntimeConfig';
 import useSettingsSync from './hooks/useSettingsSync';
 import { getActiveModel } from './lib/api';
+import { APP_NAME } from './lib/brand';
 import { defaultEffects, effectsFromPreset } from './lib/effects';
 import { effectsFromPresetSettings, presetSettingsFromVoice, voiceFromPreset } from './lib/presets';
 import { buildTabUrl, readTabFromSearch } from './lib/navigation';
@@ -47,6 +48,7 @@ function clearSettingsParam() {
 }
 
 export default function App() {
+  useEffect(() => { document.title = APP_NAME; }, []);
   const wsHook = useWebSocket();
   // Keeps the studio running while this page is open (it closes when the last page closes).
   usePresence();
@@ -298,7 +300,7 @@ export default function App() {
       {/* Studio: a top bar, three cards of one fixed height (content scrolls
           inside a card, never the page), and the presets row. On narrow screens
           the cards stack at their natural height. */}
-      <div {...panelProps('studio')} className="space-y-4 animate-fade-in-up">
+      <div {...panelProps('studio')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up gap-4">
         <AudioControls
           devices={devices}
           pipeline={pipeline}
@@ -309,7 +311,7 @@ export default function App() {
           onRetryConnection={retryNow}
         />
 
-        <div className="grid grid-cols-1 gap-4 lg:h-[clamp(540px,calc(100svh-19rem),680px)] lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-3">
           <VoiceLab
             voice={voice}
             onChange={handleVoiceChange}
@@ -363,22 +365,24 @@ export default function App() {
         />
       </div>
 
-      <div {...panelProps('models')} className="mx-auto max-w-4xl animate-fade-in-up">
+      <div {...panelProps('models')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
         <ModelManager
           activeModel={activeModel}
           onActiveModelChange={setActiveModel}
           loadingModel={loadingModel}
           active={tab === 'models'}
+          engine={(
+            <RuntimeReadiness config={runtimeConfig} checking={runtime.checking} error={runtime.error}
+              onRefresh={runtime.refresh} />
+          )}
         />
-        <RuntimeReadiness config={runtimeConfig} checking={runtime.checking} error={runtime.error}
-          onRefresh={runtime.refresh} />
       </div>
 
-      <div {...panelProps('training')} className="mx-auto max-w-5xl animate-fade-in-up">
+      <div {...panelProps('training')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
         <TrainingStudio active={tab === 'training'} onActiveModelChange={setActiveModel} />
       </div>
 
-      <div {...panelProps('converter')} className="mx-auto max-w-3xl animate-fade-in-up">
+      <div {...panelProps('converter')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
         <FileConverter
           voice={voice}
           effects={effects}
@@ -387,7 +391,7 @@ export default function App() {
         />
       </div>
 
-      <div {...panelProps('logs')} className="mx-auto max-w-6xl animate-fade-in-up">
+      <div {...panelProps('logs')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
         <LogsPanel active={tab === 'logs'} />
       </div>
 

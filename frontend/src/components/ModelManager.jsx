@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { CircleX, Download, LoaderCircle, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Boxes, CircleX, Download, LoaderCircle, RefreshCw, Search, Trash2, Upload } from 'lucide-react';
 import {
   modelDownloadUrl,
   fetchModels,
@@ -38,7 +38,7 @@ function MetaBadge({ children, tone = 'default' }) {
 //
 // `active` is true while the Models tab is showing. The panel stays mounted
 // across tab switches, so this is what triggers a fresh listing on each visit.
-function ModelManager({ activeModel = null, onActiveModelChange, active = true, loadingModel = null }) {
+function ModelManager({ activeModel = null, onActiveModelChange, active = true, loadingModel = null, engine = null }) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -47,6 +47,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
+  const [search, setSearch] = useState('');
 
   const fileInputRef = useRef(null);
 
@@ -188,144 +189,129 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
     }
   };
 
+  const query = search.trim().toLowerCase();
+  const rows = models
+    .map((model) => (typeof model === 'string' ? { name: model } : model))
+    .filter((model) => !query || model.name.toLowerCase().includes(query))
+    // The active voice first, then alphabetical.
+    .sort((a, b) => (b.name === activeModel) - (a.name === activeModel) || a.name.localeCompare(b.name));
+
   return (
-    <section className="panel p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="panel-kicker">Model Bay</p>
-          <h2 className="panel-title">Voice models</h2>
-        </div>
-
-        <Button icon={RefreshCw} size="md" onClick={loadModels} disabled={loading} aria-label="Refresh models"
-          title="Refresh models" className={loading ? '[&_svg]:animate-spin' : ''} />
-      </div>
-
-      <p className="mt-2 text-sm text-fg-subtle">
-        One model runs at a time. Matching <code className="text-fg-muted">.index</code> files
-        are picked up automatically. Without a model the studio runs in pure DSP mode.
-      </p>
-
-      <div
-        role="button"
-        tabIndex={uploading ? -1 : 0}
-        aria-label="Upload voice model files"
-        aria-disabled={uploading}
-        onDrop={handleDrop}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragActive(true);
-        }}
-        onDragLeave={(e) => {
-          e.preventDefault();
-          setDragActive(false);
-        }}
-        onClick={() => fileInputRef.current?.click()}
-        onKeyDown={(event) => {
-          if (uploading || (event.key !== 'Enter' && event.key !== ' ')) return;
-          event.preventDefault();
-          fileInputRef.current?.click();
-        }}
-        className={`relative mt-5 cursor-pointer rounded-lg border border-dashed p-6 text-center transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] sm:p-7 ${
-          dragActive
-            ? 'border-line-hover bg-control-hover drag-active'
-            : 'border-line-strong bg-raised hover:border-line-hover hover:bg-control'
-        } ${uploading ? 'pointer-events-none opacity-60' : ''}`}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pth,.pt,.index"
-          multiple
-          onChange={handleFileSelect}
-          className="hidden"
-        />
-        <Upload className="mx-auto mb-3 h-9 w-9 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
-        <p className="text-sm font-medium text-fg-secondary">
-          {dragActive ? 'Drop model files here' : 'Drop checkpoints or click to upload'}
-        </p>
-        <p className="mt-1 text-xs text-fg-faint">
-          .pth / .pt + optional .index
-        </p>
-
-        {uploading && (
-          <>
-            <p className="mt-3 font-mono text-[11px] tabular-nums text-fg-muted">
-              {uploadProgress >= 99 ? 'Finalizing on the server…' : `Uploading… ${uploadProgress}%`}
-            </p>
-            <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden rounded-b-lg bg-meter-track">
-              <div
-                className="h-full bg-primary"
-                style={{ width: `${uploadProgress}%` }}
-              />
-            </div>
-          </>
-        )}
-      </div>
-
-      {error && (
-        <div className="mt-4 flex items-start gap-2 rounded-md border border-danger-line bg-danger-bg p-4">
-          <CircleX className="mt-0.5 h-4 w-4 shrink-0 text-danger-fg" aria-hidden="true" />
-          <p className="min-w-0 break-words text-sm text-danger-fg">{error}</p>
-        </div>
-      )}
-
-      <div className="mt-5 space-y-3">
-        {loading && models.length === 0 ? (
-          <div className="flex items-center justify-center py-10">
-            <LoaderCircle className="h-5 w-5 animate-spin text-fg-subtle" aria-hidden="true" />
-          </div>
-        ) : models.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-fg-subtle">
-            No models yet — upload an RVC checkpoint, or just use the DSP studio.
+    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+      <div className="flex min-h-0 flex-col gap-4 lg:overflow-y-auto">
+        <section className="panel p-5" aria-labelledby="models-add-title">
+          <p className="panel-kicker">Models</p>
+          <h2 id="models-add-title" className="panel-title">Add a voice</h2>
+          <p className="mt-2 text-xs leading-5 text-fg-subtle">
+            RVC <code className="text-fg-muted">.pth</code> files, with their <code className="text-fg-muted">.index</code>.
+            One voice runs at a time; without one the studio uses effects only.
           </p>
-        ) : (
-          models.map((model) => {
-            const name = typeof model === 'string' ? model : model.name;
-            const size = typeof model === 'object' ? (model.size_bytes ?? model.size ?? null) : null;
-            const hasIndex = typeof model === 'object' && Boolean(model.has_index);
-            const details = typeof model === 'object' ? model.details : null;
+          <div
+            role="button"
+            tabIndex={uploading ? -1 : 0}
+            aria-label="Upload voice model files"
+            aria-disabled={uploading}
+            onDrop={handleDrop}
+            onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
+            onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(event) => {
+              if (uploading || (event.key !== 'Enter' && event.key !== ' ')) return;
+              event.preventDefault();
+              fileInputRef.current?.click();
+            }}
+            className={`relative mt-4 cursor-pointer rounded-lg border border-dashed p-5 text-center transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] ${
+              dragActive ? 'border-line-hover bg-control-hover drag-active' : 'border-line-strong bg-raised hover:border-line-hover hover:bg-control'
+            } ${uploading ? 'pointer-events-none opacity-60' : ''}`}
+          >
+            <input ref={fileInputRef} type="file" accept=".pth,.pt,.index" multiple onChange={handleFileSelect}
+              className="hidden" />
+            <Upload className="mx-auto mb-2 h-7 w-7 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
+            <p className="text-sm font-medium text-fg-secondary">
+              {dragActive ? 'Drop the files here' : 'Drop files or click to choose'}
+            </p>
+            <p className="mt-1 text-[11px] text-fg-faint">.pth / .pt + optional .index</p>
+            {uploading ? (
+              <>
+                <p className="mt-2 font-mono text-[11px] tabular-nums text-fg-muted" role="status">
+                  {uploadProgress >= 99 ? 'Finalizing on the server…' : `Uploading… ${uploadProgress}%`}
+                </p>
+                <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden rounded-b-lg bg-meter-track">
+                  <div className="h-full bg-primary" style={{ width: `${uploadProgress}%` }} />
+                </div>
+              </>
+            ) : null}
+          </div>
+          {error ? (
+            <div className="mt-3 flex items-start gap-2 rounded-md border border-danger-line bg-danger-bg p-3" role="alert">
+              <CircleX className="mt-0.5 h-4 w-4 shrink-0 text-danger-fg" aria-hidden="true" />
+              <p className="min-w-0 break-words text-xs text-danger-fg">{error}</p>
+            </div>
+          ) : null}
+        </section>
+        {engine ? <div className="panel px-5">{engine}</div> : null}
+      </div>
+
+      <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="models-list-title">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="panel-kicker">Library</p>
+            <h2 id="models-list-title" className="panel-title">
+              Voices <span className="font-normal text-fg-subtle">· {models.length}</span>
+            </h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="relative">
+              <span className="sr-only">Search voices</span>
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint"
+                aria-hidden="true" />
+              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search" className="field w-44 pl-8 sm:w-56" />
+            </label>
+            <Button icon={RefreshCw} size="md" onClick={loadModels} disabled={loading} aria-label="Refresh models"
+              title="Refresh models" className={loading ? '[&_svg]:animate-spin' : ''} />
+          </div>
+        </div>
+
+        <ul className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1" aria-label="Voice models">
+          {loading && models.length === 0 ? (
+            <li className="flex items-center justify-center py-10">
+              <LoaderCircle className="h-5 w-5 animate-spin text-fg-subtle" aria-label="Loading" />
+            </li>
+          ) : rows.length === 0 ? (
+            <li className="flex flex-col items-center gap-2 px-4 py-12 text-center text-sm text-fg-subtle">
+              <Boxes className="h-8 w-8 text-fg-faint" strokeWidth={1.5} aria-hidden="true" />
+              {models.length === 0 ? 'No voices yet: add an RVC .pth, or train one in the Train tab.'
+                : 'No voice matches the search.'}
+            </li>
+          ) : rows.map((model) => {
+            const { name } = model;
+            const size = model.size_bytes ?? model.size ?? null;
+            const details = model.details || null;
             const isActive = activeModel === name;
             // The server prepares a voice completely (weights, index, warm-up) before it is
             // active; until then it shows as loading, also when restored at start-up.
             const isOperating = operatingOn === name || loadingModel === name;
-            const type = getModelType(name);
-
             return (
-              <div
-                key={name}
-                className={`rounded-lg border px-4 py-4 transition-colors ${
-                  isActive
-                    ? 'border-ok-line bg-ok-bg'
-                    : 'border-line bg-raised hover:border-line-hover'
-                }`}
-              >
-                <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
+              <li key={name} className={`rounded-lg border px-4 py-3 transition-colors ${
+                isActive ? 'border-ok-line bg-ok-bg' : 'border-line bg-raised hover:border-line-hover'}`}>
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      {isActive && (
-                        <div className="h-2 w-2 shrink-0 rounded-full bg-ok-solid" />
-                      )}
-                      <span className="truncate text-base font-medium text-fg" title={name}>
-                        {name}
-                      </span>
+                      {isActive ? <span className="h-2 w-2 shrink-0 rounded-full bg-ok-solid" aria-hidden="true" /> : null}
+                      <span className="truncate text-sm font-semibold text-fg" title={name}>{name}</span>
                     </div>
-
-                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                      <MetaBadge>{type}</MetaBadge>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <MetaBadge>{getModelType(name)}</MetaBadge>
                       {size != null && <MetaBadge>{formatBytes(size)}</MetaBadge>}
-                      {hasIndex && <MetaBadge tone="emerald">Index</MetaBadge>}
+                      {model.has_index && <MetaBadge tone="emerald">Index</MetaBadge>}
                       {details?.version && <MetaBadge>{details.version}</MetaBadge>}
                       {details?.target_sample_rate && (
                         <MetaBadge>{(details.target_sample_rate / 1000).toFixed(0)} kHz</MetaBadge>
                       )}
-                      {details?.f0 === true && <MetaBadge>F0</MetaBadge>}
-                      {details?.device && <MetaBadge>{details.device}</MetaBadge>}
-                      {details?.realtime_index === false && (
-                        <MetaBadge>Realtime index off</MetaBadge>
-                      )}
+                      {details?.realtime_index === false && <MetaBadge>Realtime index off</MetaBadge>}
                     </div>
                   </div>
-
                   {/* Same width in every state, so the row never shifts. */}
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     {isActive ? (
@@ -351,12 +337,12 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
                     </Button>
                   </div>
                 </div>
-              </div>
+              </li>
             );
-          })
-        )}
-      </div>
-    </section>
+          })}
+        </ul>
+      </section>
+    </div>
   );
 }
 

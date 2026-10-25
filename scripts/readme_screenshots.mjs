@@ -254,30 +254,19 @@ async function main() {
     await clickText('#panel-studio', 'Start Voice Changer');
     await waitFor(`document.querySelector('[aria-label="Conversion bypass"]') && document.body.innerText.includes('Stop')`, 20000, 'audio pipeline start');
     // innerText reflects text-transform, hence the case-insensitive match.
-    await waitFor(`/round trip\\s+\\d+/i.test(document.body.innerText)`, 15000, 'a round-trip measurement');
+    await waitFor(`/latency\\s+\\d+ ms/i.test(document.body.innerText)`, 15000, 'a latency measurement');
     await sleep(1500);
     await clickText('#panel-studio', 'Record');
     await sleep(4200);
     await cdp.evaluate('window.scrollTo(0, 0)');
     await shoot('main-ui.png');
 
-    // 2. Presets + effects rack, clipped to the two panels. The viewport is
-    // made tall enough for the whole studio so the clip needs no scrolling
-    // (clip coordinates are viewport-relative).
-    await viewport(1600, 2400);
-    await clickText('#presets', 'Ghost');
-    await sleep(600);
-    const pageHeight = await cdp.evaluate('document.documentElement.scrollHeight');
-    if (pageHeight > 2400) await viewport(1600, pageHeight);
-    await cdp.evaluate('window.scrollTo(0, 0)');
-    // 12px of breathing room: the panels above and below sit 20px away, so a
-    // wider margin would catch the edge of the Voice Lab.
-    const rect = await cdp.evaluate(`(() => {
-      const a = document.getElementById('presets').getBoundingClientRect();
-      const b = document.getElementById('effects').getBoundingClientRect();
-      return { x: Math.floor(a.left) - 12, y: Math.floor(a.top) - 12, width: Math.ceil(a.width) + 24, height: Math.ceil(b.bottom - a.top) + 24 };
-    })()`);
-    await shoot('effects-rack.png', rect);
+    // 2. Train.
+    await click('#tab-training');
+    await sleep(800);
+    await shoot('training.png');
+    await click('#tab-studio');
+    await sleep(400);
 
     // 3. Settings, with the measured recommendation populated by the live stream.
     await viewport(1600, 1000);
