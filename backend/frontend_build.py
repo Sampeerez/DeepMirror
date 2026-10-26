@@ -114,7 +114,7 @@ def ensure_frontend(frontend: Path, dist: Path, npm: NpmRunner | None = None) ->
 
 
 MISSING_UI_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Voice Studio</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>VoxClone</title>
 <style>body{font:15px/1.6 system-ui,sans-serif;background:#0a0a0c;color:#e4e4e7;max-width:40rem;
 margin:4rem auto;padding:0 1rem}code{background:#18181b;padding:.1rem .35rem;border-radius:4px}</style></head>
 <body><h1>The web UI is not built yet</h1>

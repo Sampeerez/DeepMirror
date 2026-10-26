@@ -1,17 +1,18 @@
 #!/usr/bin/env sh
-# Voice Studio launcher for Linux and macOS: ./start.sh [--port 8080] [--device cpu]
+# VoxClone launcher for Linux and macOS: ./start.sh [--port 8080] [--device cpu]
 # Installs uv (per user, no root) if needed and prepares Python and every
 # dependency in .venv (visible here; the first time takes a few minutes). The
 # studio then runs in the background and opens in the browser: this terminal
 # can be closed, the log is in the studio's Logs tab, and closing the studio
-# page stops it. On Linux an app-menu entry named after the app is added.
+# page stops it. On Linux it asks once whether to add an app-menu entry
+# (answer kept in data/shortcuts.txt, or set VOXCLONE_SHORTCUTS=yes|no).
 # Use --foreground to keep it attached to the terminal.
 set -eu
 cd "$(dirname "$0")"
 HERE="$(pwd)"
 # The app's name (scripts/rename_project.py changes it everywhere).
-APP_NAME="Voice Studio"
-APP_SLUG="voicestudio"
+APP_NAME="VoxClone"
+APP_SLUG="voxclone"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "Installing uv, the Python package manager (one time only)..."
@@ -35,7 +36,16 @@ for arg in "$@"; do [ "$arg" = "--foreground" ] && FOREGROUND=1; done
 ARGS=""
 for arg in "$@"; do [ "$arg" != "--foreground" ] && ARGS="$ARGS $arg"; done
 
-if [ "$(uname)" = "Linux" ] && [ -d "$HOME/.local/share" ]; then
+SHORTCUTS="${VOXCLONE_SHORTCUTS:-}"
+if [ -z "$SHORTCUTS" ] && [ -f data/shortcuts.txt ]; then SHORTCUTS="$(cat data/shortcuts.txt)"; fi
+if [ -z "$SHORTCUTS" ] && [ "$(uname)" = "Linux" ] && [ -t 0 ]; then
+  printf "Add %s to the applications menu? [y/N] " "$APP_NAME"
+  read -r answer
+  case "$answer" in [yY]*) SHORTCUTS=yes ;; *) SHORTCUTS=no ;; esac
+  mkdir -p data && echo "$SHORTCUTS" > data/shortcuts.txt
+fi
+
+if [ "$(uname)" = "Linux" ] && [ -d "$HOME/.local/share" ] && [ "$SHORTCUTS" = "yes" ]; then
   mkdir -p "$HOME/.local/share/applications"
   UV_BIN="$(command -v uv)"
   rm -f "$HOME/.local/share/applications/openvoicechanger.desktop"
@@ -44,7 +54,7 @@ if [ "$(uname)" = "Linux" ] && [ -d "$HOME/.local/share" ]; then
 Type=Application
 Name=$APP_NAME
 Comment=Realtime voice changer studio
-Exec=sh -c 'cd "$HERE" && exec "$UV_BIN" run --no-sync openvoicechanger'
+Exec=sh -c 'cd "$HERE" && exec "$UV_BIN" run --no-sync voxclone'
 Path=$HERE
 Icon=audio-input-microphone
 Terminal=false
@@ -54,12 +64,12 @@ fi
 
 if [ "$FOREGROUND" = "1" ]; then
   # shellcheck disable=SC2086
-  exec uv run --no-sync openvoicechanger $ARGS
+  exec uv run --no-sync voxclone $ARGS
 fi
 # shellcheck disable=SC2086
 if command -v setsid >/dev/null 2>&1; then
-  setsid uv run --no-sync openvoicechanger $ARGS >/dev/null 2>&1 < /dev/null &
+  setsid uv run --no-sync voxclone $ARGS >/dev/null 2>&1 < /dev/null &
 else
-  nohup uv run --no-sync openvoicechanger $ARGS >/dev/null 2>&1 < /dev/null &
+  nohup uv run --no-sync voxclone $ARGS >/dev/null 2>&1 < /dev/null &
 fi
 echo "$APP_NAME is starting in your browser. You can close this terminal."

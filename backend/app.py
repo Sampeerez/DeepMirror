@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def app_version() -> str:
     try:
-        return version("openvoicechanger")
+        return version("voxclone")
     except PackageNotFoundError:
         return (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 

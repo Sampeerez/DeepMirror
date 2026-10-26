@@ -1,5 +1,5 @@
 [project]
-name = "openvoicechanger"
+name = "voxclone"
 description = "Realtime and offline RVC voice conversion studio"
 readme = "README.md"
 license = "MIT"
@@ -36,7 +36,7 @@ neural-f0 = ["torchcrepe>=0.0.24", "torchfcpe>=0.0.4"]
 classic-f0 = ["pyworld>=0.3.5"]
 
 [project.scripts]
-openvoicechanger = "backend.__main__:main"
+voxclone = "backend.__main__:main"
 
 [dependency-groups]
 dev = [

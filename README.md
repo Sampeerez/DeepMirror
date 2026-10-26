@@ -1,4 +1,4 @@
-# Voice Studio
+# VoxClone
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" alt="Python 3.13" />
@@ -16,13 +16,14 @@ Windows, Linux or macOS. The start script installs [uv](https://docs.astral.sh/u
 brings Python and every dependency; an NVIDIA GPU is used when there is one.
 
 ```bash
-git clone <this repository>
-cd <folder>
+git clone https://github.com/Sampeerez/VoxClone.git
+cd VoxClone
 ./start.sh          # Windows: double-click start.bat
 ```
 
 The studio opens at <http://127.0.0.1:8000>. It runs in the background (log in the **Logs**
-tab) and stops when you close the page. On Windows a Desktop shortcut is added. The first
+tab) and stops when you close the page. The first time it asks whether to add a Desktop
+shortcut (set `VOXCLONE_SHORTCUTS=yes` or `no` to skip the question). The first
 start downloads the shared models (about 400 MB) and checks each one by SHA-256.
 
 Then add a voice in **Models** (an RVC `.pth`, with its `.index` if it has one), press

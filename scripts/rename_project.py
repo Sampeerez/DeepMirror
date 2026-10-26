@@ -34,7 +34,7 @@ def main() -> None:
     parser.add_argument("--command", help="also rename the package and its command (lowercase, no spaces)")
     args = parser.parse_args()
     name = args.name.strip()
-    slug = re.sub(r"[^A-Za-z0-9]", "", name) or "VoiceStudio"
+    slug = re.sub(r"[^A-Za-z0-9]", "", name) or "VoxClone"
     if any(c in name for c in "\"'`\\%$"):
         raise SystemExit("Please use a name without quotes, backslashes, % or $.")
 

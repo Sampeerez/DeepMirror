@@ -7,7 +7,7 @@
 // converter render, settings) uses the real UI and the real DSP backend.
 //
 //   npx vite build --config frontend/vite.config.js   (or: cd frontend && npm run build)
-//   uv run openvoicechanger --no-browser            (or ./start.sh --no-browser)
+//   uv run voxclone --no-browser            (or ./start.sh --no-browser)
 //   node scripts/readme_screenshots.mjs
 //
 // Needs Node 22+ (built-in WebSocket) and a Chromium browser; set OVC_BROWSER

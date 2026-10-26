@@ -20,8 +20,8 @@ DEFAULT_ALLOWED_ORIGINS = [
 
 
 # The product's name in one place (scripts/rename_project.py changes it everywhere).
-APP_NAME = "Voice Studio"
-APP_SLUG = "VoiceStudio"          # for device names and files (no spaces)
+APP_NAME = "VoxClone"
+APP_SLUG = "VoxClone"          # for device names and files (no spaces)
 
 
 class Settings(BaseSettings):
