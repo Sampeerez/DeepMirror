@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   ADVANCED_FIELD_MAP,
-  advancedFieldsInPreset,
   effectsFromPresetSettings,
   presetSettingsFromVoice,
   voiceFromPreset,
@@ -194,11 +193,3 @@ describe('effectsFromPresetSettings', () => {
   });
 });
 
-describe('advancedFieldsInPreset', () => {
-  it('reports what a preset actually restores', () => {
-    expect(advancedFieldsInPreset(LEGACY_PRESET)).toEqual([]);
-    expect(advancedFieldsInPreset(FULL_PRESET).sort()).toEqual(
-      ['crepe_hop_length', 'f0_method', 'filter_radius', 'index_rate', 'protect', 'rms_mix_rate']
-    );
-  });
-});

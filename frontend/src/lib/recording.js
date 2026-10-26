@@ -15,14 +15,6 @@ export function maxRecordingSamples(sampleRate, maxSeconds = MAX_RECORD_SECONDS)
 }
 
 /**
- * Peak memory for a take: the Float32 chunks held during capture plus the
- * 16-bit WAV built from them at the end.
- */
-export function estimateRecordingBytes(sampleCount) {
-  return sampleCount * 4 + sampleCount * 2 + 44;
-}
-
-/**
  * Append one chunk to a take, truncating at the sample budget.
  *
  * Returns the chunk actually stored (possibly trimmed, possibly empty) and

@@ -5,7 +5,6 @@ export const STORAGE_KEYS = {
   globalSettings: 'ovc_global_settings_v2',
   // v3 records which settings the user changed; untouched ones follow the recommended defaults.
   voice: 'ovc_voice_v3',
-  legacyVoice: 'ovc_voice_v2',
   // The speaker's pitch profile learnt by the server (sent back on connect).
   speakerProfile: 'ovc_speaker_profile_v1',
   effects: 'ovc_effects_v2',

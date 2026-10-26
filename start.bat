@@ -10,7 +10,6 @@ rem or set VOXCLONE_SHORTCUTS=yes or no beforehand).
 rem Extra arguments are passed through, e.g.  start.bat --port 8080
 setlocal
 cd /d "%~dp0"
-rem The app's name (scripts\rename_project.py changes it everywhere).
 set "APP_NAME=VoxClone"
 
 where uv >nul 2>nul
@@ -42,10 +41,7 @@ if errorlevel 1 (
 )
 
 rem Shortcuts that start the studio with no console window (uvw = uv without a console),
-rem only if the user wants them. Shortcuts of the old name no longer work: remove them.
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {" ^
-  "  Remove-Item -LiteralPath (Join-Path $dir 'OpenVoiceChanger.lnk') -ErrorAction SilentlyContinue }" >nul 2>nul
+rem only if the user wants them.
 set "SHORTCUTS=%VOXCLONE_SHORTCUTS%"
 if not defined SHORTCUTS if exist "data\shortcuts.txt" set /p SHORTCUTS=<"data\shortcuts.txt"
 if not defined SHORTCUTS call :ask_shortcuts

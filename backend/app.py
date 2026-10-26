@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import lifecycle as presence
 from backend.api import convert, logs, models, presets, stream, system, training
-from backend.assets import AssetStore, legacy_asset_directories
+from backend.assets import AssetStore
 from backend.config import APP_NAME, ROOT, Settings
 from backend.config import settings as default_settings
 from backend.frontend_build import MISSING_UI_PAGE
@@ -41,8 +41,7 @@ def app_version() -> str:
 def create_app(settings: Settings | None = None, *, manager: ModelManager | None = None,
                on_ready: Callable[[], None] | None = None, lifecycle: Lifecycle | None = None) -> FastAPI:
     settings = settings or default_settings
-    assets = manager.assets if manager is not None else AssetStore(settings.ASSETS_DIR,
-                                                                    legacy_asset_directories(ROOT))
+    assets = manager.assets if manager is not None else AssetStore(settings.ASSETS_DIR)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -8,7 +8,6 @@ to the streaming ONNX graph (see backend.audio.deepfilter).
 from __future__ import annotations
 
 import logging
-import shutil
 import threading
 import urllib.request
 from collections.abc import Callable
@@ -20,12 +19,6 @@ from backend.inference.checkpoints import file_sha256
 from backend.inference.hubert import HUBERT_SHA256
 
 logger = logging.getLogger(__name__)
-
-
-def legacy_asset_directories(root: Path) -> list[Path]:
-    """Where OpenVoiceChanger 2.x left HuBERT/RMVPE (old asset dir, isolated runtime setup)."""
-    setup = root / "data" / "rvc-setup"
-    return [root / "models" / "assets", setup / "downloads", *sorted(setup.glob("jobs/*/assets"))]
 
 
 PINNED_REVISION = ("https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/"
@@ -80,8 +73,6 @@ ASSETS = (
           "49c52edc8947ae1f9bf50d81530beaf3a2c3245aeaf34b6f31ff535cd22284d2", 7986207, False,
           product=f"deepfilternet3_stream_v{DEEPFILTER_EXPORT_VERSION}.onnx"),
 )
-# Files earlier versions used that are now built here instead.
-RETIRED_FILES = ("deepfilternet3_streaming.onnx",)
 
 
 def build_product(asset: Asset, source: Path, target: Path) -> None:
@@ -102,11 +93,10 @@ class _Progress:
 
 
 class AssetStore:
-    """Locates, migrates and downloads the shared model assets."""
+    """Locates, downloads and builds the shared model assets."""
 
-    def __init__(self, directory: Path, legacy_roots: list[Path] | None = None) -> None:
+    def __init__(self, directory: Path) -> None:
         self.directory = directory
-        self.legacy_roots = legacy_roots or []
         self._progress = {asset.name: _Progress() for asset in ASSETS}
         self._thread: threading.Thread | None = None
 
@@ -128,31 +118,18 @@ class AssetStore:
         return rows
 
     def prepare(self) -> None:
-        """Mark verified files ready and adopt copies from older installs (fast, no network)."""
+        """Mark the files already on disk ready (fast, no network)."""
         self.directory.mkdir(parents=True, exist_ok=True)
-        for retired in RETIRED_FILES:
-            (self.directory / retired).unlink(missing_ok=True)
         products = {asset.product for asset in ASSETS if asset.product}
         for stale in self.directory.glob("deepfilternet3_stream_v*.onnx"):   # older exports
             if stale.name not in products:
                 stale.unlink(missing_ok=True)
         for asset in ASSETS:
             target = self.directory / asset.filename
-            if not target.is_file():
-                self._adopt_legacy_copy(asset, target)
             downloaded = target.is_file() and target.stat().st_size == asset.size
             built = asset.product is None or (self.directory / asset.product).is_file()
             if downloaded and built:
                 self._progress[asset.name].state = "ready"
-
-    def _adopt_legacy_copy(self, asset: Asset, target: Path) -> None:
-        for root in self.legacy_roots:
-            for candidate in (root / asset.filename, root / "rmvpe" / asset.filename):
-                if (candidate.is_file() and candidate.stat().st_size == asset.size
-                        and file_sha256(candidate) == asset.sha256):
-                    shutil.copy2(candidate, target)
-                    logger.info("Reused %s from %s", asset.filename, candidate.parent)
-                    return
 
     def download_missing_in_background(self) -> None:
         if self._thread is None or not self._thread.is_alive():

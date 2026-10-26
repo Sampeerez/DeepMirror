@@ -6,7 +6,6 @@ import {
   applyTheme,
   normalizeTheme,
   readAppliedTheme,
-  readStoredTheme,
   readThemeColors,
   storeTheme,
 } from './theme';
@@ -56,28 +55,6 @@ describe('normalizeTheme', () => {
   );
 });
 
-describe('readStoredTheme', () => {
-  it('reads a saved theme', () => {
-    expect(readStoredTheme(fakeStorage({ ovc_theme: 'light' }))).toBe('light');
-    expect(readStoredTheme(fakeStorage({ ovc_theme: 'dark' }))).toBe('dark');
-  });
-
-  it('defaults when nothing is stored', () => {
-    expect(readStoredTheme(fakeStorage())).toBe('dark');
-  });
-
-  it('defaults on a corrupt value rather than throwing', () => {
-    expect(readStoredTheme(fakeStorage({ ovc_theme: '{"theme":"light"}' }))).toBe('dark');
-    expect(readStoredTheme(fakeStorage({ ovc_theme: 'LIGHT' }))).toBe('dark');
-  });
-
-  it('survives storage that throws or is absent', () => {
-    expect(readStoredTheme(throwingStorage)).toBe('dark');
-    expect(readStoredTheme(undefined)).toBe('dark');
-    expect(readStoredTheme(null)).toBe('dark');
-  });
-});
-
 describe('storeTheme', () => {
   it('persists a normalized value', () => {
     const storage = fakeStorage();
@@ -96,11 +73,11 @@ describe('storeTheme', () => {
     expect(storeTheme('light', undefined)).toBe(false);
   });
 
-  it('round-trips through readStoredTheme', () => {
+  it('stores every theme as its bare name', () => {
     for (const theme of THEMES) {
       const storage = fakeStorage();
       storeTheme(theme, storage);
-      expect(readStoredTheme(storage)).toBe(theme);
+      expect(storage.data.ovc_theme).toBe(theme);
     }
   });
 });

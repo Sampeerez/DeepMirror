@@ -89,8 +89,3 @@ export function effectsFromPresetSettings(preset) {
 }
 
 /** Which optional fields a preset actually restores (for UI/debugging). */
-export function advancedFieldsInPreset(preset) {
-  const settings = preset?.settings || {};
-  const keys = ADVANCED_FIELD_MAP.map((field) => field.preset).concat('f0_method');
-  return keys.filter((key) => key in settings);
-}

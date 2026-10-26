@@ -10,7 +10,6 @@
 set -eu
 cd "$(dirname "$0")"
 HERE="$(pwd)"
-# The app's name (scripts/rename_project.py changes it everywhere).
 APP_NAME="VoxClone"
 APP_SLUG="voxclone"
 
@@ -48,7 +47,6 @@ fi
 if [ "$(uname)" = "Linux" ] && [ -d "$HOME/.local/share" ] && [ "$SHORTCUTS" = "yes" ]; then
   mkdir -p "$HOME/.local/share/applications"
   UV_BIN="$(command -v uv)"
-  rm -f "$HOME/.local/share/applications/openvoicechanger.desktop"
   cat > "$HOME/.local/share/applications/$APP_SLUG.desktop" <<EOF
 [Desktop Entry]
 Type=Application

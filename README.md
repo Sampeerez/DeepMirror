@@ -111,7 +111,6 @@ make dev-frontend     # Vite on :5173
 make lint test        # ruff, pyright, eslint, pytest, vitest
 ```
 
-`scripts/rename_project.py "New Name"` renames the app everywhere.
 
 ## Screenshots
 

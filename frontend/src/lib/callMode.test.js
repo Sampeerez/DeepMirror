@@ -9,7 +9,7 @@ describe('call mode devices', () => {
 
   it('finds the virtual cable to play into', () => {
     expect(findCableOutput(outputs).deviceId).toBe('b');
-    expect(findCableOutput([{ deviceId: 'l', label: 'OpenVoiceChanger_Output' }]).deviceId).toBe('l');
+    expect(findCableOutput([{ deviceId: 'l', label: 'VoxClone_Output' }]).deviceId).toBe('l');
     expect(findCableOutput([outputs[0]])).toBeNull();
   });
 

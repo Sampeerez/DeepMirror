@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_RECORD_SECONDS,
   appendRecordingChunk,
-  estimateRecordingBytes,
   formatRecordLimit,
   maxRecordingSamples,
 } from './recording';
@@ -67,12 +66,6 @@ describe('appendRecordingChunk', () => {
       samples = next;
     }
     expect(samples).toBe(limit);
-  });
-});
-
-describe('estimateRecordingBytes', () => {
-  it('counts the float32 capture buffer plus the 16-bit WAV', () => {
-    expect(estimateRecordingBytes(1000)).toBe(1000 * 4 + 1000 * 2 + 44);
   });
 });
 

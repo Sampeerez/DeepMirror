@@ -9,15 +9,6 @@ export function normalizeTheme(value) {
   return THEMES.includes(value) ? value : DEFAULT_THEME;
 }
 
-/** The saved theme (a bare string; storage may throw in private mode). */
-export function readStoredTheme(storage) {
-  try {
-    return normalizeTheme(storage?.getItem(THEME_STORAGE_KEY));
-  } catch {
-    return DEFAULT_THEME;
-  }
-}
-
 /** Save a theme; returns whether it was stored. */
 export function storeTheme(theme, storage) {
   if (typeof storage?.setItem !== 'function') return false;
