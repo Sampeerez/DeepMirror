@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import Layout from './components/Layout';
 import StatusIndicator from './components/StatusIndicator';
@@ -12,10 +12,7 @@ import SoundCard from './components/SoundCard';
 import Button from './components/Button';
 import PresetBar from './components/PresetBar';
 import Recorder from './components/Recorder';
-import FileConverter from './components/FileConverter';
 import RuntimeReadiness from './components/RuntimeReadiness';
-import TrainingStudio from './components/TrainingStudio';
-import LogsPanel from './components/LogsPanel';
 import usePresence from './hooks/usePresence';
 import useWebSocket from './hooks/useWebSocket';
 import useAudioPipeline from './hooks/useAudioPipeline';
@@ -28,11 +25,17 @@ import { defaultEffects, effectsFromPreset } from './lib/effects';
 import { effectsFromPresetSettings, presetSettingsFromVoice, voiceFromPreset } from './lib/presets';
 import { buildTabUrl, readTabFromSearch } from './lib/navigation';
 import { shouldTriggerShortcut } from './lib/shortcuts';
-import { STORAGE_KEYS, readStored, removeStored } from './lib/storage';
+import { STORAGE_KEYS, readStored, removeStored, writeStored } from './lib/storage';
 import { applyTheme, readAppliedTheme, storeTheme } from './lib/theme';
 import { hasStoredF0Method, loadInitialVoice, recommendedVoice, withChanges } from './lib/voice';
 
+// Loaded the first time their tab opens.
+const TrainingStudio = lazy(() => import('./components/TrainingStudio'));
+const FileConverter = lazy(() => import('./components/FileConverter'));
+const LogsPanel = lazy(() => import('./components/LogsPanel'));
+
 const ACTIVE_MODEL_POLL_MS = 5000;
+const CAPTURE_SAMPLES_KEY = 'ovc_capture_samples_v1';
 
 function loadInitialEffects() {
   const stored = readStored(STORAGE_KEYS.effects);
@@ -57,6 +60,9 @@ export default function App() {
 
   // Deep links: ?tab=models|converter selects a tab, ?settings opens the modal.
   const [tab, setTab] = useState(() => readTabFromSearch(window.location.search));
+  // Tabs opened at least once stay mounted (and keep their state) after that.
+  const [visited, setVisited] = useState(() => new Set([readTabFromSearch(window.location.search)]));
+  useEffect(() => { setVisited((previous) => (previous.has(tab) ? previous : new Set([...previous, tab]))); }, [tab]);
   const [activeModel, setActiveModel] = useState(null);
   // A voice the server is still preparing (loading, warming up): never shown as active.
   const [loadingModel, setLoadingModel] = useState(null);
@@ -66,21 +72,25 @@ export default function App() {
   const [voice, setVoice] = useState(loadInitialVoice);
   const [effects, setEffects] = useState(loadInitialEffects);
   const [activePresetId, setActivePresetId] = useState(null);
-  // Full conversion bypass. Deliberately not persisted: a monitoring toggle
-  // should never be silently still on the next time the studio opens.
+  // Not persisted: bypass must never be on by surprise at the next start.
   const [bypass, setBypass] = useState(false);
-  // Seeded from the attribute the blocking script in index.html already set,
-  // so React adopts the pre-paint theme instead of deciding it a second time.
+  const [captureSamples, setCaptureSamples] = useState(() => readStored(CAPTURE_SAMPLES_KEY) === true);
+  // index.html already applied the theme before the first paint.
   const [theme, setTheme] = useState(() => readAppliedTheme(document.documentElement));
 
   const { isRunning, isRecording, startRecording, stopRecording } = pipeline;
+  const setPipelineCapture = pipeline.setCaptureSamples;
+  useEffect(() => { setPipelineCapture?.(captureSamples); }, [setPipelineCapture, captureSamples]);
+  const changeCaptureSamples = useCallback((enabled) => {
+    setCaptureSamples(enabled);
+    writeStored(CAPTURE_SAMPLES_KEY, enabled);
+  }, []);
   const {
     status: wsStatus, latency, latencyHistory, serverMs, serverStats, retryNow,
     setOnSettingsResponse, resetLatency,
   } = wsHook;
 
-  // First run only: start from the detector the server recommends for its
-  // hardware (RMVPE on a GPU). An explicit earlier choice is never replaced.
+  // First run only: use the tracker the server recommends for its hardware.
   const adoptServerF0Ref = useRef(!hasStoredF0Method());
   const adoptRecommendedF0 = useCallback((method) => {
     if (!adoptServerF0Ref.current) return;
@@ -92,19 +102,18 @@ export default function App() {
   const { runtimeConfig } = runtime;
   useSettingsSync({ voice, effects, bypass, runtimeConfig, wsHook });
 
-  // Never leave the voice on a detector this server cannot run.
+  // Live audio only uses trackers that keep up (an older saved choice such as Crepe is replaced).
   useEffect(() => {
     const methods = runtimeConfig.f0Methods;
-    if (methods.find((method) => method.id === voice.f0Method)?.available) return;
+    const current = methods.find((method) => method.id === voice.f0Method);
+    if (current?.available && current.realtime) return;
     const preferred = methods.find((method) => method.id === runtimeConfig.defaultF0Method && method.available)
       || methods.find((method) => method.realtime && method.available);
     if (preferred) setVoice((previous) => ({ ...previous, f0Method: preferred.id }));
   }, [runtimeConfig.f0Methods, runtimeConfig.defaultF0Method, voice.f0Method]);
 
-  // Tab selection is reflected in ?tab= so the current view can be linked and
-  // Back/Forward moves between tabs instead of leaving the app.
-  // Note: pushState stays outside the state updater — StrictMode invokes
-  // updaters twice in development, which would push two history entries.
+  // ?tab= keeps tabs linkable and Back/Forward-able. pushState stays outside the
+  // state updater (StrictMode calls updaters twice).
   const handleTabChange = useCallback((nextTab) => {
     if (nextTab === tab) return;
     window.history.pushState({ tab: nextTab }, '', buildTabUrl(window.location.href, nextTab));
@@ -117,8 +126,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Studio shortcuts, all single letters that stay out of the way of typing:
-  // "B" toggles the A/B bypass, "R" starts/stops a take while routing runs.
+  // B: A/B bypass. R: start/stop a take.
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (isSettingsOpen) return;
@@ -148,9 +156,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // While audio streams, the server's status messages carry the active model,
-  // so polling is only needed when the studio is idle — and never while the
-  // tab is in the background.
+  // While streaming, status messages carry the active model; poll only when idle and visible.
   useEffect(() => {
     if (isRunning) return undefined;
 
@@ -188,17 +194,14 @@ export default function App() {
     });
   }, [setOnSettingsResponse]);
 
-  // A stopped stream has no round trip: clear the readout and the sparkline
-  // instead of leaving the last measurement on screen.
+  // No stream, no latency to show.
   useEffect(() => {
     if (!isRunning) resetLatency();
   }, [isRunning, resetLatency]);
 
   // --- Handlers --------------------------------------------------------------
 
-  // Theme is pure presentation: it only writes an attribute and a storage key,
-  // and never touches the audio pipeline or the WebSocket, so switching it
-  // mid-stream cannot interrupt playback.
+
   const handleThemeChange = useCallback((nextTheme) => {
     const applied = applyTheme(nextTheme, document.documentElement);
     storeTheme(applied, window.localStorage);
@@ -222,8 +225,7 @@ export default function App() {
   }, []);
 
   const applyPreset = useCallback((preset) => {
-    // Advanced RVC values are only overwritten when the preset carries them,
-    // so built-ins and pre-existing presets leave the current tuning intact.
+    // Advanced RVC values change only when the preset has them.
     setVoice((prev) => {
       const next = voiceFromPreset(preset, prev);
       const changed = Object.fromEntries(Object.entries(next).filter(([key, value]) => prev[key] !== value));
@@ -272,10 +274,7 @@ export default function App() {
     </>
   );
 
-  // Every tab panel stays mounted and is hidden with the `hidden` attribute.
-  // Unmounting them threw away a converter's chosen file, an in-progress
-  // render, the selected microphone and open disclosure state on every tab
-  // switch — none of which the user asked to reset.
+  // Panels stay mounted (hidden) so switching tabs keeps their state.
   const panelProps = (id) => ({
     role: 'tabpanel',
     id: `panel-${id}`,
@@ -379,20 +378,27 @@ export default function App() {
       </div>
 
       <div {...panelProps('training')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
-        <TrainingStudio active={tab === 'training'} onActiveModelChange={setActiveModel} />
+        {visited.has('training') ? (
+          <Suspense fallback={null}>
+            <TrainingStudio active={tab === 'training'} onActiveModelChange={setActiveModel} />
+          </Suspense>
+        ) : null}
       </div>
 
       <div {...panelProps('converter')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
-        <FileConverter
-          voice={voice}
-          effects={effects}
-          activeModel={activeModel}
-          f0Methods={runtimeConfig.f0Methods}
-        />
+        {visited.has('converter') ? (
+          <Suspense fallback={null}>
+            <FileConverter voice={voice} effects={effects} activeModel={activeModel} f0Methods={runtimeConfig.f0Methods} />
+          </Suspense>
+        ) : null}
       </div>
 
       <div {...panelProps('logs')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
-        <LogsPanel active={tab === 'logs'} />
+        {visited.has('logs') ? (
+          <Suspense fallback={null}>
+            <LogsPanel active={tab === 'logs'} />
+          </Suspense>
+        ) : null}
       </div>
 
       {isSettingsOpen ? (
@@ -420,6 +426,8 @@ export default function App() {
               streamInfo={pipeline.streamInfo}
               playbackStats={pipeline.playbackStats}
               transport={wsHook.transport}
+              captureSamples={captureSamples}
+              onCaptureSamplesChange={changeCaptureSamples}
             />
           </div>
         </div>

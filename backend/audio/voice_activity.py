@@ -1,23 +1,13 @@
-"""Voice activity: which parts of the input are someone speaking.
+"""Which parts of the input are someone speaking.
 
-Silero VAD (MIT, ONNX, about 0.1 ms per 32 ms frame on a CPU) tells speech
-from room noise, breaths, clicks and keyboard sounds far better than a level
-threshold, and it is level-independent: a whisper at -70 dBFS still counts
-as speech, a loud breath does not. When its weights are not available yet,
-a level detector stands in so the stream keeps working.
+Silero VAD separates speech from room noise, breaths and clicks at any level;
+a level detector stands in until its weights are downloaded. Frames that are
+clearly pitched and above the room count as voice too, so a held vowel or a
+rolled r is never cut.
 
-``SpeechTimeline`` keeps the per-frame decisions on an absolute timeline and
-turns them into a smooth 0..1 gain for any span of the input, with:
-
-* hysteresis (enter at p >= 0.5, leave below 0.35), so one frame does not
-  flip the decision, and a minimum of confident frames per segment, so the
-  brief wobble a breath or a click causes is not taken for speech;
-* pre-roll: speech starts a little before the detector is sure, so attacks
-  and soft first consonants are kept (the realtime stream emits audio with a
-  lookahead, so these future frames are already known);
-* hang-over: speech lasts a little after it, so word endings, final
-  consonants and short gaps between words are kept;
-* raised-cosine ramps instead of steps.
+``SpeechTimeline`` turns the per-frame decisions into a smooth 0..1 gain with
+hysteresis, a minimum of confident frames (a breath is not speech), pre-roll
+for attacks and hang-over for word endings.
 """
 
 from __future__ import annotations
@@ -29,6 +19,7 @@ from functools import cache
 from pathlib import Path
 
 import numpy as np
+from scipy import ndimage
 
 logger = logging.getLogger(__name__)
 
@@ -46,17 +37,28 @@ HISTORY_SECONDS = 8.0       # decisions kept (more than any stream window)
 # Laughs, humming and "mmm" are voice too, but a speech detector may not call
 # them speech. A frame that is clearly periodic (pitched) and well above the
 # room counts as voice; breaths and mouth clicks are not periodic and stay out.
-VOCAL_PERIODICITY = 0.6
+VOCAL_PERIODICITY = 0.45   # voice reads 0.7+, a rolled r 0.45-0.6, noise and breaths below 0.2
 VOCAL_ABOVE_NOISE_DB = 12.0
 VOCAL_PROBABILITY = 0.8
 MIN_LAG, MAX_LAG = RATE // 600, RATE // 70
+ENVELOPE_SAMPLES = RATE // 200
+# Room noise is learnt only from frames that are clearly not voice.
+NOISE_MAX_PERIODICITY = 0.35
 
 
 def vocal_frames(frames: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per 512-sample frame: (normalised autocorrelation peak in the voice pitch range, level dB)."""
+    """Per 512-sample frame: (normalised autocorrelation peak in the voice pitch range, level dB).
+
+    The periodicity is measured on the frame with its loudness flattened (5 ms
+    envelope), so a rolled r, whose tongue taps make the level jump 25 times a
+    second, still reads as the voice it is.
+    """
     x = frames - frames.mean(axis=1, keepdims=True)
     energy = np.sum(x * x, axis=1)
     level = 10 * np.log10(np.maximum(energy / frames.shape[1], 1e-12))
+    envelope = np.sqrt(ndimage.uniform_filter1d(x * x, ENVELOPE_SAMPLES, axis=1, mode="nearest"))
+    x = x / (envelope + 1e-3 * np.sqrt(energy / frames.shape[1] + 1e-12)[:, None] + 1e-12)
+    energy = np.sum(x * x, axis=1)
     spectrum = np.fft.rfft(x, n=2 * frames.shape[1], axis=1)
     autocorrelation = np.fft.irfft(np.abs(spectrum) ** 2, axis=1)[:, : MAX_LAG + 1]
     peak = autocorrelation[:, MIN_LAG:MAX_LAG + 1].max(axis=1) / np.maximum(energy, 1e-12)
@@ -170,7 +172,8 @@ class SpeechTimeline:
         count = len(fresh)
         if count and len(audio) >= count * FRAME:
             periodic, level = vocal_frames(audio[: count * FRAME].reshape(count, FRAME).astype(np.float64))
-            quiet = fresh < 0.2
+            # A held vowel can look like "not speech" to the detector; it is never the room.
+            quiet = (fresh < 0.2) & (periodic < NOISE_MAX_PERIODICITY)
             if quiet.any():
                 # Minimum tracking: the room is the quietest the input gets. Follow it down
                 # quickly, up only slowly, so a long breath or hum is never taken for the room.
@@ -179,8 +182,8 @@ class SpeechTimeline:
                     self._noise_db = heard
                 elif heard < self._noise_db:
                     self._noise_db = 0.5 * self._noise_db + 0.5 * heard
-                else:
-                    self._noise_db = 0.98 * self._noise_db + 0.02 * heard
+                else:   # at most 0.1 dB per frame (3 dB/s) upwards
+                    self._noise_db += min(0.02 * (heard - self._noise_db), 0.1)
                 self._noise_heard = True
             vocal = (periodic >= VOCAL_PERIODICITY) & (level >= self._noise_db + VOCAL_ABOVE_NOISE_DB)
             fresh = np.where(vocal, np.maximum(fresh, VOCAL_PROBABILITY), fresh).astype(np.float32)

@@ -47,25 +47,27 @@ class PitchMethod:
     components: tuple[str, ...] = ()
 
 
+# Live list: RMVPE (most accurate, GPU), FCPE (lighter) and the CPU classics. Crepe and Harvest
+# are slower and less accurate than RMVPE and stay for file conversion only.
 PITCH_METHODS = (
-    PitchMethod("pm", "PM", "Lowest latency CPU tracking", "Classic", dependency="parselmouth"),
-    PitchMethod("harvest", "Harvest", "Stable CPU tracking", "Classic", dependency="pyworld"),
-    PitchMethod("dio", "DIO", "Lightweight CPU tracking", "Classic", dependency="pyworld"),
-    PitchMethod("crepe", "Crepe Full", "Accurate neural tracking", "Neural", dependency="torchcrepe"),
-    PitchMethod("crepe-tiny", "Crepe Tiny", "Lower-load neural tracking", "Neural", dependency="torchcrepe"),
-    PitchMethod("mangio-crepe", "Mangio-Crepe", "Crepe with adjustable hop length", "Neural",
+    PitchMethod("pm", "PM", "CPU, lowest load", "Classic", dependency="parselmouth"),
+    PitchMethod("harvest", "Harvest", "CPU, smooth", "Classic", realtime=False, dependency="pyworld"),
+    PitchMethod("dio", "DIO", "CPU, light", "Classic", dependency="pyworld"),
+    PitchMethod("crepe", "Crepe Full", "Neural", "Neural", realtime=False, dependency="torchcrepe"),
+    PitchMethod("crepe-tiny", "Crepe Tiny", "Neural, small", "Neural", realtime=False, dependency="torchcrepe"),
+    PitchMethod("mangio-crepe", "Mangio-Crepe", "Crepe, adjustable hop", "Neural", realtime=False,
                 dependency="torchcrepe"),
-    PitchMethod("mangio-crepe-tiny", "Mangio-Crepe Tiny", "Light Crepe with adjustable hop", "Neural",
+    PitchMethod("mangio-crepe-tiny", "Mangio-Crepe Tiny", "Crepe Tiny, adjustable hop", "Neural", realtime=False,
                 dependency="torchcrepe"),
-    PitchMethod("rmvpe", "RMVPE", "Recommended all-round neural tracking", "Neural", needs_rmvpe=True),
-    PitchMethod("fcpe", "FCPE", "Fast neural tracking", "Neural", dependency="torchfcpe"),
-    PitchMethod("hybrid[crepe+rmvpe]", "Hybrid: Crepe + RMVPE", "Median of two estimators", "Hybrid",
+    PitchMethod("rmvpe", "RMVPE", "Most accurate", "Neural", needs_rmvpe=True),
+    PitchMethod("fcpe", "FCPE", "Fast", "Neural", dependency="torchfcpe"),
+    PitchMethod("hybrid[crepe+rmvpe]", "Hybrid: Crepe + RMVPE", "Median of two", "Hybrid",
                 realtime=False, components=("crepe", "rmvpe")),
-    PitchMethod("hybrid[crepe+fcpe]", "Hybrid: Crepe + FCPE", "Median of two estimators", "Hybrid",
+    PitchMethod("hybrid[crepe+fcpe]", "Hybrid: Crepe + FCPE", "Median of two", "Hybrid",
                 realtime=False, components=("crepe", "fcpe")),
-    PitchMethod("hybrid[rmvpe+fcpe]", "Hybrid: RMVPE + FCPE", "Median of two estimators", "Hybrid",
+    PitchMethod("hybrid[rmvpe+fcpe]", "Hybrid: RMVPE + FCPE", "Median of two", "Hybrid",
                 realtime=False, components=("rmvpe", "fcpe")),
-    PitchMethod("hybrid[crepe+rmvpe+fcpe]", "Hybrid: Crepe + RMVPE + FCPE", "Median of three estimators",
+    PitchMethod("hybrid[crepe+rmvpe+fcpe]", "Hybrid: Crepe + RMVPE + FCPE", "Median of three",
                 "Hybrid", realtime=False, components=("crepe", "rmvpe", "fcpe")),
 )
 PITCH_METHOD_BY_ID = {method.id: method for method in PITCH_METHODS}
@@ -141,22 +143,16 @@ def suppress_octave_spikes(f0: np.ndarray) -> np.ndarray:
 
 
 # --- Voicing clean-up -------------------------------------------------------
-# Quiet speech near the noise floor makes every tracker call noise and soft
-# consonants "voiced" now and then (measured with RMVPE: 1.3% of frames at a
-# normal level, 3.4% at -55 dBFS, 5.9% at -60 dBFS). Those frames skip the
-# consonant protection and the model sings over them ("ieeaa"), so voicing
-# also has to be audible, sustained and in a plausible octave.
+# Near the noise floor trackers call noise and soft consonants "voiced"; those
+# frames skip consonant protection and the model sings over them. Voicing must
+# also be audible, sustained and in a plausible octave.
 VOICED_MIN_DB = -80.0          # absolute floor for a voiced frame (dBFS, 10 ms): only digital near-silence
 VOICED_ABOVE_FLOOR_DB = 6.0    # and this far above the window's noise floor
 FLOOR_BELOW_PEAK_DB = 40.0     # the floor estimate never sits closer than this to the loudest frame
 MIN_VOICED_FRAMES = 3          # shorter voiced islands (< 30 ms) are noise
 MAX_GAP_FRAMES = 2             # shorter unvoiced gaps (<= 20 ms) inside voice are tracker dropouts
-# A voiced frame repeats itself every pitch period; noise and fricatives (s, f,
-# sh) do not. Below this normalised autocorrelation at the detected period the
-# tracker's "voiced" is a guess (measured: speech near 0.8-1, fricatives < 0.2).
-# Judged per voiced segment (median), so the few aperiodic frames at every
-# real onset and offset stay voiced; aperiodic frames are only trimmed off the
-# ends of a segment (a vowel running into an "s").
+# Periodicity at the detected period: voice is near 0.8-1, fricatives below 0.2.
+# Judged per segment (median); aperiodic frames are only trimmed from its ends.
 MIN_PERIODICITY = 0.3
 EDGE_PERIODICITY = 0.1
 SPLIT_PERIODICITY = 0.2        # this many aperiodic frames in a row (MIN_VOICED_FRAMES) end a segment
@@ -241,10 +237,8 @@ def clean_voicing(f0: np.ndarray, audio: np.ndarray, noise_floor_db: float | Non
     return f0
 
 
-# Expressiveness widens the melody of *speech*. Singing and laughter need the
-# opposite: a held note stretched by 25% is out of tune (measured: 35% of sung
-# frames more than a semitone off), and a laugh that already sits far above the
-# speaking pitch pushed further sounds broken (96-98% of frames off).
+# Expressiveness widens the melody of speech only: stretching a sung note or a
+# laugh far above the speaking pitch puts it out of tune.
 SPEECH_RANGE_SEMITONES = 4.0     # fully widened within this distance of the centre,
 FADE_OUT_SEMITONES = 8.0         # fading to no change at this distance (laughs, shouts, high notes)
 HELD_NOTE_SLOPE = 0.12           # semitones per frame: steadier than this ...

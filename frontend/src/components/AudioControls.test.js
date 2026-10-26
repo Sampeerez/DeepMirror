@@ -29,7 +29,7 @@ function render(props) {
 describe('AudioControls connection state', () => {
   it('offers an immediate retry while the reconnect back-off is waiting', () => {
     const html = render({ wsStatus: 'disconnected' });
-    expect(html).toContain('retrying automatically');
+    expect(html).toContain('retrying');
     expect(html).toContain('Retry now');
   });
 
@@ -44,7 +44,7 @@ describe('AudioControls connection state', () => {
   it('shows nothing about the connection once it is up', () => {
     const html = render({ wsStatus: 'connected' });
     expect(html).not.toContain('Retry now');
-    expect(html).not.toContain('Waiting for server connection');
+    expect(html).not.toContain('not reachable');
     expect(html).toContain('Start');
     expect(html).toContain('No voice active');
   });

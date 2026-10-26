@@ -46,7 +46,7 @@ export function createMeterStore(initialValue = {}) {
   };
 }
 
-/** RMS of a time-domain float buffer — the level a VU meter shows. */
+/** RMS of a time-domain float buffer, the level a VU meter shows. */
 export function rms(data) {
   if (!data || data.length === 0) return 0;
   let sum = 0;

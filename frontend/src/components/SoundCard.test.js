@@ -18,7 +18,7 @@ describe('Studio cards', () => {
     }));
     expect(container.querySelector('details')).toBeNull();
     expect(screen.getByText('Max')).toBeTruthy();
-    expect(screen.getByText(/DeepFilterNet removes noise/)).toBeTruthy();
+    expect(screen.queryByText(/Light filter/)).toBeNull();   // the normal case needs no note
 
     fireEvent.click(screen.getByRole('tab', { name: 'Effects' }));
     expect(screen.getByText('Bypass all')).toBeTruthy();

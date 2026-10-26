@@ -3,7 +3,7 @@
 // Drives headless Edge/Chrome over the DevTools protocol. A synthetic voice
 // (pulse train through vowel formants) is fed in as the fake microphone so the
 // studio is captured *running*: spectrum, meters, round-trip latency, a take in
-// progress — instead of an idle page. Everything else (presets, effects, the
+// progress, instead of an idle page. Everything else (presets, effects, the
 // converter render, settings) uses the real UI and the real DSP backend.
 //
 //   npx vite build --config frontend/vite.config.js   (or: cd frontend && npm run build)
@@ -184,7 +184,7 @@ async function main() {
   if (!browser) throw new Error('No Chromium browser found; set OVC_BROWSER.');
 
   const health = await fetch(`${BASE_URL}/api/config`).catch(() => null);
-  if (!health?.ok) throw new Error(`Backend not reachable at ${BASE_URL} — start uvicorn first.`);
+  if (!health?.ok) throw new Error(`Backend not reachable at ${BASE_URL}: start uvicorn first.`);
 
   const work = mkdtempSync(join(tmpdir(), 'ovc-readme-'));
   const voicePath = join(work, 'voice.wav');

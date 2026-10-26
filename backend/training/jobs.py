@@ -31,7 +31,7 @@ from fastapi import UploadFile
 from backend.config import ROOT, Settings
 from backend.model_manager import MODEL_EXTENSIONS, sanitize_filename
 from backend.training.dataset import audio_duration
-from backend.training.hparams import CONFIGS, MAX_AUDIO_SECONDS, MAX_EPOCHS, MIN_AUDIO_SECONDS
+from backend.training.hparams import CONFIGS, DEFAULT_BASE, MAX_AUDIO_SECONDS, MAX_EPOCHS, MIN_AUDIO_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ class TrainingJobs:
     # --- Lifecycle ----------------------------------------------------------
 
     async def create(self, name: str, files: list[UploadFile], sample_rate: int, epochs: int | None,
-                     batch_size: int | None, save_every: int, overwrite: bool) -> dict:
+                     batch_size: int | None, save_every: int, overwrite: bool, base: str = DEFAULT_BASE) -> dict:
         model_name = Path(sanitize_filename(name)).stem
         if not model_name:
             raise TrainingError("Give the voice a name.")
@@ -183,7 +183,8 @@ class TrainingJobs:
             raise
 
         spec = {"name": model_name, "sample_rate": sample_rate, "epochs": epochs, "batch_size": batch_size,
-                "save_every": save_every, "created_at": time.time(), "audio_seconds": round(total_seconds, 1),
+                "save_every": save_every, "base": base, "created_at": time.time(),
+                "audio_seconds": round(total_seconds, 1),
                 "files": [upload.filename for upload in files],
                 # The worker is a separate process: hand it this server's locations.
                 "models_dir": str(self.settings.MODELS_DIR), "assets_dir": str(self.settings.ASSETS_DIR),

@@ -13,23 +13,17 @@ const TABS = [
 ];
 const TAB_KEY = 'ovc_sound_tab_v1';
 
-const DENOISER_TEXT = {
-  neural: 'DeepFilterNet removes noise, keyboard clicks and breaths before the voice model hears them.',
-  spectral: 'Light filter (steady noise only): the neural filter is still downloading or does not fit this device.',
-  off: 'Off: the voice model hears everything your microphone picks up.',
-};
-
+// Only said when it is not the normal case.
 function noiseHint(voice, denoiser) {
-  if (voice.noiseReductionDb <= 0) return DENOISER_TEXT.off;
-  return DENOISER_TEXT[denoiser] || 'Neural noise removal (DeepFilterNet) starts with the stream.';
+  if (voice.noiseReductionDb > 0 && denoiser === 'spectral') return 'Light filter: DeepFilterNet is not ready on this device.';
+  return null;
 }
 
 function CleanupTab({ voice, onChange, denoiser }) {
   return (
     <div className="space-y-5">
       <SwitchRow label="Convert speech only" checked={voice.isolateVoice}
-        onChange={(isolateVoice) => onChange({ isolateVoice })}
-        hint="Only your voice is converted and played: never noise, breaths or your own voice." />
+        onChange={(isolateVoice) => onChange({ isolateVoice })} />
       <MiniSlider
         label="Noise removal"
         value={voice.noiseReductionDb}
@@ -41,8 +35,7 @@ function CleanupTab({ voice, onChange, denoiser }) {
         hint={noiseHint(voice, denoiser)}
       />
       <SwitchRow label="Match my volume" checked={voice.matchLoudness}
-        onChange={(matchLoudness) => onChange({ matchLoudness })}
-        hint="The converted voice is as loud as you speak." />
+        onChange={(matchLoudness) => onChange({ matchLoudness })} />
       <MiniSlider
         label="Room ambience"
         value={voice.ambientDb}
@@ -52,7 +45,6 @@ function CleanupTab({ voice, onChange, denoiser }) {
         disabled={!voice.isolateVoice}
         onChange={(value) => onChange({ ambientDb: value })}
         format={(v) => (v <= -60 ? 'Off' : `${Math.round(v)} dB`)}
-        hint="Adds back the steady room noise between words (never your voice)."
       />
     </div>
   );
@@ -63,24 +55,20 @@ function AdvancedTab({ voice, onChange, onRestoreRecommended }) {
   return (
     <div className="space-y-4">
       <MiniSlider label="Index rate" value={voice.indexRate} min={0} max={1} step={0.05}
-        onChange={(value) => onChange({ indexRate: value })}
-        hint="How much the voice's own recorded sounds are used: higher sounds more like the voice." />
+        onChange={(value) => onChange({ indexRate: value })} />
       <MiniSlider label="Protect" value={voice.protect} min={0} max={0.5} step={0.01}
-        onChange={(value) => onChange({ protect: value })}
-        hint="Keeps consonants and breaths clear; lower converts them more." />
+        onChange={(value) => onChange({ protect: value })} />
       <MiniSlider label="RMS mix" value={voice.rmsMixRate} min={0} max={1} step={0.05}
-        onChange={(value) => onChange({ rmsMixRate: value })}
-        hint="Lower follows your loudness contour more closely." />
+        onChange={(value) => onChange({ rmsMixRate: value })} />
       <MiniSlider label="Filter radius" value={voice.filterRadius} min={0} max={7} step={1}
         onChange={(value) => onChange({ filterRadius: value })}
-        format={(v) => (v >= 3 ? String(Math.round(v)) : `${Math.round(v)} · off`)}
-        hint="Smooths the Harvest and DIO pitch tracks (below 3 is off)." />
+        format={(v) => (v >= 3 ? String(Math.round(v)) : 'Off')} />
       {voice.f0Method?.startsWith('mangio-crepe') ? (
         <MiniSlider label="Crepe hop length" value={voice.crepeHopLength} min={64} max={512} step={16}
           onChange={(value) => onChange({ crepeHopLength: value })} format={(value) => `${Math.round(value)} samples`} />
       ) : null}
       <Button icon={RotateCcw} onClick={onRestoreRecommended} disabled={recommended} className="w-full">
-        {recommended ? 'Using recommended settings' : 'Restore recommended settings'}
+        {recommended ? 'Recommended settings' : 'Restore recommended'}
       </Button>
     </div>
   );

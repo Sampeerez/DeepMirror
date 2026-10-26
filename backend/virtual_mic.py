@@ -1,20 +1,10 @@
-"""Virtual microphone: route the converted voice into Discord, Teams, Meet...
+"""Virtual microphone for calls (Discord, Teams, Meet...).
 
-Browsers cannot create audio devices, so calls need a virtual audio cable:
-the studio plays the converted voice into the cable's input and the call app
-records from its output.
-
-* Windows and macOS: VB-CABLE (VB-Audio, donationware). Its licence allows
-  sharing the official package as is but not folding it into another
-  program's installer, so the studio downloads the newest package listed on
-  VB-Audio's own page and opens VB-Audio's installer for the user, who
-  confirms it and the administrator prompt. The version known when this was
-  written is checked by SHA-256; a newer one by the installer's digital
-  signature (Windows: Authenticode, signed by VB-Audio's author), so an
-  update never needs a change here and a tampered file is never run.
-* Linux: PipeWire/PulseAudio create virtual devices without installing
-  anything; the studio adds a null sink plus a microphone fed from it while
-  call mode is on, and removes them on exit.
+Windows and macOS use VB-CABLE: its licence does not allow bundling it, so
+the newest package listed on VB-Audio's page is downloaded and VB-Audio's own
+installer is opened for the user. The known version is checked by SHA-256, a
+newer one by its Authenticode signature. On Linux PipeWire/PulseAudio create
+the devices while call mode is on.
 """
 
 from __future__ import annotations

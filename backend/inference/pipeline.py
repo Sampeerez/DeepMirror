@@ -161,7 +161,7 @@ def mix_rms(source: np.ndarray, source_rate: int, converted: np.ndarray, convert
 # Articulation transfer: envelopes on a 2.5 ms grid, fast (8 ms) against slow (60 ms).
 ARTICULATION_GRID_HZ = 400
 ARTICULATION_FAST_SECONDS = 0.008
-ARTICULATION_SLOW_SECONDS = 0.06
+ARTICULATION_SLOW_SECONDS = 0.3
 ARTICULATION_CUT_DB, ARTICULATION_BOOST_DB = -30.0, 6.0
 ARTICULATION_FLOOR_DB = 45.0          # below the loudest moment: the room, left alone
 

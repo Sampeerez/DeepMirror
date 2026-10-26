@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 
 from backend.model_manager import ModelManager
 from backend.training.hparams import (
+    BASES,
     CONFIGS,
+    DEFAULT_BASE,
     DEFAULT_EPOCHS,
     MAX_AUDIO_SECONDS,
     MAX_EPOCHS,
@@ -33,6 +35,8 @@ async def training_info(request: Request) -> dict:
         "sample_rates": sorted(CONFIGS),
         "default_sample_rate": 40000,
         "default_epochs": DEFAULT_EPOCHS,
+        "bases": sorted(BASES),
+        "default_base": DEFAULT_BASE,
         "max_epochs": MAX_EPOCHS,
         "min_audio_seconds": MIN_AUDIO_SECONDS,
         "recommended_audio_seconds": list(RECOMMENDED_AUDIO_SECONDS),
@@ -57,13 +61,15 @@ async def create_job(
     batch_size: Annotated[int | None, Form()] = None,
     save_every: Annotated[int, Form()] = 25,
     overwrite: Annotated[str | None, Form()] = None,
+    base: Annotated[str | None, Form()] = None,
 ) -> dict:
     if batch_size is not None and not 1 <= batch_size <= 32:
         raise HTTPException(status_code=400, detail="Batch size must be between 1 and 32.")
     try:
         return await _jobs(request).create(name, files, sample_rate, epochs or None, batch_size,
                                            max(1, min(save_every, MAX_EPOCHS)),
-                                           (overwrite or "").lower() in {"true", "1", "on", "yes"})
+                                           (overwrite or "").lower() in {"true", "1", "on", "yes"},
+                                           base if base in BASES else DEFAULT_BASE)
     except TrainingError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

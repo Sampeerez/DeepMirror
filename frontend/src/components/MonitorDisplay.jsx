@@ -18,7 +18,7 @@ function zoneClass(percent) {
  * Levels change ~60x per second. Routing them through React state would
  * re-render the whole App on every animation frame, so the bar, the peak-hold
  * marker and the readout are written to the DOM directly instead. The visual
- * behaviour — 3x gain, zone colours, slow peak decay — is unchanged.
+ * behaviour, 3x gain, zone colours, slow peak decay, is unchanged.
  */
 function VuMeter({ label, meters, channel }) {
   const barRef = useRef(null);

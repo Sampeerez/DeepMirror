@@ -4,19 +4,18 @@ import Button from './Button';
 import Toggle from './Toggle';
 import { BigSlider, MiniSlider } from './Sliders';
 
-function pitchHint(voice, autoPitchAvailable, autoPitchShift, isRunning) {
-  if (!voice.autoPitch) return 'Manual shift. Turn Auto on to match the voice register.';
-  if (!isRunning) return 'Auto: matches your register to the voice once you speak.';
-  if (!autoPitchAvailable) return 'Auto needs a voice trained in this studio; this one keeps your pitch.';
-  if (autoPitchShift === null) return 'Auto: listening to your voice…';
-  return 'Auto: your register is matched to the voice.';
+// Auto only works with voices trained here (they store their pitch); say so when it cannot.
+function pitchHint(voice, autoPitchAvailable, isRunning) {
+  if (voice.autoPitch && isRunning && !autoPitchAvailable) return 'Auto needs a voice trained in this studio.';
+  return null;
 }
 
 function calibrationText(isRunning, speakerProfile) {
-  if (!isRunning) return 'Calibrates to you as you speak.';
-  if (!speakerProfile) return 'Learning your voice: keep talking…';
-  if (speakerProfile.calibration < 1) return `Learning your voice… ${Math.round(speakerProfile.calibration * 100)}%`;
-  return `Calibrated: ${Math.round(speakerProfile.median_hz)} Hz, range ±${speakerProfile.range_semitones} st`;
+  if (!isRunning) return 'Not calibrated yet';
+  if (!speakerProfile || speakerProfile.calibration < 1) {
+    return `Calibrating… ${Math.round((speakerProfile?.calibration || 0) * 100)}%`;
+  }
+  return `Your voice: ${Math.round(speakerProfile.median_hz)} Hz, ±${speakerProfile.range_semitones} st`;
 }
 
 /** The Voice card: pitch, melody, timbre and the pitch tracker. */
@@ -26,6 +25,7 @@ function VoiceLab({
   f0Methods = FALLBACK_F0_METHODS,
 }) {
   const autoActive = voice.autoPitch && autoPitchAvailable && autoPitchShift !== null;
+  const autoExpressiveness = voice.autoPitch && autoPitchAvailable ? expressivenessApplied : null;
   const shownPitch = autoActive ? autoPitchShift : voice.pitch;
   const selectedMethod = findF0Method(f0Methods, voice.f0Method);
   const liveGroups = groupedMethods(f0Methods, 'realtime');
@@ -63,7 +63,7 @@ function VoiceLab({
               Auto
             </span>
           )}
-          hint={pitchHint(voice, autoPitchAvailable, autoPitchShift, isRunning)}
+          hint={pitchHint(voice, autoPitchAvailable, isRunning)}
         />
 
         <div>
@@ -74,10 +74,7 @@ function VoiceLab({
             max={2}
             step={0.05}
             onChange={(value) => onChange({ expressiveness: value })}
-            format={(v) => `×${v.toFixed(2)}`}
-            hint={voice.autoPitch && autoPitchAvailable && expressivenessApplied != null
-              ? `Auto: ×${expressivenessApplied.toFixed(2)}, the voice's own melodic range.`
-              : 'Above 1 widens your rises and falls in pitch: a livelier voice.'}
+            format={(v) => (autoExpressiveness != null ? `Auto ×${autoExpressiveness.toFixed(2)}` : `×${v.toFixed(2)}`)}
           />
           <div className="mt-2 flex h-8 items-center justify-between gap-3">
             <span className="min-w-0 truncate text-[11px] text-fg-subtle" title={calibrationText(isRunning, speakerProfile)}>
@@ -95,7 +92,6 @@ function VoiceLab({
           step={0.05}
           onChange={(value) => onChange({ pitchCorrection: value })}
           format={(v) => (v <= 0 ? 'Off' : `${Math.round(v * 100)}%`)}
-          hint="Autotune: pulls each note in tune. For singing; leave it off to speak naturally."
         />
 
         <BigSlider
@@ -124,16 +120,15 @@ function VoiceLab({
               <optgroup key={group.section} label={group.section}>
                 {group.methods.map((method) => (
                   <option key={method.id} value={method.id} disabled={!method.available}>
-                    {method.label}{method.available ? '' : ' — unavailable'}
+                    {method.label}{method.available ? '' : ' (unavailable)'}
                   </option>
                 ))}
               </optgroup>
             ))}
           </select>
-          <p className={`mt-1.5 text-[11px] leading-4 ${tooSlow ? 'text-warn-fg' : 'text-fg-subtle'}`}>
-            {tooSlow ? 'Too slow for live audio on this device: the voice will stutter. RMVPE or a larger buffer keeps up.'
-              : selectedMethod.description}
-          </p>
+          {tooSlow ? (
+            <p className="mt-1.5 text-[11px] leading-4 text-warn-fg">Too slow here: the voice will stutter. Use RMVPE.</p>
+          ) : null}
         </div>
       </div>
     </section>

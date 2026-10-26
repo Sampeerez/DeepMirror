@@ -27,7 +27,7 @@ BUILTIN_PRESETS = [
         "id": "clean",
         "name": "Clean",
         "emoji": "🎙️",
-        "description": "No coloration — raw model or mic output",
+        "description": "No coloration: raw model or mic output",
         "settings": {"pitch_shift": 0, "formant_shift": 0, "effects": {}},
     },
     {

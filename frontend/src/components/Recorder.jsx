@@ -58,7 +58,7 @@ function TakeRow({ take, library }) {
         </div>
       )}
       {!take.persisted && !take.pending ? (
-        <p role="status" className="mt-1 text-[11px] text-warn-fg">Not saved in this browser: download it or retry.</p>
+        <p role="status" className="mt-1 text-[11px] text-warn-fg">Not saved: download it or retry.</p>
       ) : null}
       <div className="mt-1.5 flex items-center gap-1">
         <audio controls preload="none" src={take.url} aria-label={`Play ${take.name}`} className="h-8 min-w-0 flex-1" />
@@ -105,10 +105,10 @@ function Recorder({ pipeline }) {
           ) : null}
           {isRecording ? (
             <Button variant="danger" icon={Square} onClick={() => pipeline.stopRecording()} className="w-24"
-              title="Stop recording (shortcut: R)">Stop</Button>
+              title="Shortcut: R">Stop</Button>
           ) : (
             <Button variant="danger" icon={Circle} onClick={() => pipeline.startRecording()} disabled={!isRunning}
-              className="w-24" title={isRunning ? 'Record the converted output (shortcut: R)' : 'Press Start first'}>
+              className="w-24" title={isRunning ? 'Shortcut: R' : 'Start first'}>
               Record
             </Button>
           )}
@@ -125,7 +125,7 @@ function Recorder({ pipeline }) {
       <ul className="mt-2 max-h-72 min-h-0 flex-1 divide-y divide-line overflow-y-auto pr-1 lg:max-h-none">
         {library.loading ? <li role="status" className="py-2 text-[11px] text-fg-subtle">Loading saved takes…</li> : null}
         {!library.loading && !library.takes.length ? (
-          <li className="py-2 text-[11px] text-fg-faint">No takes yet. Start the voice changer, then Record.</li>
+          <li className="py-2 text-[11px] text-fg-faint">No takes yet.</li>
         ) : null}
         {library.takes.map((take) => <TakeRow key={take.id} take={take} library={library} />)}
       </ul>

@@ -22,6 +22,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -129,6 +130,8 @@ class StreamSession:
         self.sleeping = False
         self.processing_error: str | None = None
         self._logged_failure: str | None = None
+        # Test samples: the raw microphone and the converted output, saved while a take records.
+        self._sample: tuple[list[np.ndarray], list[np.ndarray]] | None = None
         # Stats surfaced in status messages.
         self.latency_ms = self.model_ms = self.dsp_ms = 0.0
         self.input_level_db = -math.inf
@@ -156,6 +159,10 @@ class StreamSession:
             self._auto_pitch = None
         if isinstance(payload.get("bypass"), bool):
             self.bypass = payload["bypass"]
+        if payload.get("capture_sample") is True and self._sample is None:
+            self._sample = ([], [])
+        elif payload.get("capture_sample") is False:
+            self.save_sample()
         if isinstance(payload.get("silence_saver"), bool):
             self.silence_saver = payload["silence_saver"]
             self._silence_seconds = 0.0
@@ -339,8 +346,30 @@ class StreamSession:
         self._silence_seconds += len(audio) / self.sample_rate
         return self._silence_seconds >= self._sleep_after_seconds()
 
+    def save_sample(self) -> Path | None:
+        """Write the captured microphone and output to data/samples (``<time>-mic.wav``, ``-out.wav``)."""
+        sample, self._sample = self._sample, None
+        if not sample or not sample[0]:
+            return None
+        import soundfile as sf
+
+        folder = self.config.DATA_DIR / "samples"
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = folder / time.strftime("%Y%m%d-%H%M%S")
+        sf.write(f"{stem}-mic.wav", np.concatenate(sample[0]), self.sample_rate, subtype="FLOAT")
+        sf.write(f"{stem}-out.wav", np.concatenate(sample[1]), self.sample_rate, subtype="FLOAT")
+        logger.info("Saved test sample %s-mic.wav / -out.wav", stem.name)
+        return stem
+
     def process(self, audio: np.ndarray) -> FrameResult:
         """Convert one chunk. With ``bypass`` the input is returned untouched (true A/B)."""
+        result = self._process(audio)
+        if self._sample is not None:
+            self._sample[0].append(np.array(audio, np.float32))
+            self._sample[1].append(np.array(result.audio, np.float32))
+        return result
+
+    def _process(self, audio: np.ndarray) -> FrameResult:
         self.processing_error = None
         if self.bypass:
             self.sleeping = False
@@ -538,4 +567,5 @@ async def audio_websocket(websocket: WebSocket) -> None:
         logger.exception("Audio stream error")
         with contextlib.suppress(Exception):
             await websocket.close(code=1011, reason="Internal server error")
+    session.save_sample()
     logger.info("Audio stream closed")

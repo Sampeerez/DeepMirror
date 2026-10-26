@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // constants.js derives WS_URL from `location` at module scope, which Node does
-// not provide — stub it before the module graph is evaluated.
+// not provide, stub it before the module graph is evaluated.
 let convertFile;
 
 beforeAll(async () => {

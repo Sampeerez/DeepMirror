@@ -79,7 +79,7 @@
   /*
    * Dark is the product default and therefore the base definition: a document
    * with no data-theme (or an unrecognised one) renders dark. The light theme
-   * only overrides values — it never introduces a token of its own, so a
+   * only overrides values, it never introduces a token of its own, so a
    * missing light value can never fall through to nothing.
    */
   :root {
@@ -107,7 +107,7 @@
     --text-subtle: #a1a1aa;
     --text-faint: #9696a0;
 
-    /* Primary action — highest-contrast surface in the theme */
+    /* Primary action, highest-contrast surface in the theme */
     --primary-bg: #f4f4f5;
     --primary-bg-hover: #ffffff;
     --primary-fg: #18181b;
@@ -117,7 +117,7 @@
     --border-default: rgba(255, 255, 255, 0.1);
     --border-hover: rgba(255, 255, 255, 0.25);
 
-    /* Status — success */
+    /* Status, success */
     --ok-fg: #a7f3d0;
     --ok-fg-soft: rgba(167, 243, 208, 0.6);
     --ok-bg: rgba(52, 211, 153, 0.07);
@@ -126,7 +126,7 @@
     --ok-line-strong: rgba(110, 231, 183, 0.5);
     --ok-solid: #34d399;
 
-    /* Status — warning / bypass */
+    /* Status, warning / bypass */
     --warn-fg: #fde68a;
     --warn-fg-soft: rgba(253, 230, 138, 0.75);
     --warn-bg: rgba(251, 191, 36, 0.1);
@@ -135,7 +135,7 @@
     --warn-line-strong: rgba(252, 211, 77, 0.45);
     --warn-solid: #fcd34d;
 
-    /* Status — danger / transport-stop */
+    /* Status, danger / transport-stop */
     --danger-fg: #fecdd3;
     --danger-bg: rgba(244, 63, 94, 0.1);
     --danger-bg-strong: rgba(244, 63, 94, 0.2);
@@ -163,7 +163,7 @@
     --scrollbar-thumb: rgba(255, 255, 255, 0.16);
     --scrollbar-thumb-hover: rgba(255, 255, 255, 0.26);
 
-    /* frost-lite control tokens — see .frost-control below. */
+    /* frost-lite control tokens, see .frost-control below. */
     --frost-bg: rgba(255, 255, 255, 0.055);
     --frost-bg-hover: rgba(255, 255, 255, 0.085);
     --frost-bg-pressed: rgba(255, 255, 255, 0.115);

@@ -44,8 +44,8 @@ export default function StatusIndicator({ wsStatus, activeModel, mode, bypass = 
         }`}
         title={
           bypassed
-            ? 'Conversion bypassed — monitoring raw input (press B)'
-            : failed ? 'Model inference failed; output muted' : activeModel || 'No model loaded — pure DSP mode'
+            ? 'Conversion bypassed: monitoring raw input (press B)'
+            : failed ? 'Model inference failed; output muted' : activeModel || 'No model loaded: pure DSP mode'
         }
       >
         <span className={`text-[10px] font-bold uppercase tracking-[0.14em] ${

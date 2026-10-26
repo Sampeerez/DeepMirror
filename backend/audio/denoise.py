@@ -1,14 +1,8 @@
-"""Background-noise reduction for the model's input (spectral gating).
+"""Spectral-gating noise reduction, used when DeepFilterNet is not available.
 
-The noise spectrum is learnt only from frames the voice detector marks as
-non-speech, so it follows the room (fans, hum, hiss, traffic) and never the
-voice. Each STFT bin is then attenuated by a Wiener-style gain with a floor,
-smoothed across neighbouring bins and frames so the residual does not
-"twinkle" (musical noise).
-
-Only the model hears the cleaned signal: HuBERT and the pitch tracker read
-voice instead of voice-plus-room, which keeps the conversion articulate. The
-room itself is not thrown away; the stream mixes it back, unconverted.
+The noise spectrum is learnt from non-speech frames only; bins are attenuated
+by a Wiener-style gain with a floor, smoothed across bins and frames to avoid
+musical noise.
 """
 
 from __future__ import annotations

@@ -132,7 +132,7 @@ describe('voiceFromPreset', () => {
   it('keeps the current advanced values for a legacy preset', () => {
     const next = voiceFromPreset(LEGACY_PRESET, TUNED_VOICE);
 
-    // pitch/formant still follow the preset — the long-standing behaviour.
+    // pitch/formant still follow the preset, the long-standing behaviour.
     expect(next.pitch).toBe(7);
     expect(next.formant).toBe(4);
     // ...but nothing the preset does not mention gets reset.

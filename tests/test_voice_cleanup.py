@@ -265,3 +265,36 @@ class TestArticulation:
         assert np.max(np.abs(20 * np.log10(np.abs(restored[2000:-2000]) + 1e-9)
                              - 20 * np.log10(np.abs(converted[2000:-2000]) + 1e-9))) < 1.0
         assert transfer_articulation(steady, 16000, converted, 48000, strength=0.0) is converted
+
+
+class TestHeldVoice:
+    """A held "aaaa" or a rolled "rrrr" that the speech detector does not call speech is still voice."""
+
+    @staticmethod
+    def vowel(seconds, rate=RATE, taps=False):
+        t = np.arange(int(seconds * rate)) / rate
+        voice = sum(np.sin(2 * np.pi * 120 * k * t) / k for k in range(1, 10))
+        if taps:   # tongue taps 26 times a second, the closed part muffled
+            gate = np.clip((0.5 + 0.5 * np.cos(2 * np.pi * 26 * t) - 0.3) / 0.4, 0, 1)
+            voice = voice * (0.15 + 0.85 * gate)
+        return (0.05 * voice).astype(np.float32)
+
+    def test_a_rolled_r_reads_as_voice_and_noise_does_not(self):
+        from backend.audio.voice_activity import VOCAL_PERIODICITY, vocal_frames
+
+        trill = self.vowel(1.0, taps=True).astype(np.float64)
+        noise = np.random.default_rng(0).standard_normal(RATE).astype(np.float64)
+        n = RATE // FRAME
+        assert np.median(vocal_frames(trill[: n * FRAME].reshape(n, FRAME))[0]) >= VOCAL_PERIODICITY
+        assert np.median(vocal_frames(noise[: n * FRAME].reshape(n, FRAME))[0]) < 0.3
+
+    @pytest.mark.parametrize("taps", [False, True])
+    def test_held_voice_stays_open_and_is_never_learnt_as_the_room(self, taps):
+        room = (0.001 * np.random.default_rng(1).standard_normal(RATE)).astype(np.float32)
+        audio = np.concatenate([room, self.vowel(6.0, taps=taps) + np.resize(room, 6 * RATE)])
+        timeline = SpeechTimeline(ScriptedDetector(lambda k: 0.02))   # the detector never hears speech
+        for i in range(0, len(audio), 2048):
+            timeline.feed(audio[i:i + 2048])
+        assert timeline.noise_db is not None and timeline.noise_db < -50
+        gain = timeline.gain(len(audio) - 5 * RATE, 4 * RATE, RATE)
+        assert gain.min() == pytest.approx(1.0)

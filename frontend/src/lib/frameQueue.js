@@ -4,7 +4,7 @@
 // only builds a queue on the wire and adds that queue to the round trip. The
 // scheduler keeps at most `maxInFlight` frames awaiting a reply, parks the
 // next few in a short pending list, and drops the oldest parked frame once the
-// list is full — fresh audio beats stale audio in a live monitor.
+// list is full, fresh audio beats stale audio in a live monitor.
 //
 // A frame whose reply never comes (the server hit an error and skipped it, or
 // the reply was lost) must not wedge the sender forever, so an in-flight entry
@@ -51,7 +51,7 @@ export function createFrameScheduler({
   return {
     /**
      * Offer a captured frame `{ buffer, seqNum }`.
-     * Returns the frames to transmit right now — usually this one, or nothing
+     * Returns the frames to transmit right now, usually this one, or nothing
      * while a reply is still outstanding.
      */
     offer(frame, now) {
@@ -79,7 +79,7 @@ export function createFrameScheduler({
       return { rttMs, send: takeSendable(now) };
     },
 
-    /** Forget everything — on connect, on close. */
+    /** Forget everything, on connect, on close. */
     reset() {
       inFlight.clear();
       pending = [];

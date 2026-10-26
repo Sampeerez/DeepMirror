@@ -191,3 +191,23 @@ class TestAutoPitch:
             session.process(loud(seed))
         assert fake_voice.last_settings.pitch_shift == 0.0
         assert session.status()["auto_pitch_available"] is False
+
+
+class TestSamples:
+    def test_a_take_saves_the_raw_microphone_and_the_output(self, session, settings):
+        import soundfile as sf
+
+        session.apply({"capture_sample": True})
+        chunks = [loud(k) for k in range(3)]
+        outputs = [session.process(chunk).audio for chunk in chunks]
+        stem = session.apply({"capture_sample": False}) or sorted((settings.DATA_DIR / "samples").glob("*-mic.wav"))
+        mic, rate = sf.read(str(stem[-1]), dtype="float32")
+        out, _ = sf.read(str(stem[-1]).replace("-mic.wav", "-out.wav"), dtype="float32")
+        assert rate == session.sample_rate
+        np.testing.assert_allclose(mic, np.concatenate(chunks), atol=1e-6)
+        np.testing.assert_allclose(out, np.concatenate(outputs), atol=1e-6)
+
+    def test_nothing_is_saved_unless_asked(self, session, settings):
+        session.process(loud())
+        session.apply({"capture_sample": False})
+        assert not (settings.DATA_DIR / "samples").exists()

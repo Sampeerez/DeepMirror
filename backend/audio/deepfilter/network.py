@@ -1,17 +1,10 @@
-"""DeepFilterNet3 in plain PyTorch, run one 10 ms hop at a time.
+"""DeepFilterNet3 in PyTorch, one 10 ms hop at a time.
 
-A re-implementation of the network of Schröter et al. (DeepFilterNet,
-github.com/Rikorose/DeepFilterNet, MIT or Apache-2.0; see LICENSE-DeepFilterNet
-next to this file) for the official ``DeepFilterNet3`` checkpoint. Module and
-parameter names follow the official code so its weights load unchanged; the
-feature extraction and the streaming logic of the official Rust library
-(libDF) are written here in torch, so no Rust extension is needed.
-
-``StreamingDeepFilterNet.forward(frame, state, atten_lim_db)`` takes one hop
-(480 samples at 48 kHz) and the flat recurrent state, and returns the
-enhanced hop 1440 samples (30 ms) late, the new state and the local SNR.
-Every operation is a plain tensor op (the FFTs are matrix products), so the
-step exports to a single ONNX graph.
+Re-implements the network of Schröter et al. (see LICENSE-DeepFilterNet) with
+the official parameter names, plus libDF's features and streaming logic, so
+no Rust extension is needed. ``StreamingDeepFilterNet.forward`` takes 480
+samples at 48 kHz and the flat state, and returns the hop 1440 samples late.
+FFTs are matrix products, so the step exports to a single ONNX graph.
 """
 
 from __future__ import annotations

@@ -25,7 +25,10 @@ const WORKLET_URL = `${import.meta.env.BASE_URL}audioWorklet.js`;
 export default function useAudioPipeline(wsHook) {
   // Only the stable callbacks are needed here. Depending on the whole hook
   // object would recreate start/stop every time a latency sample arrives.
-  const { sendAudio, setOnAudioReceived, setStreamSampleRate } = wsHook;
+  const { sendAudio, sendSettings, setOnAudioReceived, setStreamSampleRate } = wsHook;
+  // Settings > Diagnostics: each take also saves the raw microphone on the server (data/samples).
+  const captureSamplesRef = useRef(false);
+  const setCaptureSamples = useCallback((enabled) => { captureSamplesRef.current = Boolean(enabled); }, []);
 
   const [isRunning, setIsRunning] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -52,7 +55,7 @@ export default function useAudioPipeline(wsHook) {
   const recordChunksRef = useRef([]);
   const recordSamplesRef = useRef(0);
   const recordLimitRef = useRef(0);
-  // The rate the AudioContext actually runs at — not the rate we asked for.
+  // The rate the AudioContext actually runs at, not the rate we asked for.
   const sampleRateRef = useRef(SAMPLE_RATE);
 
   // Animation-rate values live outside React state so meter updates never
@@ -94,6 +97,7 @@ export default function useAudioPipeline(wsHook) {
   }, [meters]);
 
   const finalizeRecording = useCallback((notice = null) => {
+    if (recordingRef.current && captureSamplesRef.current) sendSettings?.({ capture_sample: false });
     recordingRef.current = false;
     setIsRecording(false);
 
@@ -122,7 +126,7 @@ export default function useAudioPipeline(wsHook) {
         console.error('Failed to encode recording:', err);
         setRecordNotice({
           tone: 'error',
-          message: 'The take could not be encoded — it may have been too long for available memory.',
+          message: 'The take could not be encoded: it may have been too long for available memory.',
         });
         return null;
       }
@@ -133,7 +137,7 @@ export default function useAudioPipeline(wsHook) {
     addTake(recording);
     setRecordNotice(notice);
     return recording;
-  }, [meters, addTake]);
+  }, [meters, addTake, sendSettings]);
 
   const stop = useCallback(() => {
     if (recordingRef.current) {
@@ -174,7 +178,7 @@ export default function useAudioPipeline(wsHook) {
 
     streamRef.current?.getTracks().forEach((track) => track.stop());
     // close() rejects if the context is already closed (a failed start that
-    // never resumed it, or a second stop) — that is not worth an unhandled
+    // never resumed it, or a second stop), that is not worth an unhandled
     // rejection in the console.
     const context = audioContextRef.current;
     if (context && context.state !== 'closed') {
@@ -384,10 +388,11 @@ export default function useAudioPipeline(wsHook) {
     recordSamplesRef.current = 0;
     recordLimitRef.current = maxRecordingSamples(sampleRateRef.current);
     recordingRef.current = true;
+    if (captureSamplesRef.current) sendSettings?.({ capture_sample: true });
     meters.set({ recordSeconds: 0 });
     setRecordNotice(null);
     setIsRecording(true);
-  }, [meters]);
+  }, [meters, sendSettings]);
 
   const stopRecording = useCallback(() => finalizeRecording(), [finalizeRecording]);
 
@@ -417,12 +422,13 @@ export default function useAudioPipeline(wsHook) {
     recordNotice,
     startRecording,
     stopRecording,
+    setCaptureSamples,
     maxRecordSeconds: MAX_RECORD_SECONDS,
     outputSelectionSupported,
     streamInfo,
     playbackStats,
   }), [
     start, stop, isRunning, meters, getAnalysers, isRecording, library, recordNotice,
-    startRecording, stopRecording, outputSelectionSupported, streamInfo, playbackStats,
+    startRecording, stopRecording, setCaptureSamples, outputSelectionSupported, streamInfo, playbackStats,
   ]);
 }

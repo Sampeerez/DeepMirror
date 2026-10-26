@@ -142,7 +142,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             ) : (
               <>
                 <p className="text-sm font-medium text-fg-secondary">
-                  {dragActive ? 'Drop the audio file here' : 'Drop an audio file or click to choose'}
+                  {dragActive ? 'Drop here' : 'Drop or choose a file'}
                 </p>
                 <p className="mt-1 text-xs text-fg-faint">wav · mp3 · flac · ogg · m4a</p>
               </>
@@ -153,12 +153,12 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             <label htmlFor="converter-f0-method" className="block text-xs font-medium text-fg-muted">Pitch tracker</label>
             <select id="converter-f0-method" value={f0Override} disabled={converting}
               onChange={(event) => setF0Override(event.target.value)} className="native-select-safe field mt-2">
-              <option value="studio">Studio setting — {findF0Method(f0Methods, voice.f0Method).label}</option>
+              <option value="studio">Studio setting: {findF0Method(f0Methods, voice.f0Method).label}</option>
               {offlineGroups.map((group) => (
                 <optgroup key={group.section} label={group.section}>
                   {group.methods.map((method) => (
                     <option key={method.id} value={method.id} disabled={!method.available}>
-                      {method.label}{method.available ? '' : ' — unavailable'}
+                      {method.label}{method.available ? '' : ' (unavailable)'}
                     </option>
                   ))}
                 </optgroup>
@@ -174,7 +174,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
               onChange={(event) => setUseModel(event.target.checked)} className="h-4 w-4 shrink-0 accent-primary" />
             <span className="shrink-0">Use the active voice</span>
             <span className="min-w-0 truncate text-xs text-fg-faint" title={activeModel || undefined}>
-              {activeModel ? `(${activeModel})` : '(none active — effects only)'}
+              {activeModel ? `(${activeModel})` : '(none active)'}
             </span>
           </label>
 
@@ -190,7 +190,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
               {converting ? (
                 <span className="flex items-center gap-2">
                   <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
-                  Converting… long files take a while.
+                  Converting…
                 </span>
               ) : notice || null}
             </p>
@@ -220,7 +220,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
           ) : !error ? (
             <div className="m-auto flex flex-col items-center gap-2 text-center text-sm text-fg-subtle">
               <AudioLines className="h-8 w-8 text-fg-faint" strokeWidth={1.5} aria-hidden="true" />
-              The converted recording appears here, ready to play and download.
+              The result appears here.
             </div>
           ) : null}
         </div>

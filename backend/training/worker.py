@@ -36,7 +36,7 @@ from backend.training.dataset import (
     save_segments,
     voiced_percent,
 )
-from backend.training.hparams import CONFIGS, PRETRAINED
+from backend.training.hparams import BASE_FOLDERS, BASES, CONFIGS, DEFAULT_BASE
 from backend.training.index_builder import build_index
 from backend.training.plan import ValidationTracker, plan_training, validation_count
 from backend.training.trainer import Trainer, TrainingProgress, auto_batch_size, build_examples
@@ -94,11 +94,12 @@ class Job:
                 self._last_write = now
 
 
-def _ensure_assets(job: Job, sample_rate: int, assets_dir: Path) -> dict[str, Path]:
-    needed = [*ASSETS, *PRETRAINED[sample_rate]]
+def _ensure_assets(job: Job, sample_rate: int, assets_dir: Path, base: str) -> dict[str, Path]:
+    pretrained = BASES[base][sample_rate]
+    needed = [*ASSETS, *pretrained]
     paths = {}
     for number, asset in enumerate(needed):
-        directory = assets_dir / ("pretrained_v2" if asset.name.startswith("pretrained") else "")
+        directory = assets_dir / (BASE_FOLDERS[base] if asset in pretrained else "")
         target = directory / asset.filename
         if not target.is_file() or target.stat().st_size != asset.size:
             job.report(force=True, stage="assets", message=f"Downloading {asset.filename}",
@@ -116,7 +117,8 @@ def run(job: Job) -> None:
     compute = select_device(spec.get("device") or settings.DEVICE)
     job.report(force=True, state="running", device=compute.describe(), error=None)
 
-    paths = _ensure_assets(job, rate, Path(spec.get("assets_dir") or settings.ASSETS_DIR))
+    base = spec.get("base") if spec.get("base") in BASES else DEFAULT_BASE
+    paths = _ensure_assets(job, rate, Path(spec.get("assets_dir") or settings.ASSETS_DIR), base)
     dataset_path = job.directory / "dataset.npz"
     model_path = models_dir / f"{spec['name']}.pth"
     index_path = models_dir / f"{spec['name']}.index"
@@ -169,7 +171,8 @@ def run(job: Job) -> None:
     trainer = Trainer(config, compute, training, job.directory / "checkpoints", plan.batch_size,
                       crops_per_example=plan.crops_per_example, validation=validation)
     if not trainer.resume():
-        trainer.load_pretrained(paths[PRETRAINED[rate][0].name], paths[PRETRAINED[rate][1].name])
+        generator, discriminator = BASES[base][rate]
+        trainer.load_pretrained(paths[generator.name], paths[discriminator.name])
     total = plan.epochs
     save_every = max(1, int(spec.get("save_every", 25)))
     tracker = ValidationTracker.restore(job.status, plan.patience_epochs, min_epochs=round(0.6 * total))

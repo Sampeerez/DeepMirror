@@ -6,10 +6,7 @@ import { STORAGE_KEYS, writeStored } from '../lib/storage';
 
 // Round-trip samples kept for the sparkline and the profile recommendation.
 const MAX_LATENCY_SAMPLES = 60;
-// How often latency/serverMs reach React state. Audio replies arrive per chunk
-// (10-40 per second); pushing each one through setState would re-render the
-// whole studio at frame rate, and a readout that flickers 40x a second is not
-// more informative than one that updates 4x a second.
+// Latency reaches React state a few times a second, not on every chunk.
 const UI_FLUSH_INTERVAL_MS = 250;
 const RECONNECT_INITIAL_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
@@ -247,8 +244,7 @@ export default function useWebSocket() {
     }
   }, [clearReconnectTimer, flushMeasurements, scheduleReconnect]);
 
-  // The reconnect timer fires long after any render, so an effect-synced ref
-  // is the right way for it to reach the current connect().
+  // The reconnect timer reaches the current connect() through a ref.
   useEffect(() => {
     connectRef.current = connect;
   }, [connect]);
@@ -269,9 +265,7 @@ export default function useWebSocket() {
     clearReconnectTimer();
     reconnectDelayRef.current = RECONNECT_INITIAL_MS;
 
-    // Abandon an attempt that is still hanging in CONNECTING (an unreachable
-    // host can sit there for a long time). Its handlers are detached first so
-    // the eventual close cannot schedule a competing reconnect.
+    // Drop an attempt stuck in CONNECTING; detach its handlers first so it cannot reconnect too.
     const current = wsRef.current;
     if (current && current.readyState !== WebSocket.OPEN) {
       current.onopen = null;
@@ -321,8 +315,7 @@ export default function useWebSocket() {
     onOpenRef.current = callback;
   }, []);
 
-  // A stable object lets consumers (and React.memo) depend on the fields they
-  // use instead of a fresh wrapper every render.
+
   return useMemo(() => ({
     status,
     connect,

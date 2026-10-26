@@ -1,37 +1,15 @@
-"""Realtime voice conversion over a rolling window, joined with SOLA.
+"""Realtime conversion over a rolling window.
 
-Every live chunk re-renders a window of recent audio and emits one chunk of
-output from it::
+Each chunk re-renders recent audio with past context (lookback) and future
+context (lookahead, never emitted), and consecutive renders are joined with
+SOLA::
 
-    |<-------------- history (16 kHz) ------------------------------>|
-    |  lookback (past context)  | emitted + crossfade + search | lookahead |
-                                                                 ^ newest input
+    | lookback | emitted + crossfade + search | lookahead |
+                                                          ^ newest input
 
-* **Lookback** gives HuBERT, the pitch tracker and the synthesizer's
-  attention real left context, which stabilises timbre and intonation.
-* **Lookahead** means every emitted sample was rendered with real audio to
-  its right, too. Model edges (reflect padding, attention and convolution
-  boundary effects, F0 tracker edge frames) fall inside the lookahead and are
-  discarded. It costs exactly ``lookahead`` of extra latency.
-* **SOLA** (synchronised overlap-add): the tail held back from the previous
-  render is matched against the new render within a small search range and
-  the two are crossfaded at the best-correlated offset, so consecutive
-  windows join without clicks or comb-filter "phasing".
-
-Around the model, every chunk also goes through:
-
-* **Voice detection** (Silero VAD): only speech is converted. Room noise,
-  breaths and clicks never go through the voice model.
-* **Noise reduction**: the model hears the voice with the room noise removed
-  (spectral gating learnt from the non-speech parts), which keeps it
-  articulate.
-* **Ambience**: the room is mixed back *unconverted* and time-aligned with
-  the voice: the real input during pauses and the removed noise under
-  speech, so the result is the converted voice in your room, not a gate.
-* **Loudness matching** to the speaker's own voice, then a soft limiter.
-
-The window is rendered by an injected callable, which keeps this module
-independent from the model code and easy to test.
+Around the model: noise removal, voice detection (only speech is converted),
+optional room ambience, loudness matching and a soft limiter. The renderer
+is injected, so this module does not depend on the model code.
 """
 
 from __future__ import annotations
@@ -91,12 +69,9 @@ def _sola_offset(reference: np.ndarray, candidate: np.ndarray, search: int) -> i
     return int(np.argmax(scores))
 
 
-# The converted voice may not be louder than the speaker's own voice (at the
-# matched level) by more than this, frame by frame. Where the input is almost
-# silent (the end of a quiet word, the gap in "no... no") a model can invent
-# vowels out of noise; this keeps them as quiet as what was actually said.
-# While the detector hears speech the margin allows the model's own dynamics;
-# in the pre-roll and hang-over around it, nothing louder than the input.
+# How much louder than the input the voice may be, frame by frame: models invent
+# vowels where the input is nearly silent. Some room while speech is heard,
+# none in the pre-roll and hang-over.
 CEILING_MARGIN_DB = 8.0
 EDGE_MARGIN_DB = 0.0
 CEILING_FRAME_SECONDS = 0.02
@@ -127,9 +102,7 @@ def envelope_ceiling(converted: np.ndarray, reference: np.ndarray, rate: int,
     return (converted * curve).astype(np.float32)
 
 
-# Below this distance from the room's noise floor the input holds no voice, so
-# whatever the model renders there (the tail of a phrase, a breath next to
-# speech) is invented noise and is faded out.
+# Closer than this to the room's level the input holds no voice: fade the output.
 SNR_GATE_DB = 6.0
 SNR_GATE_WIDTH_DB = 6.0
 
@@ -206,9 +179,7 @@ class RealtimeVoiceStream:
 
     def reset(self) -> None:
         """Forget all context (new model, stream restart)."""
-        # Kept at the client rate and resampled whole on every chunk: a
-        # streaming resampler emits in bursts, which would make the window's
-        # end (and therefore the output timing) jitter by tens of ms.
+        # Resampled whole on every chunk: a streaming resampler would make the timing jitter.
         self._history = np.zeros(0, dtype=np.float32)
         self._total = 0                       # client samples heard so far
         self._fed16 = 0                       # of which fed to the voice detector (at 16 kHz)

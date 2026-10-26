@@ -2,7 +2,7 @@
 //
 // Everything here is a pure function over injected globals so the pipeline can
 // give an accurate, actionable message instead of throwing an opaque DOM error
-// — and so the rules can be tested without a browser.
+// and so the rules can be tested without a browser.
 
 /** Why getUserMedia is unavailable, in words a user can act on. */
 export function getMediaDeviceSupport(nav = typeof navigator !== 'undefined' ? navigator : undefined,

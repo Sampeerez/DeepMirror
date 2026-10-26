@@ -20,7 +20,7 @@ function statusLine({ error, devices, captureSupported, pipeline, wsStatus, acti
     return {
       tone: 'muted',
       retry: true,
-      text: wsStatus === 'connecting' ? 'Connecting to the server…' : 'Waiting for server connection — retrying automatically.',
+      text: wsStatus === 'connecting' ? 'Connecting to the server…' : 'Server not reachable, retrying…',
     };
   }
   const info = pipeline.streamInfo;
@@ -28,25 +28,24 @@ function statusLine({ error, devices, captureSupported, pipeline, wsStatus, acti
     return {
       tone: 'warn',
       text: info.inputFallback === 'default'
-        ? 'The selected microphone was unavailable — recording from the system default instead.'
+        ? 'That microphone is unavailable: using the default one.'
         : info.inputFallback === 'sample-rate'
-          ? 'The microphone rejected the preferred rate — the browser resamples it.'
-          : 'The selected microphone could not be matched exactly — the browser picked the closest one.',
+          ? 'The microphone runs at another rate; the browser converts it.'
+          : 'Using the closest match to the selected microphone.',
     };
   }
   if (info && info.sampleRate !== info.requestedSampleRate) {
-    return { tone: 'muted', text: `Streaming at ${info.sampleRate.toLocaleString()} Hz (the browser did not grant ${info.requestedSampleRate.toLocaleString()} Hz).` };
+    return { tone: 'muted', text: `Running at ${info.sampleRate.toLocaleString()} Hz.` };
   }
   if (pipeline.isRunning) {
     return {
       tone: 'muted',
-      text: inCall ? `Live — your converted voice goes to “${callInput}”. Choose it as the microphone in your call app.`
-        : 'Live — speak into your microphone. B switches A/B, R records.',
+      text: inCall ? `Live, sending to “${callInput}”.` : 'Live. B: A/B · R: record',
     };
   }
-  if (!activeModel) return { tone: 'muted', text: 'No voice active: effects and pitch only. Load a voice in the Models tab.' };
-  if (!devices.hasLabels) return { tone: 'muted', text: 'Press Start and allow the microphone to see device names.' };
-  return { tone: 'muted', text: 'Ready. Press Start and speak.' };
+  if (!activeModel) return { tone: 'muted', text: 'No voice active: effects only.' };
+  if (!devices.hasLabels) return { tone: 'muted', text: 'Allow the microphone to see device names.' };
+  return { tone: 'muted', text: 'Ready' };
 }
 
 function DeviceSelect({ id, label, Icon, value, onChange, disabled, title, children }) {
@@ -124,13 +123,13 @@ function AudioControls({ devices, pipeline, wsStatus, activeModel, bypass = fals
 
         <div className="flex items-center gap-2 md:justify-end xl:order-last">
           <Button icon={PhoneCall} size="md" selected={inCall} onClick={() => setCallOpen(true)}
-            className={`w-32 ${inCall ? 'text-fg' : ''}`} title="Use the converted voice in Discord, Teams or Meet">
+            className={`w-32 ${inCall ? 'text-fg' : ''}`} title="Discord, Teams, Meet…">
             {inCall ? 'Call: on' : 'Call mode'}
           </Button>
           {/* True A/B: keeps the mic, the WebSocket and the output routing live and
               returns the raw input instead of the converted signal. */}
           <Button size="md" variant={bypass ? 'warning' : 'secondary'} role="switch" aria-checked={bypass}
-            aria-label="Conversion bypass" title="Compare with your own voice (shortcut: B)"
+            aria-label="Conversion bypass" title="Shortcut: B"
             onClick={() => onBypassChange?.(!bypass)} className="w-32">
             {bypass ? 'A/B: original' : 'A/B: converted'}
           </Button>
@@ -152,7 +151,7 @@ function AudioControls({ devices, pipeline, wsStatus, activeModel, bypass = fals
         <DeviceSelect id="audio-output-device" label="Output" Icon={Speaker}
           value={inCall ? cable.deviceId : (outputSelectable ? selectedOutput : '')}
           onChange={setSelectedOutput} disabled={pipeline.isRunning || !outputSelectable || inCall}
-          title={outputSelectable ? undefined : 'This browser cannot route audio to a specific device: it follows the system default.'}>
+          title={outputSelectable ? undefined : 'This browser always uses the system output.'}>
           {/* Without setSinkId the browser always plays to the system default,
               so offering a device list here would be a promise we can't keep. */}
           <option value="">{outputSelectable ? 'Default speaker' : 'System default (not selectable)'}</option>

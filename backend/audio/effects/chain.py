@@ -101,7 +101,7 @@ class EffectsChain:
         try:
             return self._effects["gate"].process(audio, params)
         except Exception:
-            logger.exception("Noise gate failed — passing signal through")
+            logger.exception("Noise gate failed: passing signal through")
             return audio
 
     def apply_pitch(self, audio: np.ndarray, semitones: float) -> np.ndarray:
@@ -109,7 +109,7 @@ class EffectsChain:
         try:
             return self._pitch.process(audio, semitones)
         except Exception:
-            logger.exception("Pitch shifter failed — passing signal through")
+            logger.exception("Pitch shifter failed: passing signal through")
             return audio
 
     def post_process(
@@ -124,7 +124,7 @@ class EffectsChain:
             try:
                 y = self._formant.process(y, formant_shift)
             except Exception:
-                logger.exception("Formant shifter failed — skipping")
+                logger.exception("Formant shifter failed: skipping")
 
         if isinstance(effects, dict):
             for key in POST_CHAIN_ORDER:
@@ -134,6 +134,6 @@ class EffectsChain:
                 try:
                     y = self._effects[key].process(y, params)
                 except Exception:
-                    logger.exception("Effect %r failed — skipping", key)
+                    logger.exception("Effect %r failed: skipping", key)
 
         return np.clip(y, -1.0, 1.0).astype(np.float32)

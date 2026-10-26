@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class RobotEffect:
-    """Ring modulation against a sine carrier — classic metallic robot voice."""
+    """Ring modulation against a sine carrier, classic metallic robot voice."""
 
     def __init__(self, sample_rate: int) -> None:
         self.sr = sample_rate
@@ -60,7 +60,7 @@ class WhisperEffect:
 
 
 class TelephoneEffect:
-    """Narrow 300–3400 Hz bandpass with light saturation — landline character."""
+    """Narrow 300–3400 Hz bandpass with light saturation, landline character."""
 
     def __init__(self, sample_rate: int) -> None:
         nyq = sample_rate / 2.0

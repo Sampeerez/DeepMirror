@@ -1,10 +1,8 @@
-"""Model assets: the HuBERT content encoder and RMVPE weights every voice needs, plus the voice detector.
+"""Shared model files: HuBERT, RMVPE, Silero VAD and DeepFilterNet3.
 
-They are fetched once from their official sources and verified by SHA-256
-before use. Copies left by earlier versions are reused instead of being
-downloaded again. An asset can be *built* after download: the official
-DeepFilterNet3 checkpoint is exported here to the streaming ONNX graph the
-live stream runs (see backend.audio.deepfilter).
+Downloaded once from their official sources and checked by SHA-256. An asset
+can be built after download: the DeepFilterNet3 checkpoint is exported here
+to the streaming ONNX graph (see backend.audio.deepfilter).
 """
 
 from __future__ import annotations

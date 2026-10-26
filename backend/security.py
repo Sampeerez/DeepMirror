@@ -1,10 +1,8 @@
 """Origin validation shared by the CORS middleware and the WebSocket handshake.
 
-The studio is a local-first app: the browser page and the API almost always
-share an origin. That makes the safe default easy — accept same-origin traffic
-plus an explicit allowlist, and reject everything else — while still letting an
-operator run the frontend on a different host or port by configuring
-``OVC_CORS_ORIGINS``.
+The page and the API normally share an origin, so same-origin traffic and an
+explicit allowlist (``OVC_CORS_ORIGINS``) are accepted and everything else is
+rejected.
 """
 
 from urllib.parse import urlsplit
@@ -79,8 +77,7 @@ def is_origin_allowed(
     A missing Origin header is allowed: only browsers attach one, so its
     absence means a non-browser client (curl, a test, a native app) that an
     attacker cannot drive from a victim's session. The literal ``"null"``
-    origin — sandboxed iframes and ``file://`` pages — is rejected because it
-    is not attributable to any site.
+    origin (sandboxed iframes, ``file://`` pages) is rejected.
     """
     if allow_any:
         return True

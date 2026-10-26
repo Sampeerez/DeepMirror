@@ -53,7 +53,8 @@ CONFIGS = {
 }
 
 _PRETRAINED = f"{PINNED_REVISION}/pretrained_v2"
-PRETRAINED = {
+_TITAN = "https://huggingface.co/blaise-tk/TITAN/resolve/cb72bb5bb05a85f07b17a33b014b694eaa9525f7/models/medium"
+OFFICIAL = {
     40000: (
         Asset("pretrained-G40k", "f0G40k.pth", f"{_PRETRAINED}/f0G40k.pth",
               "3b2c44035e782c4b14ddc0bede9e2f4a724d025cd073f736d4f43708453adfcb", 73106273, False),
@@ -67,6 +68,24 @@ PRETRAINED = {
               "2269b73c7a4cf34da09aea99274dabf99b2ddb8a42cbfb065fb3c0aa9a2fc748", 142875703, False),
     ),
 }
+# TITAN Medium (blaise-tk, Apache-2.0): the official base fine-tuned on 11 h of expressive speech.
+TITAN = {
+    40000: (
+        Asset("titan-G40k", "G-f040k-TITAN-Medium.pth", f"{_TITAN}/40k/pretrained/G-f040k-TITAN-Medium.pth",
+              "217de2fd349f48856aa6a6d9d1257b07a0addccde7b69fc7b22097f1fee5924d", 438156650, False),
+        Asset("titan-D40k", "D-f040k-TITAN-Medium.pth", f"{_TITAN}/40k/pretrained/D-f040k-TITAN-Medium.pth",
+              "bc804da752ba9cb8e3aaa90ad102edc0a6e7f033c90db53bfcce135f100d5ad1", 857119946, False),
+    ),
+    48000: (
+        Asset("titan-G48k", "G-f048k-TITAN-Medium.pth", f"{_TITAN}/48k/pretrained/G-f048k-TITAN-Medium.pth",
+              "51a6dc93687f7e1a6051be3dec958289958c9c738d5c520e4fa956e7886ee153", 452338845, False),
+        Asset("titan-D48k", "D-f048k-TITAN-Medium.pth", f"{_TITAN}/48k/pretrained/D-f048k-TITAN-Medium.pth",
+              "4999a5b66aec0a9ab7e845063eeb242e47a611ab0e6260fb0b5ca44a7c5bbc44", 857126469, False),
+    ),
+}
+BASES = {"official": OFFICIAL, "titan": TITAN}
+DEFAULT_BASE = "titan"   # measured: closer timbre and steadier expressive pitch than the official base
+BASE_FOLDERS = {"official": "pretrained_v2", "titan": "pretrained_titan"}
 
 # Dataset limits. Five minutes of clean speech trains a good voice with the
 # automatic plan (validation picks the best epoch); 10-30 minutes covers more

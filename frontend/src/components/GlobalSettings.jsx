@@ -128,6 +128,8 @@ export default function GlobalSettings({
   streamInfo = null,
   playbackStats = null,
   transport = {},
+  captureSamples = false,
+  onCaptureSamplesChange,
 }) {
   const dialogRef = useRef(null);
 
@@ -318,7 +320,7 @@ export default function GlobalSettings({
             </div>
           </div>
 
-          {disabled ? <p className="mt-3 text-xs text-warn-fg">Routing active. Profile saved for the next session.</p> : null}
+          {disabled ? <p className="mt-3 text-xs text-warn-fg">Applies the next time you press Start.</p> : null}
 
           <div className="mt-6 border-t border-line-strong pt-5">
             <div className="flex items-center justify-between gap-4">
@@ -394,12 +396,17 @@ export default function GlobalSettings({
           <RuntimeReadiness config={config} checking={runtimeChecking} error={runtimeError}
             onRefresh={onRefreshRuntime} />
           {config.stream ? (
-            <p className="border-t border-line pt-4 text-xs leading-5 text-fg-subtle">
-              Each chunk is rendered with {config.stream.lookback_seconds} s of past and
-              {' '}{Math.round(config.stream.lookahead_seconds * 1000)} ms of future context, joined with
-              a phase-aligned crossfade. Server-side delay: {config.stream.algorithmic_delay_ms} ms.
+            <p className="border-t border-line pt-4 text-xs text-fg-subtle">
+              Server delay {config.stream.algorithmic_delay_ms} ms
             </p>
           ) : null}
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-fg-secondary">Save my microphone with each take</p>
+              <p className="mt-0.5 text-xs text-fg-subtle">Raw and converted audio go to data/samples.</p>
+            </div>
+            <Toggle checked={captureSamples} onChange={onCaptureSamplesChange} label="Save my microphone with each take" />
+          </div>
           <div className="mt-4">
             <StreamDiagnostics streamInfo={streamInfo} playbackStats={playbackStats} transport={transport}
               serverMs={serverMs} serverStats={serverStats} />

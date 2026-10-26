@@ -4,7 +4,7 @@
 // The advanced RVC fields are optional on purpose: built-in presets describe a
 // voice character and say nothing about pitch detection, and user presets saved
 // before this existed have no such keys. For those, applying a preset must
-// leave the current advanced values alone instead of resetting them — only the
+// leave the current advanced values alone instead of resetting them, only the
 // pitch/formant/effects trio is unconditional, which preserves the behaviour
 // presets already had.
 
@@ -83,7 +83,7 @@ export function voiceFromPreset(preset, currentVoice = {}) {
   return next;
 }
 
-/** Effect rack for a preset — always a full rack, defaults filled in. */
+/** Effect rack for a preset, always a full rack, defaults filled in. */
 export function effectsFromPresetSettings(preset) {
   return effectsFromPreset(preset?.settings?.effects);
 }

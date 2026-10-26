@@ -4,253 +4,139 @@
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" alt="Python 3.13" />
   <img src="https://img.shields.io/badge/PyTorch-2.14-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch 2.14" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19" />
-  <img src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" alt="Vite 8" />
-  <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white" alt="Tailwind 4" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" />
 </p>
 
-<p align="center">
-  Realtime and offline RVC voice conversion studio that runs locally in your browser.<br/>
-  One command to start, no manual Python setup, quality-first streaming.
-</p>
+Realtime voice changer that runs on your own computer. It converts your voice with RVC
+models, live or from a file, and trains new voices from your recordings.
 
-<p align="center">
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#train-your-own-voice">Train a voice</a> •
-  <a href="#how-the-realtime-engine-works">Realtime engine</a> •
-  <a href="#configuration">Configuration</a> •
-  <a href="#development">Development</a> •
-  <a href="#credits">Credits</a>
-</p>
+## Quick start
 
----
-
-## Quick Start
-
-**Requirements:** Windows, Linux or macOS. Nothing else: the start script installs
-[uv](https://docs.astral.sh/uv/), which downloads Python and every dependency on its own.
-An NVIDIA GPU is used automatically when present; Apple Silicon uses MPS.
+Windows, Linux or macOS. The start script installs [uv](https://docs.astral.sh/uv/), which
+brings Python and every dependency; an NVIDIA GPU is used when there is one.
 
 ```bash
-git clone https://github.com/sioaeko/OpenVoiceChanger.git
-cd OpenVoiceChanger
+git clone <this repository>
+cd <folder>
 ./start.sh          # Windows: double-click start.bat
 ```
 
-The studio opens in your browser at <http://127.0.0.1:8000>. There is no console window
-to keep open: the server runs in the background, its log is in the **Logs** tab, and
-**closing the studio page stops it** (a reload does not; a training run in progress
-finishes on its own). On Windows the first run also adds an **OpenVoiceChanger** shortcut
-to the Desktop and Start menu that starts it with no window at all; on Linux an app-menu
-entry is added. On the first run the shared model assets (HuBERT, ~190 MB, RMVPE,
-~180 MB, the Silero voice detector, 2 MB, and the DeepFilterNet3 noise filter, 16 MB) are
-downloaded and verified by SHA-256.
-The web UI is built automatically with a bundled Node.js.
+The studio opens at <http://127.0.0.1:8000>. It runs in the background (log in the **Logs**
+tab) and stops when you close the page. On Windows a Desktop shortcut is added. The first
+start downloads the shared models (about 400 MB) and checks each one by SHA-256.
 
-Then open **Models**, drop in an RVC `.pth` voice (and its `.index` if it has one),
-press **Activate**, and start the voice changer in **Studio**.
-
-Useful options:
+Then add a voice in **Models** (an RVC `.pth`, with its `.index` if it has one), press
+**Activate**, and press **Start** in **Studio**.
 
 ```bash
-./start.sh --port 8080 --no-browser     # any CLI flag is passed through
-./start.sh --keep-alive                 # keep running after the page is closed
-./start.sh --foreground                 # (Linux/macOS) stay attached to this terminal
-OVC_TORCH=cpu ./start.sh                # force the CPU build of PyTorch (set OVC_TORCH=cpu on Windows)
-./start.sh --device cpu                 # keep the GPU build but run inference on the CPU
+./start.sh --port 8080 --no-browser    # flags are passed through
+./start.sh --keep-alive                # keep running after the page is closed
+OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 ```
 
-## Features
+## What it does
 
-### Realtime studio
-- RVC v1/v2 voice conversion (with and without pitch) streamed over a binary WebSocket and an AudioWorklet
-- Quality-first streaming: every chunk is re-rendered with **1 s of past and 150 ms of future context** and joined with a phase-aligned (SOLA) crossfade; see [How the realtime engine works](#how-the-realtime-engine-works)
-- Three profiles in Settings with an estimated end-to-end latency: **Quality** (~700 ms), **Balanced** (~400 ms), **Responsive** (~250 ms)
-- Exact nearest-neighbour **index retrieval** on the GPU for closer timbre than classic RVC's approximate search
-- Pitch and formant shifting, RVC controls (index rate, filter radius, RMS mix, protect, Crepe hop) and **13 pitch trackers**: PM, Harvest, DIO, Crepe/Mangio-Crepe (full and tiny), RMVPE, FCPE and offline hybrids. RMVPE is chosen automatically on a GPU
-- **13-effect DSP rack**: noise gate, robot, whisper, telephone, distortion, bitcrush, chorus, echo, reverb, EQ, compressor, output gain, limiter
-- **16 built-in presets** plus your own, saving the whole Voice Lab state
-- **Calls (Discord, Teams, Meet…)**: call mode sends the converted voice to a virtual microphone and you stop hearing yourself (optional headphone monitor). On Windows and macOS the studio downloads the official VB-CABLE package by VB-Audio (free donationware) and opens its installer for you; on Linux it creates a PipeWire/PulseAudio microphone with nothing to install. Then pick "CABLE Output" (or "OpenVoiceChanger Microphone") as the microphone in the call app
-- **Natural, melodic voice**: Expressiveness (default ×1.25) widens the melody of your speech so the voice is less monotone, leaving the fine detail alone; held notes stay exactly in tune and laughs or high notes are left as you make them, so singing and laughing stay stable. Voices trained in the studio use their own melodic range. Your pitch centre and range are learnt in the first seconds you speak and remembered for the next session (Recalibrate any time). Laughs, humming and other pitched sounds are converted as voice
-- **No invented sounds on quiet speech**: voicing must be audible and periodic at its own pitch, so a soft "no, no" does not turn fricatives or room noise into sung vowels, and the converted voice can never be louder than what you actually said around speech
-- **Logs** tab: the server's output live (filter, search, pause, copy, download) and each training run's log
-- **Speech-only conversion**: a neural voice detector (Silero VAD) converts only speech. Room noise, breaths and clicks are never sent through the voice model; nothing of your microphone is ever played unconverted (no breaths, no background noise, never your own voice), and what a model renders over bare room noise at the end of a phrase is faded out. An optional, off-by-default ambience slider adds back only the steady room noise
-- **Neural noise removal** (DeepFilterNet3, streaming ONNX) in front of the model: room noise, keyboard clicks, traffic and breaths are removed before RVC hears them, so they are not turned into strange voice-like sounds. A slow automatic gain keeps whispers above the filter's floor, and clearly pitched voice the filter mistakes for noise (a high laugh, singing) is put back. Where it does not fit the realtime budget (slow CPU-only machines), a light spectral filter stands in
-- **Match my volume**: the converted voice comes out as loud as you speak, whatever the model's own level, with a soft limiter against clipping
-- **Export voices**: every model, including the ones trained in the studio, downloads as a `.zip` with its `.pth` and `.index` (Models and Train tabs)
-- **Silence Saver** pauses inference when nobody speaks without cutting the end of the last word, wakes on a single quiet syllable and keeps listening while asleep, so the next word starts with real context
-- Switching voices is seamless: the previous voice keeps converting until the new one is fully loaded and warm, and only then is it shown as active
-- **Auto pitch**: voices trained in the studio store their pitch range, and the live stream moves your register onto the voice's (for example about +12 semitones from a low voice to a high one) while keeping your intonation. Pitch and formant start at 0, and every RVC control starts at its recommended value until you change it
-- Studio in one screen: a top bar (start, devices, call mode, A/B) and three equal cards (Voice, Sound with Clean-up / Effects / Advanced tabs, Monitor with spectrum, meters, latency and the recorder); nothing grows the page, long content scrolls inside its card. Stream diagnostics are in Settings
-- Output recorder (<kbd>R</kbd>) with a take library stored in the browser; <kbd>B</kbd> toggles an A/B bypass
-- Model-free DSP mode: pitch shifting and effects with no voice loaded
+- **Live conversion** of RVC v1/v2 voices, with 1 s of past and 150 ms of future context per chunk
+- **Only your voice is converted**: room noise, keyboard and breaths are removed before the model hears them, and nothing of your microphone is ever played unconverted
+- **Calls**: a virtual microphone for Discord, Teams or Meet (VB-CABLE on Windows and macOS, PipeWire on Linux)
+- **Pitch**: automatic register matching for voices trained here, expressiveness, optional pitch correction, formant shift
+- **Effects** (13), presets, an A/B switch (<kbd>B</kbd>) and a recorder (<kbd>R</kbd>)
+- **Converter** for whole files, and **Train** to make a voice from 5+ minutes of one speaker
+- **Export** any voice as a `.zip` with its `.pth` and `.index`
 
-### Voice training
-- **Train** tab: upload recordings of one speaker and get a ready-to-use voice (`.pth` + `.index`), trained on your GPU; see [Train your own voice](#train-your-own-voice)
+## Models used
 
-### Offline converter
-- Render a whole file (WAV, FLAC, OGG, MP3, ...) through the active voice, the Voice Lab settings and the effect rack, with RVC's full padding and quiet-point splitting for maximum quality
+Chosen by measuring them on this project's own tests, not by date.
 
-### Models
-- Drag-and-drop upload of `.pth` voices and `.index` files (matched by name, or the only index in the folder)
-- Voice details: RVC version, sample rate, pitch support, index size, device, warm-up render time
+| Part | Model | Why |
+|---|---|---|
+| Content | HuBERT base (RVC v2) | What RVC voices are trained on; another encoder would break them |
+| Pitch | RMVPE | Most accurate here: 92% of frames within 50 cents and 0–0.2% octave errors on sung and laughed material, ahead of FCPE (89–91%) and SwiftF0 (86%, 2.5% octave errors). FCPE is the lighter option |
+| Noise | DeepFilterNet3, official weights, exported here to one streaming ONNX graph | Least voice distortion (SI-SDR 17–20 dB vs 12 dB for DPDFNet 2026) at 0.07 s of CPU per second of audio |
+| Speech detection | Silero VAD v6.2.3 | Latest release |
+| Training base | TITAN Medium | Against the official RVC v2 base, same data and epochs: 7% closer timbre when converting another speaker and fewer notes off in singing (3.2% vs 4.2%) and laughter (8.5% vs 12.1%) |
 
-## Screenshots
+## Train a voice
 
-### Studio
-![Studio — realtime workspace, streaming](docs/images/main-ui.png)
+In **Train**, drop recordings of one speaker, name the voice and press **Start training**.
+The audio is cleaned and sliced, features are extracted on the GPU, the retrieval index is
+built, and the voice is fine-tuned from TITAN Medium (RVC v2 tuned on expressive speech; the
+official RVC v2 base is also available). A held-out part of the recordings
+picks the best epoch, so the voice in **Models** never gets worse if training over-fits.
 
-### Train
-![Training a voice from your recordings](docs/images/training.png)
+5 minutes of clean, dry speech trains a good voice; 10–30 minutes is better. Training runs in
+its own process; live conversion is slower meanwhile.
 
-### Models
-![Model bay](docs/images/models.png)
+## How live conversion works
 
-### Converter
-![Offline file converter](docs/images/converter.png)
-
-### Settings
-![Settings: quality profiles, Silence Saver and engine status](docs/images/settings-modal.png)
-
-## Train your own voice
-
-Open the **Train** tab, drop recordings of one speaker, name the voice and press **Start
-training**. Everything else is automatic:
-
-1. **Base models.** The official RVC v2 pretrained generator and discriminator (40 or 48 kHz) are downloaded once and verified by SHA-256. Fine-tuning from them is what makes a few minutes of audio enough.
-2. **Data preparation.** Audio is converted to mono, high-pass filtered and brought to a consistent speech level, then cut at pauses, split into overlapping 3.7 s segments and softly peak-normalised. Clipped segments are dropped. The job reports how much speech it found, clipping, background noise and the share of voiced speech, with advice when the material is weak.
-3. **Features.** HuBERT content features and RMVPE pitch are extracted on the GPU.
-4. **Index.** The retrieval index is built straight away, in the standard faiss format, so it also works in other RVC tools.
-5. **Automatic plan.** Epochs and batch size come from the amount of speech and the free GPU memory: the batch fits the GPU but stays small enough for about a dozen steps per epoch, and the epoch budget targets about 7,000 optimiser steps (150–1,000 epochs). Under 10 minutes of audio every segment gives two random crops per epoch. Precision is chosen per GPU: bf16 on RTX 30 and newer, FP16 where it is reliable, FP32 on GTX 16xx and older, where FP16 is slower and unstable.
-6. **Best epoch, not last epoch.** About 8% of the segments are held out. Every few epochs they are rendered through the same path live conversion uses and compared with the real voice. The voice in **Models** is always the best-scoring epoch, so it never gets worse if training starts to over-fit, and training stops by itself once the score stops improving. **Stop and save** keeps the best voice, and **Continue training** resumes later, even after a restart.
-7. **Pitch range.** The voice's median pitch is saved in the `.pth` (other RVC tools ignore it) and drives **Auto pitch**.
-
-**Recordings:** 5 minutes of clean, dry speech from one person trains a good voice; 10–30
-minutes captures more of the pitch range and sounds, and 1 minute is the minimum. Avoid
-music, reverb, noise and other voices. Vary intonation: questions, calm and lively speech.
-Leave **Epochs** on *Automatic*; a manual value is an upper limit and the best epoch is still
-the one kept.
-
-Training runs in its own process, so the studio keeps working. Live conversion is slower
-while the GPU trains. On a GTX 1660 SUPER one epoch over 6 minutes of speech takes about
-35 s; RTX cards are several times faster. Without a GPU, training works but is very slow.
-
-## How the realtime engine works
-
-RVC models are trained on whole utterances. Fed short chunks naively, they lose timbre and
-intonation at every chunk boundary and the seams click. For every chunk, the engine:
-
-1. **Re-renders a rolling window.** The window holds the last second of input plus the new chunk, so HuBERT, the pitch tracker and the synthesizer always have real left context.
-2. **Holds back a lookahead.** The newest 150 ms of each render are not emitted yet. Every sample that reaches your speakers was rendered with real audio after it, so the model's edge effects never reach the output. This is a fixed 150 ms of extra latency.
-3. **Joins renders with SOLA.** The tail held back from the previous render is matched against the new one within ±6 ms, then crossfaded at the best-correlated offset. Windows join without clicks or phasing.
-4. **Resamples with soxr.** soxr is a band-limited resampler, unlike FFT resampling, which wraps the end of each window into its start.
-5. **Applies a shift-invariant loudness envelope.** The RMS mix envelope is computed with a sliding window, so overlapping renders agree on the level they apply.
-6. **Removes the noise before the model.** DeepFilterNet3 (the official checkpoint, exported on your computer to a single streaming ONNX graph by `backend/audio/deepfilter`, about 0.08 s of CPU per second of audio) filters every chunk once, in 10 ms hops, and its output (30 ms late) is kept aligned with the input history; the newest samples it has not output yet lie in the lookahead, which is never played. HuBERT and RMVPE only hear the cleaned voice. In a noisy-room test (room noise, 6 key presses per second, breaths), sound outside speech fell from about -35 dB to about -63 dB below the voice, with the same articulation and level.
-7. **Converts speech only.** Silero VAD marks speech every 32 ms, with pre-roll and hang-over so attacks and endings are kept, and a minimum of confident frames so a breath is not taken for speech. Outside speech the output is your room, unconverted, at the ambience level; under speech, the noise the reducer removed plays back too, so there are no holes in the room sound.
-8. **Matches your level.** The converted voice is measured against your voice over the same speech frames and a slow gain (about 0.5 s) brings it to your loudness.
-9. **Keeps your articulation.** HuBERT describes the input 50 times a second, so the model alone cannot reproduce faster movements: a rolled "rrrr" (tongue closures 20-30 times a second) came out as a steady "eeee" and short stops were smeared. The fast part of your loudness envelope (8 ms against 60 ms) is put back on the converted voice, which keeps its own level. On a synthetic trill the 20-35 Hz movement went from 1-12% of the envelope's modulation to 72-98%, and articulation in noisy speech improved for every voice tested.
-
-Only the end of each window is vocoded (the content encoder and flow still see the whole
-window), and on CPU the vocoder runs on ONNX Runtime. On a GTX 1660 SUPER the Quality
-profile renders a 171 ms chunk in about 85 ms with RMVPE and index retrieval. On a
-12th-gen Core i7 without a GPU, the Light (CPU) profile renders a 341 ms chunk in about
-315 ms. Its output keeps about 95% of the spectral similarity of a
-full offline render; the ceiling for this metric is two offline renders with different
-random seeds.
-
-The inference code is a self-contained, typed port of the MIT-licensed
-[RVC](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion) synthesizer and
-RMVPE, plus fairseq's HuBERT encoder, with no dependency on fairseq, faiss or librosa. Its
-output was checked against the original implementation, and the tests keep checking it
-when the reference files are present.
+1. Each chunk re-renders the last second of audio plus the new chunk, so the model always has context.
+2. The newest 150 ms are rendered but not played, so window edges never reach the output.
+3. Consecutive renders are joined at the best-matching offset (SOLA).
+4. DeepFilterNet3 cleans what the model hears; Silero VAD and a periodicity check decide what is voice (a held vowel or a rolled r count as voice).
+5. The fast loudness movement of your voice (trills, stops) is put back on the converted voice, which the model alone smooths out.
+6. The result is brought to your own level and soft-limited.
 
 ## Configuration
 
-Every setting can be overridden with an environment variable or a `.env` file in the
-project folder. Common ones:
+Settings can be overridden with environment variables or a `.env` file:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OVC_HOST` / `OVC_PORT` | `127.0.0.1` / `8000` | Listen address. `0.0.0.0` exposes the studio on your LAN |
+| `OVC_HOST` / `OVC_PORT` | `127.0.0.1` / `8000` | Listen address (`0.0.0.0` for your LAN) |
 | `OVC_DEVICE` | `auto` | `auto`, `cuda`, `mps`, `xpu` or `cpu` |
-| `OVC_MODELS_DIR` | `models` | Where voices and `.index` files live |
-| `OVC_CHUNK_SIZE` | `8192` | Default live chunk (samples at 48 kHz) |
-| `OVC_STREAM_LOOKBACK_SECONDS` | `1.0` | Past context re-rendered with every chunk |
-| `OVC_STREAM_LOOKAHEAD_SECONDS` | `0.15` | Future context per chunk (adds this much latency) |
-| `OVC_STREAM_PAD_SECONDS` | `0.1` | Edge padding of each streaming window |
-| `OVC_INDEX_EXACT_SEARCH` | `true` | `false` reproduces classic RVC's approximate index search |
-| `OVC_DEFAULT_INDEX_RATE` / `OVC_DEFAULT_PROTECT` / ... | RVC defaults | Starting values of the Voice Lab controls |
-| `OVC_SILENCE_THRESHOLD_DB` | `-60` | Level (loudest 10 ms of a chunk) below which Silence Saver pauses inference |
-| `OVC_RESTORE_LAST_VOICE` | `true` | Load the voice that was active when the studio last closed |
-| `OVC_VOICE_ISOLATION` | `true` | Convert speech only; noise and breaths play as unconverted ambience |
-| `OVC_NOISE_REDUCTION_DB` | `60` | Noise removed from what the model hears (60 = all of it, 0 = off) |
-| `OVC_AMBIENT_DB` | `-60` | Steady room noise mixed back around the voice (-60 = off; never the raw input) |
-| `OVC_MATCH_LOUDNESS` | `true` | Bring the converted voice to the speaker's own level |
-| `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See [Security](#security) |
-| `OVC_CORS_ORIGINS` | local origins | Extra origins allowed to use the API |
+| `OVC_MODELS_DIR` | `models` | Voices and `.index` files |
+| `OVC_CHUNK_SIZE` | `8192` | Live chunk (samples at 48 kHz) |
+| `OVC_STREAM_LOOKBACK_SECONDS` | `1.0` | Past context per chunk |
+| `OVC_STREAM_LOOKAHEAD_SECONDS` | `0.15` | Future context per chunk (adds latency) |
+| `OVC_NOISE_REDUCTION_DB` | `60` | Noise removal (60 = all, 0 = off) |
+| `OVC_SILENCE_THRESHOLD_DB` | `-60` | Silence Saver threshold |
+| `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See Security |
+| `OVC_CORS_ORIGINS` | local | Extra origins allowed to use the API |
 
-See [backend/config.py](backend/config.py) for the full list.
+The full list is in [backend/config.py](backend/config.py).
 
 ## Security
 
-- **Network:** the studio listens on loopback by default. Same-origin requests are always allowed. Cross-origin HTTP and WebSocket access is limited to `OVC_CORS_ORIGINS`, and the WebSocket checks the `Origin` header because browsers do not apply the same-origin policy to WebSockets. Anyone who can reach a LAN-exposed studio can upload and run models.
-- **Checkpoints:** `.pth` files are Python pickles, and unpickling one can run code. Voices load with PyTorch's `weights_only` mode, and a checkpoint that needs more is refused unless you set `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS=true`. The HuBERT asset is accepted only with its published SHA-256, and only through a restricted unpickler.
+The studio listens on loopback only. Cross-origin requests and WebSockets are limited to
+`OVC_CORS_ORIGINS`. Voices load with PyTorch's `weights_only` mode; a checkpoint that needs
+more is refused unless `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS=true`.
 
 ## Development
 
 ```bash
-make install            # uv sync (CPU torch; TORCH=cuda for CUDA) + npm ci
-make dev-backend        # API with auto-reload on :8000
-make dev-frontend       # Vite dev server on :5173 (proxies /api and /ws)
-make lint test          # ruff + pyright + eslint, pytest + vitest
-make release            # build the UI and package a release archive
+make install          # uv sync + npm ci (TORCH=cuda for CUDA)
+make dev-backend      # API with auto-reload on :8000
+make dev-frontend     # Vite on :5173
+make lint test        # ruff, pyright, eslint, pytest, vitest
 ```
 
-### Project structure
+`scripts/rename_project.py "New Name"` renames the app everywhere.
 
-```
-backend/
-  __main__.py        CLI (`openvoicechanger`), UI build check, browser launch
-  app.py             FastAPI factory and lifespan
-  config.py          All settings (OVC_* environment variables)
-  assets.py          HuBERT / RMVPE download and verification
-  model_manager.py   Voice library and the active voice
-  presets.py         Built-in and user presets
-  security.py        Origin checks for CORS and the WebSocket
-  api/               HTTP + WebSocket endpoints (models, presets, convert, stream, training, system)
-  audio/             Wire protocol, soxr resampling, realtime streaming (SOLA), DSP effects
-  inference/         HuBERT, RVC synthesizers, RMVPE, pitch trackers, index retrieval, pipeline
-  training/          Dataset preparation, index builder, GAN training loop, job manager and worker process
-frontend/            React 19 + Vite 8 + Tailwind 4 studio
-tests/               pytest suite (API, streaming, DSP, inference equivalence)
-start.sh, start.bat  One-command launchers
-```
+## Screenshots
 
-### Wire protocol
-
-The browser sends a JSON config (`sample_rate`, `chunk_size`, and optionally
-`lookback_seconds` / `lookahead_seconds`), then binary frames. Each frame is an 8-byte
-header followed by float32 PCM: a `uint32` sequence number and a reserved `uint32`. The
-server answers every frame with a converted frame of the same length. Its reserved field
-carries the server time in 1/100 ms. JSON messages update settings at any time, and
-the server sends a `status` message about once a second.
+![Studio](docs/images/main-ui.png)
+![Train](docs/images/training.png)
+![Models](docs/images/models.png)
+![Converter](docs/images/converter.png)
+![Settings](docs/images/settings-modal.png)
 
 ## Credits
 
-This project started as a fork of [OpenVoiceChanger](https://github.com/sioaeko/OpenVoiceChanger)
-by Sioaeko (MIT) and has since been rewritten. It builds on:
+Started as a fork of [OpenVoiceChanger](https://github.com/sioaeko/OpenVoiceChanger) by
+Sioaeko (MIT), since rewritten.
 
 | Component | Use | License |
 |---|---|---|
-| [RVC](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion) | Voice conversion network (ported) | MIT |
+| [RVC](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion) | Conversion network (ported) | MIT |
 | [fairseq HuBERT](https://github.com/facebookresearch/fairseq) | Content encoder (ported) | MIT |
 | [RMVPE](https://github.com/Dream-High/RMVPE) | Pitch tracker | MIT |
-| [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | Noise removal (re-implemented, official weights) | MIT / Apache-2.0 |
-| [Silero VAD](https://github.com/snakers4/silero-vad) | Voice activity detection | MIT |
-| [Applio](https://github.com/IAHispano/Applio) | Ideas for realtime conversion (pitch correction) | MIT |
-| [VB-CABLE](https://vb-audio.com/Cable/) | Virtual microphone, downloaded from VB-Audio and installed by you | Donationware |
+| [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | Noise removal (re-implemented) | MIT / Apache-2.0 |
+| [Silero VAD](https://github.com/snakers4/silero-vad) | Speech detection | MIT |
+| [TITAN](https://huggingface.co/blaise-tk/TITAN) | Training base | Apache-2.0 |
+| [Applio](https://github.com/IAHispano/Applio) | Ideas (pitch correction) | MIT |
+| [VB-CABLE](https://vb-audio.com/Cable/) | Virtual microphone, installed by you | Donationware |
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The DeepFilterNet re-implementation keeps its authors' notice in
+MIT, see [LICENSE](LICENSE). DeepFilterNet's notice is in
 [backend/audio/deepfilter/LICENSE-DeepFilterNet](backend/audio/deepfilter/LICENSE-DeepFilterNet).

@@ -202,10 +202,6 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
         <section className="panel p-5" aria-labelledby="models-add-title">
           <p className="panel-kicker">Models</p>
           <h2 id="models-add-title" className="panel-title">Add a voice</h2>
-          <p className="mt-2 text-xs leading-5 text-fg-subtle">
-            RVC <code className="text-fg-muted">.pth</code> files, with their <code className="text-fg-muted">.index</code>.
-            One voice runs at a time; without one the studio uses effects only.
-          </p>
           <div
             role="button"
             tabIndex={uploading ? -1 : 0}
@@ -228,7 +224,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
               className="hidden" />
             <Upload className="mx-auto mb-2 h-7 w-7 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
             <p className="text-sm font-medium text-fg-secondary">
-              {dragActive ? 'Drop the files here' : 'Drop files or click to choose'}
+              {dragActive ? 'Drop here' : 'Drop or choose files'}
             </p>
             <p className="mt-1 text-[11px] text-fg-faint">.pth / .pt + optional .index</p>
             {uploading ? (
@@ -281,8 +277,8 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
           ) : rows.length === 0 ? (
             <li className="flex flex-col items-center gap-2 px-4 py-12 text-center text-sm text-fg-subtle">
               <Boxes className="h-8 w-8 text-fg-faint" strokeWidth={1.5} aria-hidden="true" />
-              {models.length === 0 ? 'No voices yet: add an RVC .pth, or train one in the Train tab.'
-                : 'No voice matches the search.'}
+              {models.length === 0 ? 'No voices yet.'
+                : 'No matches.'}
             </li>
           ) : rows.map((model) => {
             const { name } = model;

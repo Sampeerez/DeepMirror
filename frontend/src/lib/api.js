@@ -17,14 +17,7 @@ function describeTransportError(err) {
   return 'Cannot reach the server. Is the backend running?';
 }
 
-/**
- * JSON request against the API.
- *
- * `timeoutMs` bounds how long to wait for a response; without it a hung
- * backend would leave the caller pending forever (the bootstrap, notably,
- * only opens the WebSocket once /config has answered). A caller-supplied
- * `signal` takes precedence and keeps its own abort semantics.
- */
+/** JSON request. `timeoutMs` stops waiting on a hung backend; a caller's `signal` wins. */
 async function request(url, { timeoutMs, signal, ...options } = {}) {
   const requestSignal = signal
     ?? (timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
@@ -76,25 +69,7 @@ export async function fetchModels() {
   return request('/models/');
 }
 
-/**
- * Upload a model checkpoint, reporting real transport progress.
- *
- * fetch() cannot observe request-body progress in any shipping browser, so a
- * multi-gigabyte checkpoint upload would have to be faked. XMLHttpRequest does
- * expose upload.onprogress, which is why it is used here instead.
- *
- * `onProgress` receives 0..100. While the browser is still streaming the body
- * it is the true byte ratio; once the last byte is sent the request sits at 99
- * until the server finishes writing the file and responds.
- */
-/**
- * POST a multipart form, reporting real upload progress (0..100).
- *
- * fetch() cannot observe request-body progress in any shipping browser, so a
- * large upload would have to be faked; XMLHttpRequest exposes
- * upload.onprogress. The value sits at 99 once the last byte is sent, until
- * the server finishes processing and responds.
- */
+/** POST a form with upload progress (0..100; 99 until the server answers). XHR, since fetch has no upload progress. */
 function postFormWithProgress(url, formData, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -141,7 +116,7 @@ export function uploadModel(file, onProgress) {
 export const fetchTrainingInfo = () => request('/training/info', { timeoutMs: 15000 });
 export const fetchTrainingJobs = () => request('/training/jobs', { timeoutMs: 15000 });
 
-export function createTrainingJob({ name, files, sampleRate, epochs, batchSize, saveEvery, overwrite }, onProgress) {
+export function createTrainingJob({ name, files, sampleRate, epochs, batchSize, saveEvery, overwrite, base }, onProgress) {
   const formData = new FormData();
   formData.append('name', name);
   for (const audio of files) formData.append('files', audio);
@@ -151,6 +126,7 @@ export function createTrainingJob({ name, files, sampleRate, epochs, batchSize, 
   if (batchSize) formData.append('batch_size', String(batchSize));
   if (saveEvery) formData.append('save_every', String(saveEvery));
   if (overwrite) formData.append('overwrite', 'true');
+  if (base) formData.append('base', base);
   return postFormWithProgress('/training/jobs', formData, onProgress);
 }
 
@@ -208,13 +184,7 @@ export async function deletePreset(presetId) {
   });
 }
 
-/**
- * Returns a WAV Blob of the converted audio.
- *
- * A whole-file render can take minutes, so there is no timeout; pass `signal`
- * from an AbortController to let the user cancel instead. Cancellation rejects
- * with the browser's AbortError so the caller can tell it from a failure.
- */
+/** Convert a file; resolves to a WAV Blob. No timeout: cancel with `signal`. */
 export async function convertFile(file, {
   pitchShift = 0,
   formantShift = 0,
@@ -240,9 +210,7 @@ export async function convertFile(file, {
   formData.append('effects', JSON.stringify(effects));
   formData.append('use_model', String(useModel));
 
-  // Advanced RVC controls are only sent when they hold a real number: an empty
-  // field would fail server-side coercion, and omitting one means "server
-  // default" rather than zero.
+  // Omitted controls use the server default.
   for (const [field, value] of [
     ['index_rate', indexRate],
     ['filter_radius', filterRadius],

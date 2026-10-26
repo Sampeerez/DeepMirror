@@ -1,11 +1,8 @@
-"""DeepFilterNet3 from its official checkpoint, exported here to a streaming ONNX graph.
+"""DeepFilterNet3 built from the official checkpoint.
 
-The official ``DeepFilterNet3.zip`` (github.com/Rikorose/DeepFilterNet, MIT or
-Apache-2.0) holds a PyTorch checkpoint. :func:`export_streaming_onnx` loads it
-into the re-implementation in :mod:`.network` and writes one ONNX graph that
-processes a 10 ms hop with its recurrent state: what the live stream runs.
-The export happens once, on this computer, and is cached next to the
-checkpoint; nothing is taken from third-party conversions.
+``export_streaming_onnx`` loads ``DeepFilterNet3.zip`` (Rikorose/DeepFilterNet,
+MIT or Apache-2.0) into the network in :mod:`.network` and writes a one-hop
+streaming ONNX graph, once, on this computer.
 """
 
 from __future__ import annotations

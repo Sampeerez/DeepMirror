@@ -21,7 +21,7 @@ const IDLE_FRAME_INTERVAL_MS = 1000 / 24;
 // Real-time canvas visualizer: flat single-color output spectrum with the
 // input spectrum as a dim layer behind it, plus a quiet idle animation.
 //
-// `active` is false while the studio tab is hidden — the panel stays mounted
+// `active` is false while the studio tab is hidden, the panel stays mounted
 // (so its state survives) but nothing should be drawn for an invisible canvas.
 function Visualizer({ getAnalysers, isRunning, theme, active = true }) {
   const canvasRef = useRef(null);
@@ -35,7 +35,7 @@ function Visualizer({ getAnalysers, isRunning, theme, active = true }) {
   }, [isRunning]);
 
   // Resolved once per theme change and cached in a ref. The draw loop runs at
-  // 60fps, so it must never call getComputedStyle itself — that would force a
+  // 60fps, so it must never call getComputedStyle itself, that would force a
   // style recalc on every frame.
   useEffect(() => {
     const resolved = readThemeColors(CANVAS_COLORS, document.documentElement);

@@ -5,7 +5,7 @@ features and blends each input frame with its 8 nearest training frames,
 which is what makes the converted timbre match the target voice. This module
 reads the faiss on-disk format directly and searches with torch:
 
-* ``exact`` search (default) compares against every stored vector — better
+* ``exact`` search (default) compares against every stored vector: better
   neighbours than IVF with ``nprobe=1``, and fast on a GPU;
 * ``ivf`` search reproduces faiss' approximate result (nearest coarse
   centroids, then only their inverted lists).

@@ -1,28 +1,10 @@
-"""Neural noise suppression of the model's input: DeepFilterNet3, streaming.
+"""DeepFilterNet3 noise removal for what the voice model hears.
 
-RVC turns whatever reaches it into voice-like sound, so anything that is not
-speech must be gone before the model hears it. A spectral gate only removes
-steady noise; DeepFilterNet3 (Schröter et al., MIT/Apache-2.0), the reference
-open real-time suppressor, also removes keyboard clicks, breaths, traffic and
-other changing noise while leaving the voice intact. Measured on synthetic
-material: room noise -33 dB, keyboard clicks -71 dB, breaths -98 dB, clean
-speech changed by -32 dB (inaudible), at under 1 ms of CPU per 10 ms of audio.
-
-The model is the official DeepFilterNet3 checkpoint exported here (see
-backend.audio.deepfilter) to one ONNX graph that takes one 10 ms hop (480
-samples at 48 kHz) plus its recurrent state and returns the enhanced hop,
-30 ms late. Every chunk is filtered exactly once, and the
-output is kept on the same timeline as the raw input history.
-
-DeepFilterNet removes everything below about -50 dBFS, quiet speech
-included, so a slow automatic gain brings the input to a normal speaking
-level first and the same gain is taken off the output afterwards. Noise is
-raised with the voice, so what counts as noise does not change.
-
-Very expressive voice (a high laugh, a shout, some singing) can be taken
-for noise. Where the input is clearly pitched, well above the room, and the
-filter removed most of it, the original is put back (``restore_voice``):
-noise, clicks and breaths are not pitched, so they stay out.
+The ONNX graph (built in backend.audio.deepfilter) takes 10 ms hops and
+returns them 30 ms late; the cleaned audio is kept on the input's timeline.
+The filter drops everything under about -50 dBFS, so quiet input is raised
+before it and lowered after. Pitched voice that the filter removed (a high
+laugh, some singing) is put back by ``restore_voice``.
 """
 
 from __future__ import annotations

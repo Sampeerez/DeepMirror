@@ -14,6 +14,7 @@ import {
 } from '../lib/training';
 
 const ACCEPTED = '.wav,.flac,.ogg,.mp3,.m4a,.aiff';
+const BASE_LABELS = { official: 'RVC v2 (official)', titan: 'TITAN Medium' };
 const POLL_ACTIVE_MS = 2000;
 const POLL_IDLE_MS = 10000;
 
@@ -152,6 +153,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
   const [autoPlan, setAutoPlan] = useState(true);
   const [batchSize, setBatchSize] = useState('');
   const [saveEvery, setSaveEvery] = useState(25);
+  const [base, setBase] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -177,6 +179,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
       setInfo(value);
       setEpochs(value.default_epochs);
       setSampleRate(value.default_sample_rate);
+      setBase((current) => current || value.default_base || 'official');
     }).catch(() => {});
     refresh();
     return undefined;
@@ -203,10 +206,10 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
     try {
       await createTrainingJob({
         name, files: files.map((item) => item.file), sampleRate, epochs: autoPlan ? null : epochs,
-        batchSize: !autoPlan && batchSize ? Number(batchSize) : null, saveEvery,
+        batchSize: !autoPlan && batchSize ? Number(batchSize) : null, saveEvery, base,
       }, setUploadProgress);
       setFiles([]);
-      setNotice('Training started. You can keep using the studio; it will be slower while the GPU trains.');
+      setNotice('Training started. The studio is slower while the GPU trains.');
       await refresh();
     } catch (err) {
       setError(err.message);
@@ -247,10 +250,6 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           <div className="min-w-0">
             <p className="panel-kicker">Train</p>
             <h2 id="training-title" className="panel-title">Create a voice</h2>
-            <p className="mt-1.5 text-xs leading-5 text-fg-muted">
-              Recordings of one speaker become a voice you can use live or in the converter: cleaned, sliced,
-              learnt on your GPU from the official RVC v2 base models, with its retrieval index.
-            </p>
           </div>
           <GraduationCap className="hidden h-7 w-7 shrink-0 text-fg-subtle sm:block" strokeWidth={1.5} aria-hidden="true" />
         </div>
@@ -260,7 +259,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           <p className="flex items-center gap-2 text-xs text-fg-secondary">
             <Cpu className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
             Trains on {info.device.name}
-            {info.device.device === 'cpu' ? <span className="text-warn-fg"> — no GPU found: training will be very slow</span> : null}
+            {info.device.device === 'cpu' ? <span className="text-warn-fg">: no GPU found: training will be very slow</span> : null}
           </p>
         ) : null}
 
@@ -286,7 +285,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           <Upload className="mx-auto mb-2 h-7 w-7 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
           <p className="text-sm font-medium text-fg-secondary">Drop recordings or click to choose</p>
           <p className="mt-1 text-xs text-fg-faint">
-            One speaker, dry and clean (no music, reverb or other voices). 5 min trains well; 10–30 min is ideal.
+            One speaker, no music or reverb. 5 min or more; 10–30 min is best.
           </p>
         </div>
 
@@ -339,6 +338,14 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             <input id="training-batch" type="number" min={1} max={32} className={inputClass} value={autoPlan ? '' : batchSize}
               disabled={autoPlan} onChange={(event) => setBatchSize(event.target.value)} placeholder="Auto" />
           </Field>
+          <Field label="Base model" htmlFor="training-base" hint="TITAN is tuned on expressive speech.">
+            <select id="training-base" className={`native-select-safe ${inputClass}`} value={base || 'official'}
+              onChange={(event) => setBase(event.target.value)}>
+              {(info?.bases || ['official', 'titan']).map((id) => (
+                <option key={id} value={id}>{BASE_LABELS[id] || id}{id === info?.default_base ? ' (recommended)' : ''}</option>
+              ))}
+            </select>
+          </Field>
           <Field label="Save every N epochs" htmlFor="training-save" hint="Updates the usable voice.">
             <input id="training-save" type="number" min={1} max={500} className={inputClass} value={saveEvery}
               onChange={(event) => setSaveEvery(Number(event.target.value) || 25)} />
@@ -371,7 +378,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           )) : (
             <div className="flex flex-col items-center gap-2 py-12 text-center text-sm text-fg-subtle">
               <GraduationCap className="h-8 w-8 text-fg-faint" strokeWidth={1.5} aria-hidden="true" />
-              No voices trained yet: add recordings on the left and press Start training.
+              No voices trained yet.
             </div>
           )}
         </div>
