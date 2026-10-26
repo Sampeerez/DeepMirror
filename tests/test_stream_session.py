@@ -211,3 +211,23 @@ class TestSamples:
         session.process(loud())
         session.apply({"capture_sample": False})
         assert not (settings.DATA_DIR / "samples").exists()
+
+
+class TestHealth:
+    def test_stutters_are_logged_once_and_only_when_new(self, session, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="backend.api.stream"):
+            session.apply({"client_health": {"underruns": 2, "dropped": 0, "timed_out": 0}})
+            session.apply({"client_health": {"underruns": 2, "dropped": 0, "timed_out": 0}})
+            session.apply({"client_health": {"underruns": 3, "dropped": 1, "timed_out": 0}})
+        messages = [r.getMessage() for r in caplog.records if "stuttered" in r.getMessage()]
+        assert len(messages) == 2 and "2 playback gaps" in messages[0] and "1 frames dropped" in messages[1]
+
+    def test_a_chunk_slower_than_real_time_is_logged(self, session, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="backend.api.stream"):
+            session.note_timing(1.0)
+            session.note_timing(session.chunk_size * 1000.0 / session.sample_rate + 50)
+        assert any("longer than real time" in r.getMessage() for r in caplog.records)

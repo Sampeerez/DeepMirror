@@ -130,6 +130,10 @@ class StreamSession:
         self.sleeping = False
         self.processing_error: str | None = None
         self._logged_failure: str | None = None
+        # Stream health, written to the log so a stutter leaves a trace.
+        self._slow_chunks = 0
+        self._last_health_log = 0.0
+        self._client_health: dict[str, int] = {}
         # Test samples: the raw microphone and the converted output, saved while a take records.
         self._sample: tuple[list[np.ndarray], list[np.ndarray]] | None = None
         # Stats surfaced in status messages.
@@ -159,6 +163,8 @@ class StreamSession:
             self._auto_pitch = None
         if isinstance(payload.get("bypass"), bool):
             self.bypass = payload["bypass"]
+        if isinstance(payload.get("client_health"), dict):
+            self._report_client_health(payload["client_health"])
         if payload.get("capture_sample") is True and self._sample is None:
             self._sample = ([], [])
         elif payload.get("capture_sample") is False:
@@ -346,6 +352,33 @@ class StreamSession:
         self._silence_seconds += len(audio) / self.sample_rate
         return self._silence_seconds >= self._sleep_after_seconds()
 
+    def _report_client_health(self, health: dict) -> None:
+        """Log new playback gaps and lost frames the browser reports."""
+        labels = {"underruns": "playback gaps", "dropped": "frames dropped before sending",
+                  "timed_out": "frames that came back too late"}
+        news = []
+        for key, label in labels.items():
+            value = health.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > self._client_health.get(key, 0):
+                news.append(f"{value - self._client_health.get(key, 0)} {label}")
+                self._client_health[key] = value
+        if news:
+            logger.warning("Audio stuttered in the browser: %s (model %.0f ms, budget %.0f ms per chunk)",
+                           ", ".join(news), self.model_ms, self.chunk_size * 1000.0 / self.sample_rate)
+
+    def note_timing(self, elapsed_ms: float) -> None:
+        """Count chunks that took longer than their own duration; log them at most every 5 s."""
+        budget = self.chunk_size * 1000.0 / self.sample_rate
+        if elapsed_ms <= budget:
+            return
+        self._slow_chunks += 1
+        now = time.monotonic()
+        if now - self._last_health_log >= 5.0:
+            logger.warning("%d chunk(s) took longer than real time (last %.0f ms for %.0f ms of audio; model %.0f ms)",
+                           self._slow_chunks, elapsed_ms, budget, self.model_ms)
+            self._slow_chunks = 0
+            self._last_health_log = now
+
     def save_sample(self) -> Path | None:
         """Write the captured microphone and output to data/samples (``<time>-mic.wav``, ``-out.wav``)."""
         sample, self._sample = self._sample, None
@@ -521,6 +554,7 @@ async def _handle_frame(websocket: WebSocket, session: StreamSession, data: byte
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     session.latency_ms, session.model_ms, session.dsp_ms, session.mode = (
         elapsed_ms, result.model_ms, result.dsp_ms, result.mode)
+    session.note_timing(elapsed_ms)
     await websocket.send_bytes(encode_frame(result.audio, sequence, min(int(elapsed_ms * 100), 0xFFFFFFFF)))
     if session.processing_error is not None and result.mode == "error":
         await _send_status(websocket, session)

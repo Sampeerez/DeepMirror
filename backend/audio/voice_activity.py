@@ -42,6 +42,8 @@ VOCAL_ABOVE_NOISE_DB = 12.0
 VOCAL_PROBABILITY = 0.8
 MIN_LAG, MAX_LAG = RATE // 600, RATE // 70
 ENVELOPE_SAMPLES = RATE // 200
+VOICE_BAND_HZ = 1000
+MIN_LOW_SHARE = 0.3        # a voice has most of its energy below 1 kHz; key clicks do not
 # Room noise is learnt only from frames that are clearly not voice.
 NOISE_MAX_PERIODICITY = 0.35
 
@@ -49,20 +51,25 @@ NOISE_MAX_PERIODICITY = 0.35
 def vocal_frames(frames: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per 512-sample frame: (normalised autocorrelation peak in the voice pitch range, level dB).
 
-    The periodicity is measured on the frame with its loudness flattened (5 ms
-    envelope), so a rolled r, whose tongue taps make the level jump 25 times a
-    second, still reads as the voice it is.
+    Periodicity is measured below 1 kHz, where a voice's fundamental and first
+    harmonics are and a key's ringing is not, and with the loudness flattened
+    (5 ms envelope), so the taps of a rolled r do not hide that it is voice.
     """
     x = frames - frames.mean(axis=1, keepdims=True)
     energy = np.sum(x * x, axis=1)
     level = 10 * np.log10(np.maximum(energy / frames.shape[1], 1e-12))
+    size = frames.shape[1]
+    low = np.fft.rfft(x, axis=1)
+    low[:, int(VOICE_BAND_HZ * size / RATE) + 1:] = 0
+    x = np.fft.irfft(low, n=size, axis=1)
+    low_share = np.sum(x * x, axis=1) / np.maximum(energy, 1e-12)
     envelope = np.sqrt(ndimage.uniform_filter1d(x * x, ENVELOPE_SAMPLES, axis=1, mode="nearest"))
     x = x / (envelope + 1e-3 * np.sqrt(energy / frames.shape[1] + 1e-12)[:, None] + 1e-12)
     energy = np.sum(x * x, axis=1)
     spectrum = np.fft.rfft(x, n=2 * frames.shape[1], axis=1)
     autocorrelation = np.fft.irfft(np.abs(spectrum) ** 2, axis=1)[:, : MAX_LAG + 1]
     peak = autocorrelation[:, MIN_LAG:MAX_LAG + 1].max(axis=1) / np.maximum(energy, 1e-12)
-    return peak, level
+    return np.where(low_share >= MIN_LOW_SHARE, peak, 0.0), level
 
 
 @cache

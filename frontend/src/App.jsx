@@ -194,6 +194,16 @@ export default function App() {
     });
   }, [setOnSettingsResponse]);
 
+  // Playback gaps and lost frames go to the server log, so a stutter leaves a trace.
+  const underruns = pipeline.playbackStats?.underruns || 0;
+  const { dropped = 0, timedOut = 0 } = wsHook.transport || {};
+  const { sendSettings } = wsHook;
+  useEffect(() => {
+    if (!isRunning || underruns + dropped + timedOut === 0) return undefined;
+    const timer = setTimeout(() => sendSettings({ client_health: { underruns, dropped, timed_out: timedOut } }), 1000);
+    return () => clearTimeout(timer);
+  }, [isRunning, underruns, dropped, timedOut, sendSettings]);
+
   // No stream, no latency to show.
   useEffect(() => {
     if (!isRunning) resetLatency();

@@ -298,3 +298,12 @@ class TestHeldVoice:
         assert timeline.noise_db is not None and timeline.noise_db < -50
         gain = timeline.gain(len(audio) - 5 * RATE, 4 * RATE, RATE)
         assert gain.min() == pytest.approx(1.0)
+
+    def test_the_ringing_of_a_key_is_not_voice(self):
+        from backend.audio.voice_activity import VOCAL_PERIODICITY, vocal_frames
+
+        n = RATE // FRAME
+        m = np.arange(n * FRAME)
+        for freq in (1500.0, 2500.0, 4000.0):
+            ring = np.sin(2 * np.pi * freq * m / RATE) * np.exp(-(m % 4000) / 80)
+            assert np.mean(vocal_frames(ring.reshape(n, FRAME))[0] >= VOCAL_PERIODICITY) == 0
