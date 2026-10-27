@@ -68,7 +68,7 @@ function AdvancedTab({ voice, onChange, onRestoreRecommended }) {
           onChange={(value) => onChange({ crepeHopLength: value })} format={(value) => `${Math.round(value)} samples`} />
       ) : null}
       <Button icon={RotateCcw} onClick={onRestoreRecommended} disabled={recommended} className="w-full">
-        {recommended ? 'Recommended settings' : 'Restore recommended'}
+        {recommended ? 'Automatic settings' : 'Back to automatic'}
       </Button>
     </div>
   );

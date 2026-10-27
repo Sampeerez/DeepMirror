@@ -21,26 +21,22 @@ import useRuntimeConfig from './hooks/useRuntimeConfig';
 import useSettingsSync from './hooks/useSettingsSync';
 import { getActiveModel } from './lib/api';
 import { APP_NAME } from './lib/brand';
-import { defaultEffects, effectsFromPreset } from './lib/effects';
+import { defaultEffects } from './lib/effects';
 import { effectsFromPresetSettings, presetSettingsFromVoice, voiceFromPreset } from './lib/presets';
 import { buildTabUrl, readTabFromSearch } from './lib/navigation';
 import { shouldTriggerShortcut } from './lib/shortcuts';
-import { STORAGE_KEYS, readStored, removeStored, writeStored } from './lib/storage';
+import { readStored, writeStored } from './lib/storage';
 import { applyTheme, readAppliedTheme, storeTheme } from './lib/theme';
-import { hasStoredF0Method, loadInitialVoice, recommendedVoice, withChanges } from './lib/voice';
+import { loadVoiceFor, recommendedVoice, withChanges } from './lib/voice';
 
 // Loaded the first time their tab opens.
 const TrainingStudio = lazy(() => import('./components/TrainingStudio'));
 const FileConverter = lazy(() => import('./components/FileConverter'));
 const LogsPanel = lazy(() => import('./components/LogsPanel'));
+const VoiceProfile = lazy(() => import('./components/VoiceProfile'));
 
 const ACTIVE_MODEL_POLL_MS = 5000;
 const CAPTURE_SAMPLES_KEY = 'ovc_capture_samples_v1';
-
-function loadInitialEffects() {
-  const stored = readStored(STORAGE_KEYS.effects);
-  return stored ? effectsFromPreset(stored) : defaultEffects();
-}
 
 /** Drop ?settings from the address bar without adding a history entry. */
 function clearSettingsParam() {
@@ -69,8 +65,9 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () => new URLSearchParams(window.location.search).has('settings')
   );
-  const [voice, setVoice] = useState(loadInitialVoice);
-  const [effects, setEffects] = useState(loadInitialEffects);
+  // Each voice model keeps its own settings and effects (loaded when it becomes active).
+  const [voice, setVoice] = useState(() => recommendedVoice());
+  const [effects, setEffects] = useState(defaultEffects);
   const [activePresetId, setActivePresetId] = useState(null);
   // Not persisted: bypass must never be on by surprise at the next start.
   const [bypass, setBypass] = useState(false);
@@ -90,17 +87,25 @@ export default function App() {
     setOnSettingsResponse, resetLatency,
   } = wsHook;
 
-  // First run only: use the tracker the server recommends for its hardware.
-  const adoptServerF0Ref = useRef(!hasStoredF0Method());
+  // The tracker the server recommends for its hardware, unless the user chose one.
+  const recommendedF0Ref = useRef(null);
   const adoptRecommendedF0 = useCallback((method) => {
-    if (!adoptServerF0Ref.current) return;
-    adoptServerF0Ref.current = false;
-    setVoice((previous) => ({ ...previous, f0Method: method }));
+    recommendedF0Ref.current = method;
+    setVoice((previous) => (previous.customized?.includes('f0Method') ? previous : { ...previous, f0Method: method }));
   }, []);
 
   const runtime = useRuntimeConfig({ wsHook, isRunning, onRecommendedF0: adoptRecommendedF0 });
   const { runtimeConfig } = runtime;
-  useSettingsSync({ voice, effects, bypass, runtimeConfig, wsHook });
+  useSettingsSync({ voice, effects, bypass, runtimeConfig, wsHook, activeModel });
+
+  // A newly active voice brings its own settings; nothing carries over from the previous one.
+  useEffect(() => {
+    if (!activeModel) return;
+    const saved = loadVoiceFor(activeModel, recommendedF0Ref.current);
+    setVoice(saved.voice);
+    setEffects(saved.effects);
+    setActivePresetId(null);
+  }, [activeModel]);
 
   // Live audio only uses trackers that keep up (an older saved choice such as Crepe is replaced).
   useEffect(() => {
@@ -223,9 +228,11 @@ export default function App() {
     setVoice((prev) => withChanges(prev, partial));
   }, []);
 
+  // Back to automatic: this voice's own changes and effects are dropped.
   const handleRestoreRecommended = useCallback(() => {
     setActivePresetId(null);
     setVoice(recommendedVoice(runtimeConfig.defaultF0Method));
+    setEffects(defaultEffects());
   }, [runtimeConfig.defaultF0Method]);
 
   // Accepts a rack or an updater over the previous rack (see EffectsRack).
@@ -329,10 +336,7 @@ export default function App() {
             f0Pending={serverStats.f0Pending}
             speakerProfile={serverStats.speakerProfile}
             expressivenessApplied={serverStats.expressiveness}
-            onRecalibrate={() => {
-              removeStored(STORAGE_KEYS.speakerProfile);
-              wsHook.sendSettings({ recalibrate: true });
-            }}
+            onRecalibrate={() => wsHook.sendSettings({ recalibrate: true })}
             tooSlow={pipeline.isRunning && !serverStats.inferenceSleeping && serverStats.modelMs > 0
               && serverStats.modelMs > (runtimeConfig.chunkSize / runtimeConfig.sampleRate) * 1000 * 0.95}
             hasModel={Boolean(activeModel)}
@@ -385,6 +389,14 @@ export default function App() {
               onRefresh={runtime.refresh} />
           )}
         />
+      </div>
+
+      <div {...panelProps('voice')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
+        {visited.has('voice') ? (
+          <Suspense fallback={null}>
+            <VoiceProfile active={tab === 'voice'} activeModel={activeModel} inputDevices={devices.inputDevices} />
+          </Suspense>
+        ) : null}
       </div>
 
       <div {...panelProps('training')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">

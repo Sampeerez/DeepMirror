@@ -5,7 +5,7 @@
 // walked out of the app instead of between tabs. These helpers keep the query
 // string authoritative while preserving every other parameter and the hash.
 
-export const TAB_IDS = ['studio', 'models', 'training', 'converter', 'logs'];
+export const TAB_IDS = ['studio', 'models', 'voice', 'training', 'converter', 'logs'];
 const DEFAULT_TAB = 'studio';
 
 export function isValidTab(tab) {

@@ -1,6 +1,7 @@
-// Voice Lab state: defaults, stored-state migration and the live settings message.
+// Voice Lab state: defaults, the settings kept per voice model and the live settings message.
 import { DEFAULT_F0_METHOD } from './constants';
-import { STORAGE_KEYS, readStored } from './storage';
+import { defaultEffects, effectsFromPreset } from './effects';
+import { STORAGE_KEYS, readStored, writeStored } from './storage';
 
 // Mirrors the server's RVC defaults (OVC_DEFAULT_*). Pitch and formant at 0
 // keep the model's own voice; with autoPitch the server moves the speaker's
@@ -61,13 +62,22 @@ export function isRecommendedVoice(voice) {
   return !voice.customized?.length;
 }
 
-export function loadInitialVoice() {
-  return restoreStoredVoice(readStored(STORAGE_KEYS.voice));
+/**
+ * The settings saved for ``model``. Each voice keeps its own: one voice's
+ * pitch or effects never carry over to another, and a voice without saved
+ * changes starts from the automatic settings.
+ */
+export function loadVoiceFor(model, recommendedF0Method) {
+  const saved = model ? readStored(STORAGE_KEYS.voices)?.[model] : null;
+  const voice = restoreStoredVoice(saved?.voice);
+  if (!voice.customized.includes('f0Method') && recommendedF0Method) voice.f0Method = recommendedF0Method;
+  return { voice, effects: saved?.effects ? effectsFromPreset(saved.effects) : defaultEffects() };
 }
 
-/** True when the user explicitly chose a pitch detector. */
-export function hasStoredF0Method() {
-  return Boolean(readStored(STORAGE_KEYS.voice)?.customized?.includes('f0Method'));
+export function storeVoiceFor(model, voice, effects) {
+  if (!model) return;
+  const all = readStored(STORAGE_KEYS.voices);
+  writeStored(STORAGE_KEYS.voices, { ...(all && typeof all === 'object' ? all : {}), [model]: { voice, effects } });
 }
 
 /** The full live settings message for the audio WebSocket. */
@@ -90,7 +100,6 @@ export function streamSettingsPayload(voice, effects, bypass, runtimeConfig) {
     match_loudness: voice.matchLoudness,
     effects,
     bypass,
-    speaker_profile: readStored(STORAGE_KEYS.speakerProfile) || undefined,
     silence_saver: runtimeConfig.silenceSaver,
     silence_threshold_db: runtimeConfig.silenceThresholdDb,
   };

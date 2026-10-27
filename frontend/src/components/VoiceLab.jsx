@@ -11,6 +11,7 @@ function pitchHint(voice, autoPitchAvailable, isRunning) {
 }
 
 function calibrationText(isRunning, speakerProfile) {
+  if (speakerProfile?.from_profile) return `From My voice: ${Math.round(speakerProfile.median_hz)} Hz`;
   if (!isRunning) return 'Not calibrated yet';
   if (!speakerProfile || speakerProfile.calibration < 1) {
     return `Calibrating… ${Math.round((speakerProfile?.calibration || 0) * 100)}%`;

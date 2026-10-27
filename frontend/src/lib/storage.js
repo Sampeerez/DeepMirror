@@ -3,11 +3,8 @@
 export const STORAGE_KEYS = {
   // v2 stores only explicit choices; v1 saved every field and pinned stale defaults.
   globalSettings: 'ovc_global_settings_v2',
-  // v3 records which settings the user changed; untouched ones follow the recommended defaults.
-  voice: 'ovc_voice_v3',
-  // The speaker's pitch profile learnt by the server (sent back on connect).
-  speakerProfile: 'ovc_speaker_profile_v1',
-  effects: 'ovc_effects_v2',
+  // Voice settings and effects of each voice model: { [model]: { voice, effects } }.
+  voices: 'ovc_voices_v1',
 };
 
 export function readStored(key) {

@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import lifecycle as presence
-from backend.api import convert, logs, models, presets, stream, system, training
+from backend.api import convert, logs, models, presets, profile, stream, system, training
 from backend.assets import AssetStore
 from backend.config import APP_NAME, ROOT, Settings
 from backend.config import settings as default_settings
@@ -88,7 +88,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for module in (system, models, presets, convert, stream, training, logs, presence):
+    for module in (system, models, presets, profile, convert, stream, training, logs, presence):
         app.include_router(module.router)
 
     if (settings.FRONTEND_DIST / "index.html").is_file():

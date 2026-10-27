@@ -36,16 +36,17 @@ from backend.training.dataset import (
     save_segments,
     voiced_percent,
 )
-from backend.training.hparams import BASE_FOLDERS, BASES, CONFIGS, DEFAULT_BASE
+from backend.training.hparams import BASE_FOLDERS, BASES, CONFIGS, DEFAULT_BASE, SEPARATOR
 from backend.training.index_builder import build_index
-from backend.training.plan import ValidationTracker, plan_training, validation_count
+from backend.training.isolate import VoiceIsolator
+from backend.training.plan import DEFAULT_QUALITY, ValidationTracker, plan_training, validation_count
 from backend.training.trainer import Trainer, TrainingProgress, auto_batch_size, build_examples
 
 logger = logging.getLogger("backend.training.worker")
 
 # Share of the overall progress bar per stage (training dominates).
-_STAGE_SPAN = {"assets": (0.0, 0.03), "prepare": (0.03, 0.06), "features": (0.06, 0.14),
-               "index": (0.14, 0.16), "train": (0.16, 1.0)}
+_STAGE_SPAN = {"assets": (0.0, 0.03), "prepare": (0.03, 0.12), "features": (0.12, 0.18),
+               "index": (0.18, 0.2), "train": (0.2, 1.0)}
 
 
 class StopRequested(Exception):
@@ -90,13 +91,19 @@ class Job:
             if force or now - self._last_write > 1.0:
                 partial = self.status_path.with_suffix(".part")
                 partial.write_text(json.dumps(self.status), encoding="utf-8")
-                partial.replace(self.status_path)
-                self._last_write = now
+                # Windows refuses the swap while the server is reading the file; a later write catches up.
+                for attempt in range(10):
+                    try:
+                        partial.replace(self.status_path)
+                        self._last_write = now
+                        break
+                    except PermissionError:
+                        time.sleep(0.05 * (attempt + 1))
 
 
-def _ensure_assets(job: Job, sample_rate: int, assets_dir: Path, base: str) -> dict[str, Path]:
+def _ensure_assets(job: Job, sample_rate: int, assets_dir: Path, base: str, isolate: bool) -> dict[str, Path]:
     pretrained = BASES[base][sample_rate]
-    needed = [*ASSETS, *pretrained]
+    needed = [*ASSETS, *pretrained, *([SEPARATOR] if isolate else [])]
     paths = {}
     for number, asset in enumerate(needed):
         directory = assets_dir / (BASE_FOLDERS[base] if asset in pretrained else "")
@@ -118,7 +125,9 @@ def run(job: Job) -> None:
     job.report(force=True, state="running", device=compute.describe(), error=None)
 
     base = spec.get("base") if spec.get("base") in BASES else DEFAULT_BASE
-    paths = _ensure_assets(job, rate, Path(spec.get("assets_dir") or settings.ASSETS_DIR), base)
+    isolate = spec.get("isolate", True) is not False
+    assets_dir = Path(spec.get("assets_dir") or settings.ASSETS_DIR)
+    paths = _ensure_assets(job, rate, assets_dir, base, isolate)
     dataset_path = job.directory / "dataset.npz"
     model_path = models_dir / f"{spec['name']}.pth"
     index_path = models_dir / f"{spec['name']}.index"
@@ -128,7 +137,18 @@ def run(job: Job) -> None:
         job.report(force=True, stage="prepare", stage_progress=0.0, message="Cleaning and slicing audio")
         sources = sorted((job.directory / "uploads").iterdir())
         report: dict = {}
-        segments = prepare_segments(sources, rate, lambda p: job.report(stage="prepare", stage_progress=p), report)
+        isolator = None
+        if isolate:
+            job.report(force=True, stage="prepare", stage_progress=0.0,
+                       message="Keeping only the voice (removing music and noise)")
+            denoiser = next(iter(sorted(assets_dir.glob("deepfilternet3_stream_v*.onnx"))), None)
+            isolator = VoiceIsolator(paths[SEPARATOR.name], denoiser, paths.get("vad"), compute.device)
+        try:
+            segments = prepare_segments(sources, rate, lambda p: job.report(stage="prepare", stage_progress=p),
+                                        report, isolator)
+        finally:
+            if isolator is not None:
+                isolator.close()
         if not segments:
             raise ValueError("No usable speech found in the uploaded audio.")
         save_segments(segments, dataset_path)
@@ -164,7 +184,8 @@ def run(job: Job) -> None:
     training = [e for i, e in enumerate(examples) if i not in picks]
     dataset_seconds = float(job.status.get("dataset_seconds") or 0.0)
     plan = plan_training(len(examples), dataset_seconds, auto_batch_size(compute),
-                         batch_size=spec.get("batch_size"), epochs=spec.get("epochs"))
+                         batch_size=spec.get("batch_size"), epochs=spec.get("epochs"),
+                         quality=spec.get("quality") or DEFAULT_QUALITY)
     f0_stats = compute_f0_stats([s.pitchf for s in segments if s.pitchf is not None])
     f0_payload = f0_stats.to_dict() if f0_stats else None
 

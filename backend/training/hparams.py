@@ -84,6 +84,11 @@ TITAN = {
     ),
 }
 BASES = {"official": OFFICIAL, "titan": TITAN}
+# Mel-Band RoFormer "vocals" by Kimberley Jensen (MIT): keeps only the voice of training recordings.
+SEPARATOR = Asset("separator", "MelBandRoformer.ckpt",
+                  "https://huggingface.co/KimberleyJSN/melbandroformer/resolve/"
+                  "ac9b0614ab3cd7f77219e18ba494dfd93956c348/MelBandRoformer.ckpt",
+                  "87201f4d31afb5bc79993230fc49446918425574db48c01c405e44f365c7559e", 913106900, False)
 DEFAULT_BASE = "titan"   # measured: closer timbre and steadier expressive pitch than the official base
 BASE_FOLDERS = {"official": "pretrained_v2", "titan": "pretrained_titan"}
 

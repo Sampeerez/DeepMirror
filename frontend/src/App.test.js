@@ -17,7 +17,7 @@ vi.mock('./hooks/useAudioDevices', () => ({ default: () => ({}) }));
 vi.mock('./hooks/useUpdates', () => ({ default: () => ({}) }));
 vi.mock('./lib/api', () => ({
   fetchConfig: vi.fn(), fetchPresets: vi.fn(), savePreset: vi.fn(), deletePreset: vi.fn(),
-  getActiveModel: vi.fn().mockResolvedValue(null),
+  getActiveModel: vi.fn().mockResolvedValue({ name: 'mine.pth' }),
 }));
 vi.mock('./components/Layout', () => ({ default: ({ children }) => children }));
 vi.mock('./components/StatusIndicator', () => ({ default: () => null }));
@@ -34,12 +34,13 @@ vi.mock('./components/UpdateButton', () => ({ default: () => null }));
 vi.mock('./components/GlobalSettings', () => ({ default: () => null }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
-it('recovers capabilities and presets after reconnect without overwriting voice or transport settings', async () => {
+it('recovers capabilities and presets after reconnect without overwriting the voice settings or transport', async () => {
   const stored = new Map();
   vi.stubGlobal('localStorage', { getItem: (key) => stored.get(key) ?? null,
     setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) });
   localStorage.setItem('ovc_global_settings_v2', JSON.stringify({ sampleRate: 48000, chunkSize: 2048 }));
-  localStorage.setItem('ovc_voice_v3', JSON.stringify({ pitch: 7, crepeHopLength: 512, customized: ['pitch', 'crepeHopLength'] }));
+  localStorage.setItem('ovc_voices_v1', JSON.stringify({ 'mine.pth': {
+    voice: { pitch: 7, crepeHopLength: 512, customized: ['pitch', 'crepeHopLength'] } } }));
   fetchConfig.mockRejectedValue(new Error('offline'));
   fetchPresets.mockRejectedValue(new Error('offline'));
   const view = render(React.createElement(App));
@@ -52,10 +53,27 @@ it('recovers capabilities and presets after reconnect without overwriting voice 
   state.ws.status = 'connected';
   view.rerender(React.createElement(App));
   expect(await screen.findByRole('button', { name: 'Restored preset' })).toBeTruthy();
+  await waitFor(() => expect(JSON.parse(screen.getByTestId('voice').textContent).voice.pitch).toBe(7));
   const observed = JSON.parse(screen.getByTestId('voice').textContent);
   expect(observed.f0Methods.find((method) => method.id === 'pm').available).toBe(true);
   expect(observed.voice.pitch).toBe(7);
   expect(observed.voice.crepeHopLength).toBe(512);
   expect(SAMPLE_RATE).toBe(48000);
   expect(CHUNK_SIZE).toBe(2048);
+});
+
+it('gives each voice its own settings', async () => {
+  const stored = new Map();
+  vi.stubGlobal('localStorage', { getItem: (key) => stored.get(key) ?? null,
+    setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) });
+  localStorage.setItem('ovc_voices_v1', JSON.stringify({ 'other.pth': { voice: { pitch: 5, customized: ['pitch'] } } }));
+  fetchConfig.mockRejectedValue(new Error('offline'));
+  fetchPresets.mockRejectedValue(new Error('offline'));
+  render(React.createElement(App));
+  await waitFor(() => expect(state.ws.connect).toHaveBeenCalled());
+  // mine.pth has nothing saved: it starts from the automatic settings, not other.pth's.
+  await new Promise((resolve) => { setTimeout(resolve, 50); });
+  const observed = JSON.parse(screen.getByTestId('voice').textContent);
+  expect(observed.voice.pitch).toBe(0);
+  expect(observed.voice.customized).toEqual([]);
 });

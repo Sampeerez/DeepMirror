@@ -152,12 +152,23 @@ class TestJobsApi:
         assert response.status_code == 200, response.text
         job = response.json()
         assert job["name"] == "Mi_Voz" and job["epochs"] == 50 and job["state"] == "queued"
+        assert (job["quality"], job["isolate"]) == ("high", True)
+        stray = settings.DATA_DIR / "training" / "copied by hand"
+        stray.mkdir()
+        (stray / "job.json").write_text("{}")
         assert job["audio_seconds"] == pytest.approx(80, abs=0.5) and no_worker == [job["id"]]
         assert [j["id"] for j in client.get("/api/training/jobs").json()] == [job["id"]]
         assert client.post(f"/api/training/jobs/{job['id']}/stop").status_code == 200
         assert (settings.DATA_DIR / "training" / job["id"] / "stop").exists()
         assert client.delete(f"/api/training/jobs/{job['id']}").status_code == 200
         assert client.get(f"/api/training/jobs/{job['id']}").status_code == 404
+
+    def test_quality_and_isolation_can_be_chosen(self, client, no_worker):
+        response = client.post("/api/training/jobs",
+                               data={"name": "rapida", "quality": "standard", "isolate": "false"},
+                               files=[("files", ("a.wav", wav(70), "audio/wav"))])
+        assert response.status_code == 200, response.text
+        assert (response.json()["quality"], response.json()["isolate"]) == ("standard", False)
 
     def test_existing_voice_names_are_protected(self, client, no_worker, settings):
         settings.MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -197,7 +208,7 @@ class TestTrainingPlan:
         plan = plan_training(windows=85, dataset_seconds=300, vram_batch=5)
         assert plan.validation_windows == 7 and plan.crops_per_example == 2
         assert plan.batch_size == 5
-        assert 150 <= plan.epochs <= 1000 and plan.patience_epochs >= 40
+        assert 200 <= plan.epochs <= 1500 and plan.patience_epochs >= 80
 
     def test_epochs_follow_a_step_budget(self):
         from backend.training.plan import plan_training
@@ -205,6 +216,15 @@ class TestTrainingPlan:
         short = plan_training(windows=85, dataset_seconds=300, vram_batch=8)
         long = plan_training(windows=500, dataset_seconds=1800, vram_batch=8)
         assert short.epochs > long.epochs and long.crops_per_example == 1
+
+    def test_high_quality_trains_longer_and_waits_longer(self):
+        from backend.training.plan import plan_training
+
+        # ViejoFraile: ten minutes, batch 3.
+        standard = plan_training(windows=180, dataset_seconds=620, vram_batch=3, quality="standard")
+        high = plan_training(windows=180, dataset_seconds=620, vram_batch=3, quality="high")
+        assert high.epochs > standard.epochs and high.patience_epochs >= 2 * standard.patience_epochs
+        assert high.crops_per_example == 2   # under 20 minutes
 
     def test_explicit_choices_win(self):
         from backend.training.plan import plan_training
@@ -298,3 +318,45 @@ class TestRecordingQuality:
         assert len(warnings) == 4
         assert quality_warnings({"speech_seconds": 400, "clipped_percent": 0.0, "snr_db": 45,
                                  "voiced_percent": 70}) == []
+
+
+# --------------------------------------------------------------------------
+# Voice isolation for training
+# --------------------------------------------------------------------------
+
+
+class TestVoiceIsolation:
+    def test_mel_bands_cover_every_frequency(self):
+        from backend.training.roformer import N_FFT, NUM_BANDS, mel_band_mask
+
+        mask = mel_band_mask()
+        assert mask.shape == (NUM_BANDS, N_FFT // 2 + 1)
+        assert mask.any(axis=0).all() and mask.any(axis=1).all()
+        # The official checkpoint's band split sizes add up to this many (frequency, stereo, complex) inputs.
+        assert int(mask.sum()) * 2 * 2 == 7916
+
+    def test_chunked_separation_reassembles_the_audio(self):
+        from backend.training.roformer import SAMPLE_RATE, separate_vocals
+
+        class PassThrough(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unused = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, audio):
+                return audio
+
+        audio = np.random.default_rng(0).normal(0, 0.1, SAMPLE_RATE * 19).astype(np.float32)
+        steps = []
+        out = separate_vocals(PassThrough(), audio, steps.append)
+        assert out.shape == audio.shape and np.allclose(out, audio, atol=1e-5)
+        assert steps[-1] == 1.0
+
+    def test_without_models_the_audio_is_left_alone(self, tmp_path):
+        from backend.training.isolate import VoiceIsolator
+
+        audio = np.sin(np.linspace(0, 2000, 40000)).astype(np.float32) * 0.3
+        isolator = VoiceIsolator(tmp_path / "missing.ckpt", None, None, torch.device("cpu"))
+        result = isolator(audio, 40000)
+        assert result.background_db is None and not result.separated
+        assert np.array_equal(result.audio, audio) and result.speech_share == 1.0

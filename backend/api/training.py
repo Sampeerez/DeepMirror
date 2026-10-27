@@ -20,6 +20,7 @@ from backend.training.hparams import (
     RECOMMENDED_AUDIO_SECONDS,
 )
 from backend.training.jobs import TrainingError, TrainingJobs
+from backend.training.plan import DEFAULT_QUALITY, QUALITY
 
 router = APIRouter(prefix="/api/training", tags=["training"])
 
@@ -37,6 +38,8 @@ async def training_info(request: Request) -> dict:
         "default_epochs": DEFAULT_EPOCHS,
         "bases": sorted(BASES),
         "default_base": DEFAULT_BASE,
+        "qualities": list(QUALITY),
+        "default_quality": DEFAULT_QUALITY,
         "max_epochs": MAX_EPOCHS,
         "min_audio_seconds": MIN_AUDIO_SECONDS,
         "recommended_audio_seconds": list(RECOMMENDED_AUDIO_SECONDS),
@@ -62,6 +65,8 @@ async def create_job(
     save_every: Annotated[int, Form()] = 25,
     overwrite: Annotated[str | None, Form()] = None,
     base: Annotated[str | None, Form()] = None,
+    quality: Annotated[str | None, Form()] = None,
+    isolate: Annotated[str | None, Form()] = None,
 ) -> dict:
     if batch_size is not None and not 1 <= batch_size <= 32:
         raise HTTPException(status_code=400, detail="Batch size must be between 1 and 32.")
@@ -69,7 +74,9 @@ async def create_job(
         return await _jobs(request).create(name, files, sample_rate, epochs or None, batch_size,
                                            max(1, min(save_every, MAX_EPOCHS)),
                                            (overwrite or "").lower() in {"true", "1", "on", "yes"},
-                                           base if base in BASES else DEFAULT_BASE)
+                                           base if base in BASES else DEFAULT_BASE,
+                                           quality if quality in QUALITY else DEFAULT_QUALITY,
+                                           (isolate or "true").lower() not in {"false", "0", "off", "no"})
     except TrainingError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

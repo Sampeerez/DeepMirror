@@ -27,6 +27,7 @@ from fastapi import UploadFile
 
 from backend.assets import AssetStore
 from backend.config import Settings
+from backend.inference.auto_pitch import F0Stats
 from backend.inference.device import ComputeDevice, select_device
 from backend.inference.hubert import HubertModel, load_hubert
 from backend.inference.onnx_decoder import onnx_decoder
@@ -34,6 +35,7 @@ from backend.inference.pipeline import ConversionSettings, VoiceConverter
 from backend.inference.pitch import DEFAULT_F0_METHOD, PitchExtractor, method_capabilities
 from backend.inference.retrieval import FeatureIndex, IndexFormatError
 from backend.inference.voice_model import VoiceModel
+from backend.voice_profile import VoiceProfileStore
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,8 @@ class ModelManager:
         self._activation_lock = threading.Lock()
         self._loading: dict | None = None
         self._state_path = Path(settings.DATA_DIR) / "state.json"
+        # The speaker's recorded profile and the registers of downloaded voices.
+        self.profiles = VoiceProfileStore(Path(settings.DATA_DIR))
 
     # --- Shared engine ------------------------------------------------------
 
@@ -182,6 +186,38 @@ class ModelManager:
 
     def remember_pitch_shift(self, voice_name: str, semitones: float) -> None:
         self._pitch_memory[voice_name] = semitones
+
+    def estimate_f0(self, audio16: np.ndarray) -> np.ndarray:
+        """Pitch track (Hz, 100 frames/s) of 16 kHz ``audio16`` with the best tracker available."""
+        converter = self._converter
+        settings = self.default_conversion()
+        method = "rmvpe" if self.assets.ready("rmvpe") else settings.f0_method
+        settings = settings.with_payload({"f0_method": method})
+        if converter is not None:
+            return converter.estimate_f0(audio16, settings)
+        with self._lock:
+            _, pitch = self._engine()
+        return pitch.estimate(method, audio16, len(audio16) // 160, filter_radius=settings.filter_radius,
+                              rmvpe_threshold=settings.rmvpe_threshold)
+
+    def set_reference(self, name: str, stats: F0Stats | None, voiced_seconds: float = 0.0) -> None:
+        """Store (or with None forget) the register of a downloaded voice; applies at once if it is active."""
+        path = self._path_of(name)
+        if stats is None:
+            self.profiles.delete_reference(path.name)
+        else:
+            self.profiles.save_reference(path.name, stats, voiced_seconds)
+        converter = self._converter
+        details = self._details.get(path.name)
+        if converter is None or converter.voice.name != path.name or details is None:
+            return
+        if details.get("f0_source") == "training":
+            return
+        reference = self.profiles.reference(path.name)
+        converter.voice.f0_stats = reference
+        details.update(f0_stats=reference.to_dict() if reference else None,
+                       f0_source="reference" if reference else None)
+        self._pitch_memory.pop(path.name, None)
 
     # --- Library ------------------------------------------------------------
 
@@ -303,6 +339,10 @@ class ModelManager:
         compute = self.compute
         voice = VoiceModel.load(path, compute.device, compute.half,
                                 allow_unsafe=self.settings.RVC_ALLOW_UNSAFE_CHECKPOINTS)
+        f0_source = "training" if voice.f0_stats is not None else None
+        if voice.use_pitch and voice.f0_stats is None:
+            voice.f0_stats = self.profiles.reference(path.name)
+            f0_source = "reference" if voice.f0_stats is not None else None
         index = None
         index_path = self.find_index(path.name)
         if index_path is not None:
@@ -320,7 +360,7 @@ class ModelManager:
         self._loading = {"name": path.name, "stage": "warming up"}
         warm = self._warm_up(converter)
         details = {
-            **voice.describe(), **compute.describe(),
+            **voice.describe(), **compute.describe(), "f0_source": f0_source,
             "index": index_path.name if index is not None and index_path else None,
             "index_vectors": index.size if index is not None else 0,
             "warmup_ms": warm.get(self.default_f0_method()),

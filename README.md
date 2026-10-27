@@ -40,9 +40,11 @@ OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 - **Live conversion** of RVC v1/v2 voices, with 1 s of past and 150 ms of future context per chunk
 - **Only your voice is converted**: room noise, keyboard and breaths are removed before the model hears them, and nothing of your microphone is ever played unconverted
 - **Calls**: a virtual microphone for Discord, Teams or Meet (VB-CABLE on Windows and macOS, PipeWire on Linux)
-- **Pitch**: automatic register matching for voices trained here, expressiveness, optional pitch correction, formant shift
+- **My voice**: read about 90 s of guided lines (Spanish or English) once; every voice is then tuned to your pitch and range when you activate it
+- **Pitch**: automatic register matching (voices trained here know their register; a downloaded voice learns it from a short clip of the original), expressiveness, optional pitch correction, formant shift
+- **Settings per voice**: each voice keeps its own settings and effects; **Back to automatic** drops them
 - **Effects** (13), presets, an A/B switch (<kbd>B</kbd>) and a recorder (<kbd>R</kbd>)
-- **Converter** for whole files, and **Train** to make a voice from 5+ minutes of one speaker
+- **Converter** for whole files, and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
 ## Models used
@@ -55,6 +57,7 @@ Chosen by measuring them on this project's own tests, not by date.
 | Pitch | RMVPE | Most accurate here: 92% of frames within 50 cents and 0–0.2% octave errors on sung and laughed material, ahead of FCPE (89–91%) and SwiftF0 (86%, 2.5% octave errors). FCPE is the lighter option |
 | Noise | DeepFilterNet3, official weights, exported here to one streaming ONNX graph | Least voice distortion (SI-SDR 17–20 dB vs 12 dB for DPDFNet 2026) at 0.07 s of CPU per second of audio |
 | Speech detection | Silero VAD v6.2.3 | Latest release |
+| Voice separation (training) | Mel-Band RoFormer, vocals model by Kimberley Jensen | Among the best open vocal separators (about 12.6 dB SDR); here music under speech came out 59 dB lower with the voice within 0.5 dB |
 | Training base | TITAN Medium | Against the official RVC v2 base, same data and epochs: 7% closer timbre when converting another speaker and fewer notes off in singing (3.2% vs 4.2%) and laughter (8.5% vs 12.1%) |
 
 ## Train a voice
@@ -65,7 +68,16 @@ built, and the voice is fine-tuned from TITAN Medium (RVC v2 tuned on expressive
 official RVC v2 base is also available). A held-out part of the recordings
 picks the best epoch, so the voice in **Models** never gets worse if training over-fits.
 
-5 minutes of clean, dry speech trains a good voice; 10–30 minutes is better. Training runs in
+**Voice only** (on by default) keeps nothing but the voice: when there is music or effects
+under it, Mel-Band RoFormer separates the voice first; DeepFilterNet3 then removes the noise
+left and Silero VAD drops everything that is not speech. The training status reports how loud
+the background was.
+
+**Training quality**: *High* (default) runs about 16 000 optimiser steps with more patience
+before stopping early; *Standard* about 7 000. Under 20 minutes of audio each recording is
+cropped twice per epoch.
+
+5 minutes of dry speech trains a good voice; 10–30 minutes is better. Training runs in
 its own process; live conversion is slower meanwhile.
 
 ## How live conversion works
@@ -132,6 +144,7 @@ Sioaeko (MIT), since rewritten.
 | [RMVPE](https://github.com/Dream-High/RMVPE) | Pitch tracker | MIT |
 | [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | Noise removal (re-implemented) | MIT / Apache-2.0 |
 | [Silero VAD](https://github.com/snakers4/silero-vad) | Speech detection | MIT |
+| [Mel-Band RoFormer](https://github.com/lucidrains/BS-RoFormer), [vocals weights](https://huggingface.co/KimberleyJSN/melbandroformer) | Voice separation for training (re-implemented) | MIT |
 | [TITAN](https://huggingface.co/blaise-tk/TITAN) | Training base | Apache-2.0 |
 | [Applio](https://github.com/IAHispano/Applio) | Ideas (pitch correction) | MIT |
 | [VB-CABLE](https://vb-audio.com/Cable/) | Virtual microphone, installed by you | Donationware |

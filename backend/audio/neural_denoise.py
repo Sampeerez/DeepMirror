@@ -156,3 +156,10 @@ class NeuralDenoiser:
         if len(cleaned) >= length:
             return cleaned[-length:].astype(np.float32, copy=False)
         return np.concatenate([np.zeros(length - len(cleaned), np.float32), cleaned])
+
+
+def denoise_offline(model_path: Path, audio48: np.ndarray) -> np.ndarray:
+    """A whole 48 kHz recording through the same filter (training data), aligned with the input."""
+    denoiser = NeuralDenoiser(model_path, RATE)
+    padded = np.concatenate([np.asarray(audio48, np.float32), np.zeros(DELAY + HOP, np.float32)])
+    return denoiser._run(padded)[DELAY:DELAY + len(audio48)]

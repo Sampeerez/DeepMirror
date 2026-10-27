@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { AudioWaveform, Boxes, FileDown, GraduationCap, Mic2, ScrollText } from 'lucide-react';
+import { AudioWaveform, Boxes, FileDown, GraduationCap, Mic2, ScrollText, UserRound } from 'lucide-react';
 import { APP_NAME, APP_TAGLINE } from '../lib/brand';
 
 // Ids match lib/navigation TAB_IDS; the matching panels in App carry
@@ -14,6 +14,11 @@ const TABS = [
     id: 'models',
     label: 'Models',
     Icon: Boxes,
+  },
+  {
+    id: 'voice',
+    label: 'My voice',
+    Icon: UserRound,
   },
   {
     id: 'training',

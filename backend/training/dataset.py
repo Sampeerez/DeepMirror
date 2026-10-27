@@ -21,6 +21,7 @@ from backend.audio.resampling import resample
 from backend.inference.hubert import HubertModel
 from backend.inference.pitch import to_rvc_pitch
 from backend.inference.rmvpe import Rmvpe
+from backend.training.isolate import VoiceIsolator
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,10 @@ def quality_warnings(report: dict) -> list[str]:
     snr = report.get("snr_db")
     if snr is not None and snr < 25:
         warnings.append("There is noticeable background noise. A quieter room gives a cleaner voice.")
+    background = report.get("background_db")
+    if report.get("background_removed") and background is not None and background > -15:
+        warnings.append(f"There was strong music or noise under the voice ({background:.0f} dB). It was removed, "
+                        "but a clean recording still trains a better voice.")
     voiced = report.get("voiced_percent")
     if voiced is not None and voiced < 35:
         warnings.append("Little voiced speech was found. Use spoken or sung voice, without music.")
@@ -150,14 +155,27 @@ def normalise(piece: np.ndarray) -> np.ndarray | None:
 
 
 def prepare_segments(sources: list[Path], rate: int, progress: Progress | None = None,
-                     report: dict | None = None) -> list[Segment]:
-    """Clean, slice and normalise ``sources``; ``report`` (if given) receives recording facts."""
+                     report: dict | None = None, isolate: VoiceIsolator | None = None) -> list[Segment]:
+    """Clean, slice and normalise ``sources``; ``report`` (if given) receives recording facts.
+
+    With ``isolate`` only the voice of each recording is kept (music, noise and
+    non-speech removed) before slicing.
+    """
     high_pass = signal.butter(N=5, Wn=48, btype="high", fs=rate, output="sos")
     segments: list[Segment] = []
     assessments = []
+    isolations = []
     for number, path in enumerate(sources):
         audio, source_rate = load_mono(path)
         assessments.append((len(audio) / source_rate, assess_recording(audio, source_rate)))
+        if isolate is not None:
+            def step(p: float, number: int = number) -> None:
+                if progress:
+                    progress((number + 0.9 * p) / len(sources))
+
+            result = isolate(audio, source_rate, step)
+            isolations.append((len(audio) / source_rate, result))
+            audio = result.audio
         audio = np.asarray(signal.sosfilt(high_pass, resample(audio, source_rate, rate)), dtype=np.float32)
         audio = normalise_loudness(audio, rate)
         for chunk in split_on_pauses(audio, rate):
@@ -177,6 +195,13 @@ def prepare_segments(sources: list[Path], rate: int, progress: Progress | None =
         report.update(source_seconds=round(total, 1), clipped_percent=weighted("clipped_percent"),
                       noise_floor_db=weighted("noise_floor_db"), snr_db=weighted("snr_db"),
                       speech_seconds=round(_unique_seconds(segments, rate), 1))
+        if isolations:
+            measured = [(sec, r.background_db) for sec, r in isolations if r.background_db is not None]
+            report.update(
+                isolated=True,
+                background_db=round(sum(s * b for s, b in measured) / sum(s for s, _ in measured), 1)
+                if measured else None,
+                background_removed=any(r.separated for _, r in isolations))
     logger.info("Prepared %d segments (%.1f min) from %d file(s)", len(segments),
                 sum(len(s.audio) for s in segments) / rate / 60, len(sources))
     return segments

@@ -21,12 +21,16 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass, field
 
-TARGET_STEPS = 7000
-MIN_EPOCHS = 150
-MAX_AUTO_EPOCHS = 1000
+# Quality presets: optimiser-step budget, minimum epochs, patience (epochs, and share of the plan).
+QUALITY = {
+    "standard": {"steps": 7000, "min_epochs": 150, "patience": 40, "patience_share": 0.15},
+    "high": {"steps": 16000, "min_epochs": 200, "patience": 80, "patience_share": 0.25},
+}
+DEFAULT_QUALITY = "high"
+MAX_AUTO_EPOCHS = 1500
+SHORT_DATASET_SECONDS = 1200   # below 20 minutes each window is cropped twice per epoch
 MIN_STEPS_PER_EPOCH = 12
 MAX_AUTO_BATCH = 8
-SHORT_DATASET_SECONDS = 600
 VALIDATION_SHARE = 0.08
 VALIDATION_RANGE = (4, 16)
 MIN_WINDOWS_FOR_VALIDATION = 20
@@ -53,8 +57,10 @@ def validation_count(windows: int) -> int:
 
 
 def plan_training(windows: int, dataset_seconds: float, vram_batch: int, *,
-                  batch_size: int | None = None, epochs: int | None = None) -> TrainingPlan:
+                  batch_size: int | None = None, epochs: int | None = None,
+                  quality: str = DEFAULT_QUALITY) -> TrainingPlan:
     """Plan for ``windows`` training windows; explicit values override the automatic ones."""
+    preset = QUALITY.get(quality, QUALITY[DEFAULT_QUALITY])
     held_out = validation_count(windows)
     train_windows = max(1, windows - held_out)
     crops = 2 if dataset_seconds < SHORT_DATASET_SECONDS else 1
@@ -63,9 +69,9 @@ def plan_training(windows: int, dataset_seconds: float, vram_batch: int, *,
     batch_size = max(1, min(batch_size, train_windows * crops))
     steps_per_epoch = math.ceil(train_windows * crops / batch_size)
     if epochs is None:
-        epochs = int(min(MAX_AUTO_EPOCHS, max(MIN_EPOCHS, math.ceil(TARGET_STEPS / steps_per_epoch))))
+        epochs = int(min(MAX_AUTO_EPOCHS, max(preset["min_epochs"], math.ceil(preset["steps"] / steps_per_epoch))))
     eval_every = 5 if epochs >= 100 else 2
-    patience = max(40, round(0.15 * epochs))
+    patience = max(preset["patience"], round(preset["patience_share"] * epochs))
     return TrainingPlan(batch_size, epochs, crops, eval_every, patience, held_out)
 
 

@@ -79,13 +79,15 @@ AUTO_EXPRESSIVENESS_RANGE = (0.8, 1.8)
 class SpeakerProfile:
     """The speaker's pitch, learnt from the first seconds of speech and kept current.
 
-    It can start from a profile saved by the browser (``seed``), so a new
-    session sounds right from the first word; the speaker's own speech takes
-    over as soon as there is a second of it.
+    It can start from known statistics (``seed``), so a new session sounds
+    right from the first word; the speaker's own speech takes over as soon as
+    there is a second of it, unless ``fixed`` (a recorded voice profile, which
+    a shout or a laugh must not move).
     """
 
-    def __init__(self, seed: F0Stats | None = None) -> None:
+    def __init__(self, seed: F0Stats | None = None, fixed: bool = False) -> None:
         self.seed = seed
+        self.fixed = fixed and seed is not None
         self._log_f0: deque[float] = deque(maxlen=int(PROFILE_SECONDS * FRAMES_PER_SECOND))
         self.voiced_frames = 0
 
@@ -99,7 +101,7 @@ class SpeakerProfile:
 
     @property
     def stats(self) -> F0Stats | None:
-        if len(self._log_f0) < MIN_VOICED_SECONDS * FRAMES_PER_SECOND:
+        if self.fixed or len(self._log_f0) < MIN_VOICED_SECONDS * FRAMES_PER_SECOND:
             return self.seed
         values = np.exp(np.fromiter(self._log_f0, dtype=np.float64))
         return compute_f0_stats([values])
@@ -107,7 +109,7 @@ class SpeakerProfile:
     @property
     def calibration(self) -> float:
         """0..1: how much of the calibration speech has been heard (1 with a saved profile)."""
-        if self.seed is not None and self.voiced_frames == 0:
+        if self.seed is not None and (self.fixed or self.voiced_frames == 0):
             return 1.0
         return min(1.0, self.voiced_frames / (CALIBRATED_SECONDS * FRAMES_PER_SECOND))
 
@@ -115,7 +117,7 @@ class SpeakerProfile:
         stats = self.stats
         if stats is None:
             return None
-        return {**stats.to_dict(), "calibration": round(self.calibration, 2),
+        return {**stats.to_dict(), "calibration": round(self.calibration, 2), "from_profile": self.fixed,
                 "range_semitones": round(semitones_between(stats.p10_hz, stats.p90_hz) / 2, 1)}
 
 

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { STORAGE_KEYS, writeStored } from '../lib/storage';
-import { streamSettingsPayload } from '../lib/voice';
+import { storeVoiceFor, streamSettingsPayload } from '../lib/voice';
 
 // Slider drags produce many changes per second; settings go out (and to
 // storage) once the user pauses for this long.
@@ -11,10 +10,12 @@ const SETTINGS_DEBOUNCE_MS = 140;
  * full update while editing, the bypass toggle immediately (A/B must feel
  * instant), and everything again whenever a connection opens.
  */
-export default function useSettingsSync({ voice, effects, bypass, runtimeConfig, wsHook }) {
+export default function useSettingsSync({ voice, effects, bypass, runtimeConfig, wsHook, activeModel }) {
   const { status: wsStatus, sendSettings, setOnOpen } = wsHook;
   const payloadRef = useRef(null);
   const statusRef = useRef(wsStatus);
+  const modelRef = useRef(activeModel);
+  useEffect(() => { modelRef.current = activeModel; }, [activeModel]);
 
   useEffect(() => {
     payloadRef.current = streamSettingsPayload(voice, effects, bypass, runtimeConfig);
@@ -23,9 +24,9 @@ export default function useSettingsSync({ voice, effects, bypass, runtimeConfig,
   useEffect(() => { statusRef.current = wsStatus; }, [wsStatus]);
 
   useEffect(() => {
+    const model = modelRef.current;   // the voice these settings belong to
     const timer = setTimeout(() => {
-      writeStored(STORAGE_KEYS.voice, voice);
-      writeStored(STORAGE_KEYS.effects, effects);
+      storeVoiceFor(model, voice, effects);
       if (statusRef.current === 'connected') sendSettings(payloadRef.current);
     }, SETTINGS_DEBOUNCE_MS);
     return () => clearTimeout(timer);

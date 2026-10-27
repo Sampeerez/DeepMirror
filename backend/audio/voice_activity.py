@@ -150,8 +150,9 @@ def load_vad(model_path: Path | None, threshold_db: Callable[[], float]) -> Sile
 class SpeechTimeline:
     """Speech decisions on the absolute 16 kHz timeline of one stream."""
 
-    def __init__(self, detector: SileroVad | LevelVad) -> None:
+    def __init__(self, detector: SileroVad | LevelVad, history_seconds: float = HISTORY_SECONDS) -> None:
         self.detector = detector
+        self.history_seconds = history_seconds
         self.reset()
 
     @property
@@ -196,7 +197,7 @@ class SpeechTimeline:
             fresh = np.where(vocal, np.maximum(fresh, VOCAL_PROBABILITY), fresh).astype(np.float32)
         self._pending = audio[count * FRAME:]
         self._probabilities = np.concatenate([self._probabilities, fresh])
-        keep = int(HISTORY_SECONDS * RATE / FRAME)
+        keep = int(self.history_seconds * RATE / FRAME)
         if len(self._probabilities) > keep:
             drop = len(self._probabilities) - keep
             self._probabilities = self._probabilities[drop:]

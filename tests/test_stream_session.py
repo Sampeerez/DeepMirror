@@ -192,6 +192,25 @@ class TestAutoPitch:
         assert fake_voice.last_settings.pitch_shift == 0.0
         assert session.status()["auto_pitch_available"] is False
 
+    def test_a_recorded_profile_sets_the_shift_from_the_first_chunk(self, session, trained_voice, manager):
+        from backend.voice_profile import analyse
+
+        audio = (0.1 * np.sin(2 * np.pi * 110 * np.arange(16000 * 12) / 16000)).astype(np.float32)
+        manager.profiles.save(audio, analyse(audio, np.full(1200, 110.0)), "es")
+        trained_voice.f0_hz = 160.0   # a shout: the recorded profile, not this, sets the register
+        session.process(loud(0))
+        assert session.auto_pitch_shift == 12.0
+        for seed in range(1, 30):
+            session.process(loud(seed))
+        assert session.auto_pitch_shift == 12.0 and session.status()["speaker_profile"]["from_profile"] is True
+
+        manager.profiles.delete()     # without the profile it learns from the speech again
+        session.apply({"recalibrate": True})
+        for seed in range(30):
+            session.process(loud(seed))
+        learnt = session.status()["speaker_profile"]
+        assert learnt["from_profile"] is False and learnt["median_hz"] == pytest.approx(160.0)
+
 
 class TestSamples:
     def test_a_take_saves_the_raw_microphone_and_the_output(self, session, settings):

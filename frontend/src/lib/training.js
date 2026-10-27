@@ -36,7 +36,7 @@ export function datasetQuality(seconds, info) {
   const minimum = info?.min_audio_seconds ?? 60;
   const [low, high] = info?.recommended_audio_seconds ?? [300, 1800];
   const maximum = info?.max_audio_seconds ?? 3600;
-  if (!seconds) return { tone: 'muted', text: 'Add clean recordings of one voice.' };
+  if (!seconds) return { tone: 'muted', text: 'Add recordings of one voice.' };
   if (seconds < minimum) return { tone: 'danger', text: `Too short: at least ${formatDuration(minimum)} is needed.` };
   if (seconds > maximum) return { tone: 'danger', text: `Too long: use at most ${formatDuration(maximum)}.` };
   if (seconds < low) return { tone: 'warn', text: `Usable. ${formatDuration(low)} or more gives a much steadier voice.` };

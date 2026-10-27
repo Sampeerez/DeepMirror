@@ -116,7 +116,9 @@ export function uploadModel(file, onProgress) {
 export const fetchTrainingInfo = () => request('/training/info', { timeoutMs: 15000 });
 export const fetchTrainingJobs = () => request('/training/jobs', { timeoutMs: 15000 });
 
-export function createTrainingJob({ name, files, sampleRate, epochs, batchSize, saveEvery, overwrite, base }, onProgress) {
+export function createTrainingJob({
+  name, files, sampleRate, epochs, batchSize, saveEvery, overwrite, base, quality, isolate,
+}, onProgress) {
   const formData = new FormData();
   formData.append('name', name);
   for (const audio of files) formData.append('files', audio);
@@ -127,6 +129,8 @@ export function createTrainingJob({ name, files, sampleRate, epochs, batchSize, 
   if (saveEvery) formData.append('save_every', String(saveEvery));
   if (overwrite) formData.append('overwrite', 'true');
   if (base) formData.append('base', base);
+  if (quality) formData.append('quality', quality);
+  if (isolate === false) formData.append('isolate', 'false');
   return postFormWithProgress('/training/jobs', formData, onProgress);
 }
 
@@ -260,6 +264,23 @@ export function isAbortError(err) {
 }
 
 // --- Virtual microphone (calls) and server logs -----------------------------
+
+export const fetchVoiceProfile = () => request('/profile/', { timeoutMs: 15000 });
+export function saveVoiceProfile(wavBlob, language) {
+  const formData = new FormData();
+  formData.append('file', wavBlob, 'my-voice.wav');
+  formData.append('language', language);
+  return request('/profile/', { method: 'POST', body: formData });
+}
+export const deleteVoiceProfile = () => request('/profile/', { method: 'DELETE' });
+export function saveVoiceReference(modelName, file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request(`/profile/reference/${encodeURIComponent(modelName)}`, { method: 'POST', body: formData });
+}
+export const deleteVoiceReference = (modelName) => request(`/profile/reference/${encodeURIComponent(modelName)}`, {
+  method: 'DELETE',
+});
 
 export const fetchVirtualMic = () => request('/virtual-mic');
 export const installVirtualMic = () => request('/virtual-mic/install', { method: 'POST' });

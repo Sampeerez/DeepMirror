@@ -34,7 +34,7 @@ from backend.audio.protocol import decode_frame, encode_frame
 from backend.audio.streaming import RealtimeVoiceStream, StreamCleanup, StreamTiming
 from backend.audio.voice_activity import load_vad
 from backend.config import Settings
-from backend.inference.auto_pitch import AutoPitch, F0Stats, SpeakerProfile, auto_expressiveness
+from backend.inference.auto_pitch import AutoPitch, SpeakerProfile, auto_expressiveness
 from backend.inference.pipeline import ConversionSettings, VoiceConverter
 from backend.model_manager import ModelManager
 from backend.security import is_origin_allowed
@@ -106,8 +106,9 @@ class StreamSession:
         # "auto": follow the speaker's register onto the voice's (needs voice F0 stats).
         self.pitch_mode = "auto"
         self._auto_pitch: AutoPitch | None = None
-        # The speaker's own pitch, learnt from the first seconds of speech (or a saved profile).
+        # The speaker's own pitch: the recorded voice profile, or learnt from the first seconds of speech.
         self.profile = SpeakerProfile()
+        self._profile_revision = -1
         self._auto_pitch_voice: str | None = None
         self.effects: dict = {}
         self.bypass = False
@@ -156,11 +157,7 @@ class StreamSession:
         if payload.get("pitch_mode") in ("auto", "manual"):
             self.pitch_mode = payload["pitch_mode"]
         if payload.get("recalibrate") is True:
-            self.profile = SpeakerProfile()
-            self._auto_pitch = None
-        elif isinstance(payload.get("speaker_profile"), dict) and self.profile.voiced_frames == 0:
-            self.profile = SpeakerProfile(F0Stats.from_dict(payload["speaker_profile"]))
-            self._auto_pitch = None
+            self._profile_revision = -1     # back to the recorded profile, or learn again without one
         if isinstance(payload.get("bypass"), bool):
             self.bypass = payload["bypass"]
         if isinstance(payload.get("client_health"), dict):
@@ -257,18 +254,33 @@ class StreamSession:
 
     # --- Processing (runs in a worker thread) -------------------------------
 
+    def _sync_profile(self) -> None:
+        """Follow the recorded voice profile and voice registers when they change."""
+        profiles = self.manager.profiles
+        if profiles.revision == self._profile_revision:
+            return
+        self._profile_revision = profiles.revision
+        recorded = profiles.stats()
+        self.profile = SpeakerProfile(recorded, fixed=True) if recorded is not None else SpeakerProfile()
+        self._auto_pitch = None
+
     def _auto_pitch_for(self, converter: VoiceConverter) -> AutoPitch | None:
         """The register tracker for the active voice, when automatic pitch applies."""
+        self._sync_profile()
         stats = converter.voice.f0_stats
         if self.pitch_mode != "auto" or stats is None:
             return None
-        if self._auto_pitch is None or self._auto_pitch_voice != converter.voice.name:
-            self._auto_pitch = AutoPitch(stats, self.profile, self.manager.remembered_pitch_shift(converter.voice.name))
+        if (self._auto_pitch is None or self._auto_pitch_voice != converter.voice.name
+                or self._auto_pitch.target is not stats):
+            # With a recorded profile the shift is known at once; otherwise start where the last stream ended.
+            initial = None if self.profile.fixed else self.manager.remembered_pitch_shift(converter.voice.name)
+            self._auto_pitch = AutoPitch(stats, self.profile, initial)
             self._auto_pitch_voice = converter.voice.name
         return self._auto_pitch
 
     def _render_settings(self, converter: VoiceConverter) -> ConversionSettings:
         settings = self.conversion
+        self._sync_profile()
         speaker = self.profile.stats
         if speaker is not None:
             settings = replace(settings, pitch_center_hz=speaker.median_hz)
@@ -307,6 +319,7 @@ class StreamSession:
 
             def observe_f0(f0: np.ndarray) -> None:
                 end = len(f0) - ahead_frames
+                self._sync_profile()
                 pause = self.profile.observe(f0[max(0, end - new_frames):max(0, end)])
                 auto = self._auto_pitch_for(converter)
                 if auto is None:

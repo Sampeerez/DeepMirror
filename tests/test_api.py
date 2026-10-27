@@ -153,3 +153,44 @@ class TestModelExport:
     def test_unknown_or_path_like_names_are_404(self, client):
         assert client.get("/api/models/missing.pth/download").status_code == 404
         assert client.get("/api/models/..%2F..%2Fpyproject.toml/download").status_code == 404
+
+
+class TestVoiceProfile:
+    def reading(self, seconds: float = 40.0, hz: float = 110.0) -> bytes:
+        buffer = io.BytesIO()
+        t = np.arange(int(seconds * 16000)) / 16000
+        sf.write(buffer, (0.2 * np.sin(2 * np.pi * hz * t)).astype(np.float32), 16000, format="WAV")
+        return buffer.getvalue()
+
+    def test_the_profile_calibrates_the_active_voice(self, client, fake_voice):
+        from backend.inference.auto_pitch import F0Stats
+
+        fake_voice.voice.f0_stats = F0Stats(220.0, 180.0, 280.0)
+        fake_voice.f0_hz = 110.0
+        assert client.get("/api/profile/").json()["profile"] is None
+        response = client.post("/api/profile/", files={"file": ("me.wav", self.reading(), "audio/wav")},
+                               data={"language": "en"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["profile"]["median_hz"] == 110.0 and body["profile"]["language"] == "en"
+        assert body["profile"]["register"] == "deep"
+        assert body["voice"]["calibration"]["pitch_shift"] == 12.0
+        assert client.delete("/api/profile/").json()["profile"] is None
+
+    def test_too_little_voice_is_refused(self, client, fake_voice):
+        fake_voice.f0_hz = 110.0
+        response = client.post("/api/profile/", files={"file": ("me.wav", self.reading(3.0), "audio/wav")})
+        assert response.status_code == 400 and "voice" in response.json()["detail"]
+
+    def test_a_reference_clip_gives_a_downloaded_voice_its_register(self, client, fake_voice, settings):
+        (settings.MODELS_DIR / "voice.pth").write_bytes(b"x")
+        fake_voice.f0_hz = 200.0
+        response = client.post("/api/profile/reference/voice.pth",
+                               files={"file": ("clip.wav", self.reading(10.0), "audio/wav")})
+        assert response.status_code == 200, response.text
+        store = client.app.state.model_manager.profiles
+        assert store.reference("voice.pth").median_hz == 200.0
+        assert client.delete("/api/profile/reference/voice.pth").status_code == 200
+        assert store.reference("voice.pth") is None
+        assert client.post("/api/profile/reference/missing.pth",
+                           files={"file": ("clip.wav", self.reading(10.0), "audio/wav")}).status_code == 404

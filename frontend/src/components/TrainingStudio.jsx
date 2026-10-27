@@ -154,6 +154,8 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
   const [batchSize, setBatchSize] = useState('');
   const [saveEvery, setSaveEvery] = useState(25);
   const [base, setBase] = useState(null);
+  const [trainingQuality, setTrainingQuality] = useState('high');
+  const [isolate, setIsolate] = useState(true);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -206,7 +208,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
     try {
       await createTrainingJob({
         name, files: files.map((item) => item.file), sampleRate, epochs: autoPlan ? null : epochs,
-        batchSize: !autoPlan && batchSize ? Number(batchSize) : null, saveEvery, base,
+        batchSize: !autoPlan && batchSize ? Number(batchSize) : null, saveEvery, base, quality: trainingQuality, isolate,
       }, setUploadProgress);
       setFiles([]);
       setNotice('Training started. The studio is slower while the GPU trains.');
@@ -285,7 +287,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           <Upload className="mx-auto mb-2 h-7 w-7 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
           <p className="text-sm font-medium text-fg-secondary">Drop recordings or click to choose</p>
           <p className="mt-1 text-xs text-fg-faint">
-            One speaker, no music or reverb. 5 min or more; 10–30 min is best.
+            One speaker; music and noise are removed. 5 min or more; 10–30 min is best.
           </p>
         </div>
 
@@ -337,6 +339,22 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             hint={autoPlan ? 'Fits your GPU memory.' : 'Empty = automatic.'}>
             <input id="training-batch" type="number" min={1} max={32} className={inputClass} value={autoPlan ? '' : batchSize}
               disabled={autoPlan} onChange={(event) => setBatchSize(event.target.value)} placeholder="Auto" />
+          </Field>
+          <Field label="Training quality" htmlFor="training-quality"
+            hint={trainingQuality === 'high' ? 'Several hours on a mid-range GPU; the best epoch is kept.' : 'Faster.'}>
+            <select id="training-quality" className={`native-select-safe ${inputClass}`} value={trainingQuality}
+              onChange={(event) => setTrainingQuality(event.target.value)}>
+              <option value="high">High (recommended)</option>
+              <option value="standard">Standard</option>
+            </select>
+          </Field>
+          <Field label="Voice only" htmlFor="training-isolate"
+            hint="Removes music, noise and other sounds before training.">
+            <label className="flex h-9 items-center gap-2 text-xs text-fg-secondary">
+              <input id="training-isolate" type="checkbox" checked={isolate}
+                onChange={(event) => setIsolate(event.target.checked)} />
+              Keep only the voice (recommended)
+            </label>
           </Field>
           <Field label="Base model" htmlFor="training-base" hint="TITAN is tuned on expressive speech.">
             <select id="training-base" className={`native-select-safe ${inputClass}`} value={base || 'official'}

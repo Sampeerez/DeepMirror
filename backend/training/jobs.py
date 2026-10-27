@@ -127,14 +127,16 @@ class TrainingJobs:
             self._running_id()
         jobs = []
         for directory in self.root.iterdir():
-            if (directory / "job.json").is_file():
+            # Anything else in the folder (copied by hand, half deleted) is not a job of ours.
+            if _JOB_ID.fullmatch(directory.name) and (directory / "job.json").is_file():
                 jobs.append(self.describe(directory.name))
         return sorted(jobs, key=lambda job: job.get("created_at", 0), reverse=True)
 
     # --- Lifecycle ----------------------------------------------------------
 
     async def create(self, name: str, files: list[UploadFile], sample_rate: int, epochs: int | None,
-                     batch_size: int | None, save_every: int, overwrite: bool, base: str = DEFAULT_BASE) -> dict:
+                     batch_size: int | None, save_every: int, overwrite: bool, base: str = DEFAULT_BASE,
+                     quality: str = "high", isolate: bool = True) -> dict:
         model_name = Path(sanitize_filename(name)).stem
         if not model_name:
             raise TrainingError("Give the voice a name.")
@@ -183,7 +185,8 @@ class TrainingJobs:
             raise
 
         spec = {"name": model_name, "sample_rate": sample_rate, "epochs": epochs, "batch_size": batch_size,
-                "save_every": save_every, "base": base, "created_at": time.time(),
+                "save_every": save_every, "base": base, "quality": quality, "isolate": isolate,
+                "created_at": time.time(),
                 "audio_seconds": round(total_seconds, 1),
                 "files": [upload.filename for upload in files],
                 # The worker is a separate process: hand it this server's locations.
