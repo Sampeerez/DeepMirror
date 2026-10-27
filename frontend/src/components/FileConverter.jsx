@@ -1,6 +1,6 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
 import { AudioLines, Download, FileAudio, LoaderCircle, X } from 'lucide-react';
-import { convertFile, isAbortError } from '../lib/api';
+import { convertFile, fetchModels, isAbortError } from '../lib/api';
 import { countActiveEffects } from '../lib/effects';
 import { FALLBACK_F0_METHODS, findF0Method, groupedMethods } from '../lib/f0Methods';
 import { formatBytes } from '../lib/format';
@@ -8,11 +8,15 @@ import Button from './Button';
 
 const ACCEPTED = '.wav,.mp3,.flac,.ogg,.m4a,.aiff';
 
-// Offline conversion: renders an uploaded audio file through the active
-// model + current studio settings on the server, returns a WAV.
-function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_METHODS }) {
+const EFFECTS_ONLY = '';
+
+// Offline conversion: renders an uploaded audio file through any voice in
+// Models (the active one by default) + current studio settings, returns a WAV.
+function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_METHODS, active = true }) {
   const [file, setFile] = useState(null);
-  const [useModel, setUseModel] = useState(true);
+  const [voices, setVoices] = useState([]);
+  // null: follow the active voice; EFFECTS_ONLY or a model name once the user picks.
+  const [chosenVoice, setChosenVoice] = useState(null);
   const [converting, setConverting] = useState(false);
   const [result, setResult] = useState(null); // {url, name, size, downloaded}
   const [error, setError] = useState(null);
@@ -28,6 +32,22 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
     resultUrlRef.current = result?.url || null;
   }, [result]);
 
+  // The voice list is read whenever the tab is shown, so new and deleted voices appear.
+  useEffect(() => {
+    if (!active) return undefined;
+    let cancelled = false;
+    fetchModels()
+      .then((list) => {
+        if (cancelled) return;
+        setVoices((Array.isArray(list) ? list : []).filter((item) => item?.type !== 'index').map((item) => item.name));
+      })
+      .catch(() => { if (!cancelled) setVoices([]); });
+    return () => { cancelled = true; };
+  }, [active]);
+
+  const processWith = chosenVoice !== null && (chosenVoice === EFFECTS_ONLY || voices.includes(chosenVoice))
+    ? chosenVoice
+    : (activeModel || EFFECTS_ONLY);
   const fxCount = countActiveEffects(effects, voice.formant);
   const selectedF0 = findF0Method(f0Methods, f0Override === 'studio' ? voice.f0Method : f0Override);
   const offlineGroups = groupedMethods(f0Methods, 'offline');
@@ -66,7 +86,8 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
         formantShift: voice.formant,
         f0Method: selectedF0.id,
         effects,
-        useModel: useModel && Boolean(activeModel),
+        useModel: processWith !== EFFECTS_ONLY,
+        model: processWith || null,
         // The panel promises "uses current studio settings", so the Voice Lab
         // advanced controls have to travel with the render too.
         indexRate: voice.indexRate,
@@ -171,14 +192,18 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
 
           <div>
             <label htmlFor="converter-process" className="block text-xs font-medium text-fg-muted">Process with</label>
-            <select id="converter-process" value={useModel && activeModel ? 'voice' : 'effects'}
-              disabled={!activeModel || converting} onChange={(event) => setUseModel(event.target.value === 'voice')}
-              className="native-select-safe field mt-2">
-              <option value="voice" disabled={!activeModel}>
-                {activeModel ? `The active voice (${activeModel})` : 'The active voice (none active)'}
-              </option>
-              <option value="effects">Studio effects only</option>
+            <select id="converter-process" value={processWith} disabled={converting}
+              onChange={(event) => setChosenVoice(event.target.value)} className="native-select-safe field mt-2">
+              <option value={EFFECTS_ONLY}>Studio effects only</option>
+              {voices.map((name) => (
+                <option key={name} value={name}>{name}{name === activeModel ? ' (active)' : ''}</option>
+              ))}
             </select>
+            <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">
+              {processWith && processWith !== activeModel
+                ? 'Loaded only for this file; the live voice is not changed.'
+                : 'Any voice in Models can convert the file.'}
+            </p>
           </div>
 
           <div className="mt-auto flex items-center gap-3">

@@ -95,6 +95,21 @@ class TestConvert:
         assert response.status_code == 200 and rate == 44100 and len(audio) == 44100
         assert fake_voice.calls == 1
 
+    def test_any_voice_in_models_can_convert_a_file(self, client, manager, monkeypatch):
+        from .conftest import FakeConverter
+
+        other = FakeConverter()
+        asked = []
+        monkeypatch.setattr(manager, "file_converter", lambda name: (asked.append(name), other)[1])
+        response = client.post("/api/convert/", files={"file": ("a.wav", wav_bytes(), "audio/wav")},
+                               data={"model": "other.pth"})
+        assert response.status_code == 200 and asked == ["other.pth"] and other.calls == 1
+
+    def test_an_unknown_voice_is_a_404(self, client):
+        response = client.post("/api/convert/", files={"file": ("a.wav", wav_bytes(), "audio/wav")},
+                               data={"model": "missing.pth"})
+        assert response.status_code == 404
+
     def test_empty_and_undecodable_uploads_are_rejected(self, client):
         assert client.post("/api/convert/", files={"file": ("a.wav", b"", "audio/wav")}).status_code == 400
         assert client.post("/api/convert/", files={"file": ("a.wav", b"nope", "audio/wav")}).status_code == 400

@@ -210,14 +210,15 @@ class VoiceConverter:
     """Shared HuBERT + pitch extractor, plus the active voice and its index."""
 
     def __init__(self, compute: ComputeDevice, hubert: HubertModel, pitch: PitchExtractor,
-                 voice: VoiceModel, index: FeatureIndex | None) -> None:
+                 voice: VoiceModel, index: FeatureIndex | None, lock: threading.Lock | None = None) -> None:
         self.compute = compute
         self.hubert = hubert
         self.pitch = pitch
         self.voice = voice
         self.index = index
         self._dtype = torch.float16 if compute.half else torch.float32
-        self._lock = threading.Lock()
+        # Converters sharing one device pass one lock, so their renders take turns.
+        self._lock = lock or threading.Lock()
         # Milliseconds spent in each stage of the last conversion (for the stream health log).
         self.timings: dict[str, float] = {}
 

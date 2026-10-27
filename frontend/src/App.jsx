@@ -259,7 +259,18 @@ export default function App() {
     setEffects(nextEffects);
   }, []);
 
+  // Pressing the active preset again turns it off: the sound goes back to what it was before.
+  const presetSnapshotRef = useRef(null);
   const applyPreset = useCallback((preset) => {
+    if (preset.id === activePresetId && presetSnapshotRef.current) {
+      const { voice: before, effects: beforeEffects } = presetSnapshotRef.current;
+      presetSnapshotRef.current = null;
+      setVoice(before);
+      setEffects(beforeEffects);
+      setActivePresetId(null);
+      return;
+    }
+    if (!activePresetId) presetSnapshotRef.current = { voice, effects };
     // Advanced RVC values change only when the preset has them.
     setVoice((prev) => {
       const next = voiceFromPreset(preset, prev);
@@ -268,7 +279,7 @@ export default function App() {
     });
     setEffects(effectsFromPresetSettings(preset));
     setActivePresetId(preset.id);
-  }, []);
+  }, [activePresetId, voice, effects]);
 
   const getCurrentSettings = useCallback(
     () => presetSettingsFromVoice(voice, effects),
@@ -428,7 +439,8 @@ export default function App() {
       <div {...panelProps('converter')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
         {visited.has('converter') ? (
           <Suspense fallback={null}>
-            <FileConverter voice={voice} effects={effects} activeModel={activeModel} f0Methods={runtimeConfig.f0Methods} />
+            <FileConverter voice={voice} effects={effects} activeModel={activeModel} f0Methods={runtimeConfig.f0Methods}
+              active={tab === 'converter'} />
           </Suspense>
         ) : null}
       </div>

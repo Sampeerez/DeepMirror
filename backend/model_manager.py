@@ -69,6 +69,11 @@ class ModelManager:
         self._hubert: HubertModel | None = None
         self._pitch: PitchExtractor | None = None
         self._converter: VoiceConverter | None = None
+        # A voice loaded only to convert files (the Converter can use any voice, not just the active one).
+        self._file_converter: VoiceConverter | None = None
+        self._file_lock = threading.Lock()
+        # Every converter renders under this lock: live chunks and file renders take turns on the device.
+        self._render_lock = threading.Lock()
         self._details: dict[str, dict] = {}
         # Last automatic pitch shift per voice, so a new stream starts in the right register.
         self._pitch_memory: dict[str, float] = {}
@@ -300,6 +305,8 @@ class ModelManager:
             if self._converter is not None and self._converter.voice.name == path.name:
                 self._release_locked()
                 self._remember_active(None)
+            if self._file_converter is not None and self._file_converter.voice.name == path.name:
+                self._file_converter = None
             path.unlink()
             self._details.pop(path.name, None)
         logger.info("Deleted model %s", path.name)
@@ -333,7 +340,25 @@ class ModelManager:
         logger.info("Activated %s", path.name)
         return {"name": path.name, "type": "rvc", "status": "active", "details": details}
 
-    def _prepare(self, path: Path) -> tuple[VoiceConverter, dict]:
+    def file_converter(self, name: str | None) -> VoiceConverter | None:
+        """The voice a file is converted with: ``name`` (any voice in Models), or the active one when None."""
+        if not name:
+            return self._converter
+        path = self._path_of(name)
+        active = self._converter
+        if active is not None and active.voice.name == path.name:
+            return active
+        with self._file_lock:
+            cached = self._file_converter
+            if cached is None or cached.voice.name != path.name:
+                self._file_converter = None   # one voice for files at a time
+                cached, _, _ = self._load_converter(path)
+                self._file_converter = cached
+                logger.info("Loaded %s for file conversion", path.name)
+            return cached
+
+    def _load_converter(self, path: Path, report: bool = False) -> tuple[VoiceConverter, str | None, Path | None]:
+        """Weights, register and index of ``path``; ``report`` shows the stages as the active voice loading."""
         with self._lock:
             hubert, pitch = self._engine()
         compute = self.compute
@@ -346,17 +371,25 @@ class ModelManager:
         index = None
         index_path = self.find_index(path.name)
         if index_path is not None:
-            self._loading = {"name": path.name, "stage": "loading the index"}
+            if report:
+                self._loading = {"name": path.name, "stage": "loading the index"}
             try:
                 index = FeatureIndex.load(index_path, compute.device, exact=self.settings.INDEX_EXACT_SEARCH)
             except (IndexFormatError, OSError) as exc:
                 logger.warning("Ignoring index %s: %s", index_path.name, exc)
+                index_path = None
+        else:
+            index_path = None
+        return VoiceConverter(compute, hubert, pitch, voice, index, self._render_lock), f0_source, index_path
+
+    def _prepare(self, path: Path) -> tuple[VoiceConverter, dict]:
+        converter, f0_source, index_path = self._load_converter(path, report=True)
+        compute, voice, index = self.compute, converter.voice, converter.index
         if compute.device.type == "cpu" and self.settings.CPU_ONNX_DECODER:
             self._loading = {"name": path.name, "stage": "optimising the CPU decoder"}
             stat = path.stat()
             cache = self.settings.DATA_DIR / "cache" / f"{path.stem}-{stat.st_size}-{stat.st_mtime_ns}.onnx"
             voice.synthesizer.decoder_override = onnx_decoder(voice.synthesizer, cache)
-        converter = VoiceConverter(compute, hubert, pitch, voice, index)
         self._loading = {"name": path.name, "stage": "warming up"}
         warm = self._warm_up(converter)
         details = {

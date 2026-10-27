@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import { fetchConfig, fetchPresets } from './lib/api';
 import { CHUNK_SIZE, SAMPLE_RATE } from './lib/constants';
@@ -76,4 +76,22 @@ it('gives each voice its own settings', async () => {
   const observed = JSON.parse(screen.getByTestId('voice').textContent);
   expect(observed.voice.pitch).toBe(0);
   expect(observed.voice.customized).toEqual([]);
+});
+
+it('turns a preset off when it is pressed again', async () => {
+  const stored = new Map();
+  vi.stubGlobal('localStorage', { getItem: (key) => stored.get(key) ?? null,
+    setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) });
+  fetchConfig.mockRejectedValue(new Error('offline'));
+  fetchPresets.mockResolvedValue({ builtin: [{ id: 'deep', name: 'Deep', settings: { pitch_shift: -4, effects: {} } }],
+    user: [] });
+  render(React.createElement(App));
+  const tile = await screen.findByRole('button', { name: 'Deep' });
+  const pitch = () => JSON.parse(screen.getByTestId('voice').textContent).voice.pitch;
+  fireEvent.click(tile);
+  await waitFor(() => expect(pitch()).toBe(-4));
+  expect(tile.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(tile);
+  await waitFor(() => expect(pitch()).toBe(0));
+  expect(tile.getAttribute('aria-pressed')).toBe('false');
 });

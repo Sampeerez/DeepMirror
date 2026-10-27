@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getMediaDeviceSupport, supportsOutputDeviceSelection } from '../lib/audioSupport';
+import { uniqueDevices } from '../lib/devices';
 
 export default function useAudioDevices() {
   const [inputDevices, setInputDevices] = useState([]);
@@ -25,8 +26,8 @@ export default function useAudioDevices() {
 
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const inputs = devices.filter((d) => d.kind === 'audioinput' && d.deviceId);
-      const outputs = devices.filter((d) => d.kind === 'audiooutput' && d.deviceId);
+      const inputs = uniqueDevices(devices.filter((d) => d.kind === 'audioinput'));
+      const outputs = uniqueDevices(devices.filter((d) => d.kind === 'audiooutput'));
       setInputDevices(inputs);
       setOutputDevices(outputs);
       setHasLabels([...inputs, ...outputs].some((d) => d.label));

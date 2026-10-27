@@ -49,7 +49,7 @@ OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 - **Settings per voice**: each voice keeps its own settings and effects; **Back to automatic** drops them
 - **Effects** (13), eight sound presets that never touch the voice's pitch (Radio, Phone, Hall…) plus your own, an A/B switch (<kbd>B</kbd>) and a recorder (<kbd>R</kbd>)
 - **Steady under load**: when the computer is too busy to keep up (a browser, a game, a live wallpaper on the same GPU), the stream moves to a longer buffer by itself instead of cutting the voice; the log says which stage took the time
-- **Converter** for whole files, and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
+- **Converter** for whole files with any voice in Models (not only the active one), and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
 ## Models used

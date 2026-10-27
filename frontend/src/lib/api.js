@@ -195,6 +195,7 @@ export async function convertFile(file, {
   f0Method = DEFAULT_F0_METHOD,
   effects = {},
   useModel = true,
+  model = null,
   autoPitch = false,
   expressiveness,
   pitchCorrection,
@@ -213,6 +214,7 @@ export async function convertFile(file, {
   formData.append('f0_method', f0Method);
   formData.append('effects', JSON.stringify(effects));
   formData.append('use_model', String(useModel));
+  if (model) formData.append('model', model);
 
   // Omitted controls use the server default.
   for (const [field, value] of [

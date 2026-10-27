@@ -38,8 +38,8 @@ function Field({ label, htmlFor, hint, children }) {
   return (
     <div>
       <label htmlFor={htmlFor} className="block text-xs font-medium text-fg-muted">{label}</label>
-      <div className="mt-2">{children}</div>
-      {hint ? <p className="mt-1.5 text-[11px] leading-4 text-fg-faint">{hint}</p> : null}
+      <div className="mt-1.5">{children}</div>
+      {hint ? <p className="mt-1 truncate text-[11px] leading-4 text-fg-faint" title={hint}>{hint}</p> : null}
     </div>
   );
 }
@@ -51,7 +51,6 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
   const active = isActiveJob(job);
   const progress = Math.round((job.progress || 0) * 100);
   const losses = job.losses || {};
-  const canUse = Boolean(job.exported_epoch) && !active;
   return (
     <article className="rounded-lg border border-line-strong bg-raised px-4 py-4" aria-label={`Training ${job.name}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -114,28 +113,38 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
         </p>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {active ? <Button icon={Square} onClick={() => onStop(job)} disabled={busy}>Stop and save</Button> : null}
-        {canUse ? <Button variant="primary" icon={Wand2} onClick={() => onUse(job)} disabled={busy}>Use this voice</Button> : null}
-        {job.exported_epoch && !active ? (
-          <Button href={modelDownloadUrl(jobModelFile(job))} download icon={Download}
-            title="The trained voice is already saved in Models; this downloads a copy (.pth and .index)">
-            Download voice (.zip)
-          </Button>
+      <div className="mt-4 space-y-2">
+        {active ? (
+          <Button size="md" icon={Square} onClick={() => onStop(job)} disabled={busy} className="w-full">Stop and save</Button>
         ) : null}
-        {canResume(job) ? (
-          <>
-            <input type="number" min={(job.epoch || 0) + 1} max={2000} placeholder={String(Math.max(plannedEpochs(job) || 0, (job.epoch || 0) + 100))}
-              value={moreEpochs} onChange={(event) => setMoreEpochs(event.target.value)}
-              className="field h-8 w-24 text-xs" aria-label="Total epochs when continuing" />
-            <Button icon={RotateCcw} disabled={busy} onClick={() => onResume(job, moreEpochs ? Number(moreEpochs) : null)}>
-              Continue training
+        {job.exported_epoch && !active ? (
+          <div className="grid grid-cols-2 gap-2">
+            <Button size="md" variant="primary" icon={Wand2} onClick={() => onUse(job)} disabled={busy}>
+              Use this voice
             </Button>
-          </>
+            <Button size="md" href={modelDownloadUrl(jobModelFile(job))} download icon={Download}
+              title="The trained voice is already saved in Models; this downloads a copy (.pth and .index)">
+              Download .zip
+            </Button>
+          </div>
         ) : null}
         {!active ? (
-          <Button icon={Trash2} className="ml-auto" disabled={busy} onClick={() => onDelete(job)}
-            aria-label={`Delete training ${job.name}`}>Delete</Button>
+          <div className="flex items-center gap-2">
+            {canResume(job) ? (
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <input type="number" min={(job.epoch || 0) + 1} max={2000}
+                  placeholder={String(Math.max(plannedEpochs(job) || 0, (job.epoch || 0) + 100))}
+                  value={moreEpochs} onChange={(event) => setMoreEpochs(event.target.value)}
+                  className="field w-24 shrink-0" aria-label="Total epochs when continuing" title="Total epochs" />
+                <Button size="md" icon={RotateCcw} disabled={busy} className="min-w-0 flex-1"
+                  onClick={() => onResume(job, moreEpochs ? Number(moreEpochs) : null)}>
+                  Continue training
+                </Button>
+              </div>
+            ) : <div className="flex-1" />}
+            <Button size="md" variant="danger" icon={Trash2} disabled={busy} onClick={() => onDelete(job)}
+              aria-label={`Delete training ${job.name}`} title="Delete this training" />
+          </div>
         ) : null}
       </div>
     </article>
@@ -255,7 +264,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           </div>
           <GraduationCap className="hidden h-7 w-7 shrink-0 text-fg-subtle sm:block" strokeWidth={1.5} aria-hidden="true" />
         </div>
-        <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
 
         {info?.device ? (
           <p className="flex items-center gap-2 text-xs text-fg-secondary">
@@ -278,17 +287,19 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             event.preventDefault();
             fileInputRef.current?.click();
           }}
-          className={`mt-3 cursor-pointer rounded-lg border border-dashed p-5 text-center transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] ${
+          className={`mt-3 flex cursor-pointer items-center justify-center gap-3 rounded-lg border border-dashed px-5 py-3.5 transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] ${
             dragActive ? 'border-line-hover bg-control-hover' : 'border-line-strong bg-raised hover:border-line-hover hover:bg-control'
           }`}
         >
           <input ref={fileInputRef} type="file" accept={ACCEPTED} multiple className="hidden"
             onChange={(event) => { addFiles(event.target.files); event.target.value = ''; }} />
-          <Upload className="mx-auto mb-2 h-7 w-7 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
-          <p className="text-sm font-medium text-fg-secondary">Drop recordings or click to choose</p>
-          <p className="mt-1 text-xs text-fg-faint">
-            One speaker; music and noise are removed. 5 min or more; 10–30 min is best.
-          </p>
+          <Upload className="h-6 w-6 shrink-0 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
+          <div className="min-w-0 text-left">
+            <p className="text-sm font-medium text-fg-secondary">Drop recordings or click to choose</p>
+            <p className="mt-0.5 text-xs text-fg-faint">
+              One speaker; music and noise are removed. 5 min or more; 10–30 min is best.
+            </p>
+          </div>
         </div>
 
         {fileSummary.length ? (
@@ -305,11 +316,11 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             ))}
           </ul>
         ) : null}
-        <p className={`mt-3 text-xs ${TONE_CLASS[quality.tone]}`} role="status">
+        <p className={`mt-2 text-xs ${TONE_CLASS[quality.tone]}`} role="status">
           {totalSeconds ? `${formatDuration(totalSeconds)} in total. ` : ''}{quality.text}
         </p>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="mt-3 grid gap-x-4 gap-y-3 sm:grid-cols-2">
           <Field label="Voice name" htmlFor="training-name" hint="Saved in Models as <name>.pth.">
             <input id="training-name" className={inputClass} value={name} maxLength={60}
               onChange={(event) => setName(event.target.value)} placeholder="my_voice" />
@@ -376,7 +387,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
         {notice ? <p className="mt-4 rounded-md border border-ok-line bg-ok-bg p-3 text-sm text-ok-fg" role="status">{notice}</p> : null}
 
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
           <Button variant="primary" size="lg" icon={Play} onClick={start} disabled={!canStart}
             loading={uploadProgress !== null} className="w-48">
             {uploadProgress !== null ? `Uploading ${uploadProgress}%` : 'Start training'}

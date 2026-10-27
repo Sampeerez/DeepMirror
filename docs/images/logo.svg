@@ -1,19 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="VoxClone">
   <defs>
     <linearGradient id="vox-bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#34d399"/>
-      <stop offset="1" stop-color="#0d9488"/>
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="vox-shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".16"/>
+      <stop offset=".55" stop-color="#fff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="15" fill="url(#vox-bg)"/>
-  <!-- A V drawn as a waveform: bars that grow towards the centre, hanging from one line. -->
-  <g stroke="#ffffff" stroke-width="4.6" stroke-linecap="round" fill="none">
-    <line x1="14" y1="17" x2="14" y2="21"/>
-    <line x1="20" y1="17" x2="20" y2="29"/>
-    <line x1="26" y1="17" x2="26" y2="38"/>
-    <line x1="32" y1="17" x2="32" y2="47"/>
-    <line x1="38" y1="17" x2="38" y2="38"/>
-    <line x1="44" y1="17" x2="44" y2="29"/>
-    <line x1="50" y1="17" x2="50" y2="21"/>
+  <rect width="64" height="64" rx="16" fill="url(#vox-bg)"/>
+  <rect width="64" height="64" rx="16" fill="url(#vox-shine)"/>
+  <!-- A V holding a voice: the letter, with a short waveform in its opening. -->
+  <path d="M15 16 L32 49 L49 16" stroke="#fff" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-opacity=".92">
+    <line x1="26.5" y1="20.5" x2="26.5" y2="24.5"/>
+    <line x1="32" y1="16" x2="32" y2="30"/>
+    <line x1="37.5" y1="20.5" x2="37.5" y2="24.5"/>
   </g>
 </svg>
