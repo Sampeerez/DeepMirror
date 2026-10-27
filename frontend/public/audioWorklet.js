@@ -7,6 +7,15 @@ class CaptureProcessor extends AudioWorkletProcessor {
     this.chunkSize = options.processorOptions?.chunkSize || 4096;
     this.buffer = new Float32Array(this.chunkSize);
     this.writeIndex = 0;
+    // A longer chunk while running (more headroom when the computer is busy).
+    this.port.onmessage = ({ data }) => {
+      if (data?.type !== 'chunkSize' || !(data.chunkSize > 0)) return;
+      const next = new Float32Array(data.chunkSize);
+      next.set(this.buffer.subarray(0, Math.min(this.writeIndex, data.chunkSize)));
+      this.buffer = next;
+      this.chunkSize = data.chunkSize;
+      this.writeIndex = Math.min(this.writeIndex, data.chunkSize - 1);
+    };
   }
 
   process(inputs) {
@@ -48,6 +57,10 @@ class PlaybackProcessor extends AudioWorkletProcessor {
 
     this.port.onmessage = (event) => {
       const data = event.data;
+      if (data?.type === 'chunkSize' && data.chunkSize > 0) {
+        this.resize(data.chunkSize);
+        return;
+      }
       if (data instanceof Float32Array) {
         for (let i = 0; i < data.length; i++) {
           if (this.availableSamples >= this.ringBufferSize) {
@@ -71,6 +84,22 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         }
       }
     };
+  }
+
+  /** Buffer targets for a new chunk size; queued audio is kept. */
+  resize(chunkSize) {
+    const ring = new Float32Array(6 * chunkSize);
+    const keep = Math.min(this.availableSamples, ring.length);
+    for (let i = 0; i < keep; i++) {
+      ring[i] = this.ringBuffer[(this.readIndex + this.availableSamples - keep + i) % this.ringBufferSize];
+    }
+    this.ringBuffer = ring;
+    this.ringBufferSize = ring.length;
+    this.readIndex = 0;
+    this.writeIndex = keep % ring.length;
+    this.availableSamples = keep;
+    this.primeBufferSize = chunkSize;
+    this.targetBufferSize = 2 * chunkSize;
   }
 
   process(inputs, outputs) {

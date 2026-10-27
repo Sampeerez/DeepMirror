@@ -44,6 +44,7 @@ class FakeConverter:
         self.calls = 0
         self.last_settings = None
         self.f0_hz = 0.0  # pitch the fake tracker "hears" in every frame
+        self.timings: dict[str, float] = {}
 
     def estimate_f0(self, audio: np.ndarray, settings) -> np.ndarray:
         return np.full(len(audio) // 160, self.f0_hz, dtype=np.float32)

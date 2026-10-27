@@ -19,8 +19,10 @@ import contextlib
 import json
 import logging
 import math
+import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -43,6 +45,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 STATUS_INTERVAL_SECONDS = 1.0
+# Overloaded: over the last 3 s, more than a quarter of the chunks used over 95% of their own duration.
+OVERLOAD_WINDOW_SECONDS = 3.0
+OVERLOAD_MIN_CHUNKS = 8
+OVERLOAD_LOAD = 0.95
+OVERLOAD_SHARE = 0.25
 SAMPLE_RATE_RANGE = (8000, 192000)
 CHUNK_SIZE_RANGE = (128, 65536)
 SILENCE_THRESHOLD_RANGE = (-80.0, -20.0)
@@ -134,6 +141,9 @@ class StreamSession:
         # Stream health, written to the log so a stutter leaves a trace.
         self._slow_chunks = 0
         self._last_health_log = 0.0
+        # (time, took / budget) of recent chunks: sustained lateness asks the client for a longer chunk.
+        self._recent_load: deque[tuple[float, float]] = deque()
+        self.listen_ms = 0.0
         self._client_health: dict[str, int] = {}
         # Test samples: the raw microphone and the converted output, saved while a take records.
         self._sample: tuple[list[np.ndarray], list[np.ndarray]] | None = None
@@ -234,8 +244,12 @@ class StreamSession:
             if value is None:
                 logger.warning("Ignoring invalid %s %r (expected %d-%d)", key, payload[key], low, high)
                 continue
+            if key == "chunk_size" and value != self.chunk_size and self._recent_load:
+                logger.info("Stream chunk changed to %d samples (%.0f ms)",
+                            value, value * 1000.0 / self.sample_rate)
             setattr(self, key, value)
             self._stream = None  # window geometry depends on both
+            self._recent_load.clear()
         if self.chain.sr != self.sample_rate:
             self.chain = EffectsChain(self.sample_rate)
 
@@ -382,15 +396,35 @@ class StreamSession:
     def note_timing(self, elapsed_ms: float) -> None:
         """Count chunks that took longer than their own duration; log them at most every 5 s."""
         budget = self.chunk_size * 1000.0 / self.sample_rate
+        now = time.monotonic()
+        self._recent_load.append((now, elapsed_ms / budget))
+        while self._recent_load and now - self._recent_load[0][0] > OVERLOAD_WINDOW_SECONDS:
+            self._recent_load.popleft()
         if elapsed_ms <= budget:
             return
         self._slow_chunks += 1
-        now = time.monotonic()
         if now - self._last_health_log >= 5.0:
-            logger.warning("%d chunk(s) took longer than real time (last %.0f ms for %.0f ms of audio; model %.0f ms)",
-                           self._slow_chunks, elapsed_ms, budget, self.model_ms)
+            logger.warning("%d chunk(s) took longer than real time (last %.0f ms for %.0f ms of audio; %s)",
+                           self._slow_chunks, elapsed_ms, budget, self._stage_text())
             self._slow_chunks = 0
             self._last_health_log = now
+
+    def _stage_text(self) -> str:
+        """Where the time of the last chunk went, for the log."""
+        converter = self.manager.converter
+        parts = [f"noise and voice detection {self.listen_ms:.0f} ms", f"model {self.model_ms:.0f} ms"]
+        if converter is not None:
+            parts += [f"{name} {value:.0f} ms" for name, value in converter.timings.items()]
+        parts.append(f"rest {max(self.dsp_ms - self.listen_ms, 0.0):.0f} ms")
+        return ", ".join(parts)
+
+    @property
+    def overloaded(self) -> bool:
+        """Most recent chunks barely made it, or did not: the stream needs a longer chunk."""
+        loads = [load for _, load in self._recent_load]
+        if len(loads) < OVERLOAD_MIN_CHUNKS or self.bypass or self.sleeping:
+            return False
+        return sum(load > OVERLOAD_LOAD for load in loads) / len(loads) > OVERLOAD_SHARE
 
     def save_sample(self) -> Path | None:
         """Write the captured microphone and output to data/samples (``<time>-mic.wav``, ``-out.wav``)."""
@@ -435,7 +469,9 @@ class StreamSession:
             mode = "rvc"
             self.eligible_frames += 1
             stream = self._realtime_stream(converter)
+            listen_started = time.perf_counter()
             speech = stream.listen(processed)
+            self.listen_ms = (time.perf_counter() - listen_started) * 1000.0
             asleep = self._update_silence(processed, speech)
             if asleep and self.sleeping:
                 # Keep listening (the next onset gets real context); the room still plays.
@@ -500,6 +536,7 @@ class StreamSession:
             "latency_ms": round(self.latency_ms, 2),
             "model_ms": round(self.model_ms, 2),
             "dsp_ms": round(self.dsp_ms, 2),
+            "overloaded": self.overloaded,
             "mode": mode,
             "processing_error": self.processing_error,
             "bypass": self.bypass,
@@ -523,6 +560,18 @@ class StreamSession:
         }
         self.eligible_frames = self.inference_frames = 0
         return message
+
+
+def _raise_priority() -> None:
+    """Windows: run above normal priority, so a browser or a game in the background delays chunks less."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    above_normal = 0x8000
+    kernel32 = ctypes.windll.kernel32
+    if not kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), above_normal):
+        logger.debug("Could not raise the process priority")
 
 
 async def _read_config(websocket: WebSocket, session: StreamSession) -> bool:
@@ -588,6 +637,7 @@ async def audio_websocket(websocket: WebSocket) -> None:
     if not await _read_config(websocket, session):
         return
     logger.info("Audio stream started: %d Hz, %d-sample chunks", session.sample_rate, session.chunk_size)
+    _raise_priority()
 
     last_status = time.perf_counter()
     try:

@@ -96,5 +96,15 @@ export default function useRuntimeConfig({ wsHook, isRunning, onRecommendedF0 })
     sendSettings(live);
   }, [runtimeConfig, wsStatus, isRunning, sendSettings]);
 
-  return { runtimeConfig, refresh, checking, error, revision, changeSettings };
+  // A running stream moves to a longer chunk: the worklets resize themselves, the server is told here.
+  const changeLiveChunkSize = useCallback((chunkSize) => {
+    const next = updateRuntimeConfig(runtimeConfig, { chunkSize });
+    setRuntimeConfig(next);
+    writeStored(STORAGE_KEYS.globalSettings,
+      persistedRuntimeConfig(readStored(STORAGE_KEYS.globalSettings), { chunkSize }, next));
+    applyConfig({ chunk_size: next.chunkSize });
+    sendSettings({ chunk_size: next.chunkSize, ...streamTimingForChunkSize(next.chunkSize) });
+  }, [runtimeConfig, sendSettings]);
+
+  return { runtimeConfig, refresh, checking, error, revision, changeSettings, changeLiveChunkSize };
 }

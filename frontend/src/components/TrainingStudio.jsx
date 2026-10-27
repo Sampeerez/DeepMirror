@@ -86,7 +86,7 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
       </div>
 
       {job.stage === 'train' && Object.keys(losses).length ? (
-        <dl className="mt-3 grid grid-cols-3 gap-2 font-mono text-[11px] tabular-nums sm:grid-cols-6">
+        <dl className="mt-3 grid grid-cols-3 gap-2 font-mono text-[11px] tabular-nums">
           {[['mel', 'Mel'], ['kl', 'KL'], ['fm', 'FM'], ['gen', 'Gen'], ['disc', 'Disc']].map(([key, label]) => (
             <div key={key} className="rounded-sm border border-line px-2 py-1">
               <dt className="text-fg-faint">{label}</dt>
@@ -246,8 +246,8 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
   })), [files]);
 
   return (
-    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-      <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="training-title">
+    <div className="page-grid">
+      <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="training-title">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="panel-kicker">Train</p>
@@ -322,17 +322,19 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
               ))}
             </select>
           </Field>
-          <Field label={autoPlan ? 'Epochs: automatic' : `Epochs: ${epochs}`} htmlFor="training-epochs"
+          <Field label="Epochs" htmlFor="training-plan"
             hint={autoPlan
               ? 'Planned from your audio and GPU; the best epoch is kept.'
               : 'Upper limit; the best epoch is kept. Stop any time: it saves.'}>
-            <label className="mb-2 flex items-center gap-2 text-xs text-fg-secondary">
-              <input type="checkbox" checked={autoPlan} onChange={(event) => setAutoPlan(event.target.checked)} />
-              Automatic (recommended)
-            </label>
+            <select id="training-plan" className={`native-select-safe ${inputClass}`} value={autoPlan ? 'auto' : 'manual'}
+              onChange={(event) => setAutoPlan(event.target.value === 'auto')}>
+              <option value="auto">Automatic (recommended)</option>
+              <option value="manual">Manual: {epochs} epochs</option>
+            </select>
             {!autoPlan ? (
               <input id="training-epochs" type="range" min={20} max={info?.max_epochs || 2000} step={10} value={epochs}
-                onChange={(event) => setEpochs(Number(event.target.value))} className="fx-slider w-full" />
+                aria-label="Epochs" onChange={(event) => setEpochs(Number(event.target.value))}
+                className="fx-slider mt-3 w-full" />
             ) : null}
           </Field>
           <Field label="Batch size" htmlFor="training-batch"
@@ -348,13 +350,13 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
               <option value="standard">Standard</option>
             </select>
           </Field>
-          <Field label="Voice only" htmlFor="training-isolate"
-            hint="Removes music, noise and other sounds before training.">
-            <label className="flex h-9 items-center gap-2 text-xs text-fg-secondary">
-              <input id="training-isolate" type="checkbox" checked={isolate}
-                onChange={(event) => setIsolate(event.target.checked)} />
-              Keep only the voice (recommended)
-            </label>
+          <Field label="Background" htmlFor="training-isolate"
+            hint={isolate ? 'Removes music, noise and other sounds before training.' : 'For recordings already clean.'}>
+            <select id="training-isolate" className={`native-select-safe ${inputClass}`} value={isolate ? 'voice' : 'as-is'}
+              onChange={(event) => setIsolate(event.target.value === 'voice')}>
+              <option value="voice">Keep only the voice (recommended)</option>
+              <option value="as-is">Use the audio as it is</option>
+            </select>
           </Field>
           <Field label="Base model" htmlFor="training-base" hint="TITAN is tuned on expressive speech.">
             <select id="training-base" className={`native-select-safe ${inputClass}`} value={base || 'official'}

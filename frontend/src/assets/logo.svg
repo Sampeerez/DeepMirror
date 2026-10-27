@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="VoxClone">
+  <defs>
+    <linearGradient id="vox-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#vox-bg)"/>
+  <!-- A V drawn as a waveform: bars that grow towards the centre, hanging from one line. -->
+  <g stroke="#ffffff" stroke-width="4.6" stroke-linecap="round" fill="none">
+    <line x1="14" y1="17" x2="14" y2="21"/>
+    <line x1="20" y1="17" x2="20" y2="29"/>
+    <line x1="26" y1="17" x2="26" y2="38"/>
+    <line x1="32" y1="17" x2="32" y2="47"/>
+    <line x1="38" y1="17" x2="38" y2="38"/>
+    <line x1="44" y1="17" x2="44" y2="29"/>
+    <line x1="50" y1="17" x2="50" y2="21"/>
+  </g>
+</svg>

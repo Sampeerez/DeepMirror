@@ -12,7 +12,6 @@ router = APIRouter(prefix="/api/presets", tags=["presets"])
 
 class PresetPayload(BaseModel):
     name: str = Field(min_length=1, max_length=40)
-    emoji: str = Field(default="⭐", max_length=4)
     settings: dict
 
 
@@ -29,7 +28,7 @@ async def list_presets(request: Request) -> dict:
 @router.post("/")
 async def save_preset(request: Request, payload: PresetPayload) -> dict:
     try:
-        return _store(request).save(payload.name, payload.settings, payload.emoji)
+        return _store(request).save(payload.name, payload.settings)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

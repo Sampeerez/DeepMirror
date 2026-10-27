@@ -396,6 +396,14 @@ export default function useAudioPipeline(wsHook) {
 
   const stopRecording = useCallback(() => finalizeRecording(), [finalizeRecording]);
 
+  /** Switch the running stream to another chunk size (the server is told separately). */
+  const setChunkSize = useCallback((chunkSize) => {
+    if (!captureNodeRef.current || !playbackNodeRef.current) return;
+    captureNodeRef.current.port.postMessage({ type: 'chunkSize', chunkSize });
+    playbackNodeRef.current.port.postMessage({ type: 'chunkSize', chunkSize });
+    setStreamInfo((info) => (info ? { ...info, chunkSize, adaptedFrom: info.adaptedFrom ?? info.chunkSize } : info));
+  }, []);
+
   useEffect(() => {
     if (!isRecording) return undefined;
     const guard = (event) => { event.preventDefault(); event.returnValue = ''; };
@@ -427,8 +435,10 @@ export default function useAudioPipeline(wsHook) {
     outputSelectionSupported,
     streamInfo,
     playbackStats,
+    setChunkSize,
   }), [
     start, stop, isRunning, meters, getAnalysers, isRecording, library, recordNotice,
     startRecording, stopRecording, setCaptureSamples, outputSelectionSupported, streamInfo, playbackStats,
+    setChunkSize,
   ]);
 }

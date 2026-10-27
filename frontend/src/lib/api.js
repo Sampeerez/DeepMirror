@@ -175,10 +175,10 @@ export async function fetchPresets() {
   return request('/presets/', { timeoutMs: 10000 });
 }
 
-export async function savePreset(name, settings, emoji = '⭐') {
+export async function savePreset(name, settings) {
   return request('/presets/', {
     method: 'POST',
-    body: JSON.stringify({ name, settings, emoji }),
+    body: JSON.stringify({ name, settings }),
   });
 }
 

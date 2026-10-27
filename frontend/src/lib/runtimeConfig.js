@@ -11,6 +11,8 @@ export const DEFAULT_RUNTIME_CONFIG = {
   chunkSize: PERFORMANCE_PROFILES[0].chunkSize,
   silenceSaver: true,
   silenceThresholdDb: -60,
+  // A longer chunk, automatically, when the computer cannot keep up.
+  autoHeadroom: true,
   f0Methods: FALLBACK_F0_METHODS,
   defaultF0Method: null,
   device: null,
@@ -53,11 +55,12 @@ export function mergeRuntimeConfig(config, stored = null) {
       stored?.silenceThresholdDb,
       normalizeSilenceThreshold(config?.silence_threshold_db, base.silenceThresholdDb)
     ),
+    autoHeadroom: typeof stored?.autoHeadroom === 'boolean' ? stored.autoHeadroom : base.autoHeadroom,
     ...serverFacts(config),
   };
 }
 
-const USER_KEYS = ['sampleRate', 'chunkSize', 'silenceSaver', 'silenceThresholdDb'];
+const USER_KEYS = ['sampleRate', 'chunkSize', 'silenceSaver', 'silenceThresholdDb', 'autoHeadroom'];
 
 /**
  * The persisted slice: only the settings the user actually changed. Anything
@@ -81,5 +84,6 @@ export function updateRuntimeConfig(current, partial) {
     chunkSize: normalizePositiveInt(partial.chunkSize, current.chunkSize),
     silenceSaver: typeof partial.silenceSaver === 'boolean' ? partial.silenceSaver : current.silenceSaver,
     silenceThresholdDb: normalizeSilenceThreshold(partial.silenceThresholdDb, current.silenceThresholdDb),
+    autoHeadroom: typeof partial.autoHeadroom === 'boolean' ? partial.autoHeadroom : current.autoHeadroom,
   };
 }

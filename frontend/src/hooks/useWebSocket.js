@@ -14,6 +14,7 @@ const EMPTY_TRANSPORT = { pending: 0, inFlight: 0, dropped: 0, timedOut: 0 };
 const DEFAULT_SERVER_STATS = {
   modelMs: 0,
   dspMs: 0,
+  overloaded: false,
   mode: 'dsp',
   activeModel: null,
   effectsActive: 0,
@@ -185,6 +186,7 @@ export default function useWebSocket() {
             setServerStats({
               modelMs: msg.model_ms ?? 0,
               dspMs: msg.dsp_ms ?? 0,
+              overloaded: Boolean(msg.overloaded),
               mode: msg.mode ?? 'dsp',
               processingError: msg.processing_error ?? null,
               activeModel: msg.active_model ?? null,

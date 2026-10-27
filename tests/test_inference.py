@@ -174,6 +174,39 @@ class TestConversionSettings:
         assert ConversionSettings(f0_method="pm").with_payload({"f0_method": "nope"}).f0_method == "pm"
 
 
+def test_pitch_is_tracked_on_the_audio_without_its_mirrored_pad():
+    """The tracker never sees the reflection pad (it dropped most of a rolled r's voicing)."""
+    from types import SimpleNamespace
+
+    from backend.inference.pipeline import VoiceConverter
+
+    seen = {}
+
+    class Pitch:
+        def estimate(self, method, audio, frames, **_options):
+            seen["audio"], seen["frames"] = audio.copy(), frames
+            return np.full(frames, 120.0, np.float32)
+
+    voice = SimpleNamespace(use_pitch=True, speaker_count=1, sample_rate=16000,
+                            synthesizer=SimpleNamespace(hop_length=160))
+    compute = SimpleNamespace(half=False, device=torch.device("cpu"), offline_pad_seconds=0.1)
+    converter = VoiceConverter(compute, None, Pitch(), voice, None)  # type: ignore[arg-type]
+    lengths = {}
+
+    def synthesize(audio, pitch, pitchf, *_args):
+        lengths["audio"], lengths["pitch"] = len(audio) // 160, pitchf.shape[1]
+        return np.zeros(len(audio), np.float32)
+
+    converter._synthesize = synthesize  # type: ignore[method-assign]
+    tracks = []
+    audio = (0.1 * np.sin(2 * np.pi * 120 * np.arange(16000) / 16000)).astype(np.float32)
+    converter.convert(audio, ConversionSettings(rms_mix_rate=1.0, articulation=0.0), pad_seconds=0.1,
+                      split_long_input=False, on_f0=tracks.append)
+    assert len(seen["audio"]) == len(audio) and seen["frames"] == 100
+    assert len(tracks[0]) == 100
+    assert lengths["pitch"] == lengths["audio"] == 120   # the track is padded back to the padded window
+
+
 def test_sliding_rms_is_shift_invariant():
     rng = np.random.default_rng(2)
     audio = (rng.standard_normal(32000) * np.linspace(0.1, 1, 32000)).astype(np.float32)

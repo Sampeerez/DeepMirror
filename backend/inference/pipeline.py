@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import math
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -217,6 +218,8 @@ class VoiceConverter:
         self.index = index
         self._dtype = torch.float16 if compute.half else torch.float32
         self._lock = threading.Lock()
+        # Milliseconds spent in each stage of the last conversion (for the stream health log).
+        self.timings: dict[str, float] = {}
 
     @property
     def output_rate(self) -> int:
@@ -258,18 +261,24 @@ class VoiceConverter:
         frames = len(padded) // HOP
 
         pitch = pitchf = None
+        started = time.perf_counter()
         if voice.use_pitch:
-            f0 = self.pitch.estimate(settings.f0_method, padded, frames, filter_radius=settings.filter_radius,
+            # Tracked on the real audio only: a mirrored pad confuses the tracker near the
+            # window's end (a rolled r kept 39% of its voicing, 98% without the pad).
+            pad_frames = t_pad // HOP
+            inner = frames - 2 * pad_frames
+            f0 = self.pitch.estimate(settings.f0_method, audio, inner, filter_radius=settings.filter_radius,
                                      crepe_hop_length=settings.crepe_hop_length,
                                      rmvpe_threshold=settings.rmvpe_threshold)
             if on_f0 is not None:
-                pad_frames = t_pad // HOP
-                on_f0(f0[pad_frames:frames - pad_frames])
+                on_f0(f0)
+            f0 = np.pad(f0, (pad_frames, frames - inner - pad_frames), mode="edge") if len(f0) else f0
             f0 = expand_intonation(f0, settings.pitch_expressiveness, settings.pitch_center_hz)
             f0 = correct_pitch(f0, settings.pitch_correction, settings.pitch_shift)
             coarse, shifted = to_rvc_pitch(f0, settings.pitch_shift)
             pitch = torch.from_numpy(coarse[:frames]).to(self.compute.device)[None]
             pitchf = torch.from_numpy(shifted[:frames]).to(self.compute.device)[None]
+        pitch_done = time.perf_counter()
 
         speaker = torch.tensor([int(np.clip(settings.speaker_id, 0, voice.speaker_count - 1))],
                                device=self.compute.device)
@@ -288,6 +297,8 @@ class VoiceConverter:
             if cut is not None:
                 start = cut // HOP * HOP
         output = np.concatenate(segments)
+        self.timings = {"pitch": (pitch_done - started) * 1000.0,
+                        "voice synthesis": (time.perf_counter() - pitch_done) * 1000.0}
         if settings.rms_mix_rate != 1:
             output = mix_rms(audio, SAMPLE_RATE, output, voice.sample_rate, settings.rms_mix_rate,
                              rms_frame_seconds)

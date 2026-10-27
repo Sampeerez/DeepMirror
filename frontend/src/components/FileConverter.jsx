@@ -98,21 +98,21 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
   };
 
   return (
-    <section className="panel mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col p-5" aria-labelledby="converter-title">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <p className="panel-kicker">Converter</p>
-          <h2 id="converter-title" className="panel-title">Convert a recording</h2>
+    <div className="page-grid">
+      <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="converter-title">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="panel-kicker">Converter</p>
+            <h2 id="converter-title" className="panel-title">Convert a recording</h2>
+          </div>
+          <p className="text-xs text-fg-subtle">
+            Studio settings: pitch {voice.pitch > 0 ? '+' : ''}{voice.pitch} st · formant {voice.formant > 0 ? '+' : ''}
+            {voice.formant} st · {fxCount} effect{fxCount === 1 ? '' : 's'}
+          </p>
         </div>
-        <p className="text-xs text-fg-subtle">
-          Studio settings: pitch {voice.pitch > 0 ? '+' : ''}{voice.pitch} st · formant {voice.formant > 0 ? '+' : ''}
-          {voice.formant} st · {fxCount} effect{fxCount === 1 ? '' : 's'}
-        </p>
-      </div>
 
-      <div className="mt-4 grid min-h-0 flex-1 gap-5 lg:grid-cols-2">
-        {/* Left: the file and how to convert it. */}
-        <div className="flex min-h-0 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
+        {/* The file and how to convert it. */}
+        <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
           <div
             role="button"
             tabIndex={converting ? -1 : 0}
@@ -169,14 +169,17 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             </p>
           </div>
 
-          <label className={`flex min-w-0 items-center gap-2.5 text-sm ${activeModel ? 'text-fg-secondary' : 'text-fg-faint'}`}>
-            <input type="checkbox" checked={useModel && Boolean(activeModel)} disabled={!activeModel || converting}
-              onChange={(event) => setUseModel(event.target.checked)} className="h-4 w-4 shrink-0 accent-primary" />
-            <span className="shrink-0">Use the active voice</span>
-            <span className="min-w-0 truncate text-xs text-fg-faint" title={activeModel || undefined}>
-              {activeModel ? `(${activeModel})` : '(none active)'}
-            </span>
-          </label>
+          <div>
+            <label htmlFor="converter-process" className="block text-xs font-medium text-fg-muted">Process with</label>
+            <select id="converter-process" value={useModel && activeModel ? 'voice' : 'effects'}
+              disabled={!activeModel || converting} onChange={(event) => setUseModel(event.target.value === 'voice')}
+              className="native-select-safe field mt-2">
+              <option value="voice" disabled={!activeModel}>
+                {activeModel ? `The active voice (${activeModel})` : 'The active voice (none active)'}
+              </option>
+              <option value="effects">Studio effects only</option>
+            </select>
+          </div>
 
           <div className="mt-auto flex items-center gap-3">
             {converting ? (
@@ -196,9 +199,13 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             </p>
           </div>
         </div>
+      </section>
 
-        {/* Right: the result. */}
-        <div className="flex min-h-48 flex-col rounded-lg border border-line bg-raised p-4">
+      {/* The result. */}
+      <section className="panel flex min-h-48 flex-col p-5" aria-labelledby="converter-result-title">
+        <p className="panel-kicker">Converter</p>
+        <h2 id="converter-result-title" className="panel-title">Result</h2>
+        <div className="mt-4 flex min-h-0 flex-1 flex-col rounded-lg border border-line bg-raised p-4">
           {error ? (
             <p className="break-words rounded-md border border-danger-line bg-danger-bg p-3 text-sm text-danger-fg" role="alert">
               {error}
@@ -224,8 +231,8 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             </div>
           ) : null}
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }
 

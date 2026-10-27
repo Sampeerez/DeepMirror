@@ -37,6 +37,10 @@ function statusLine({ error, devices, captureSupported, pipeline, wsStatus, acti
   if (info && info.sampleRate !== info.requestedSampleRate) {
     return { tone: 'muted', text: `Running at ${info.sampleRate.toLocaleString()} Hz.` };
   }
+  if (pipeline.isRunning && info?.adaptedFrom && info.chunkSize !== info.adaptedFrom) {
+    const ms = Math.round((info.chunkSize * 1000) / info.sampleRate);
+    return { tone: 'warn', text: `Live with a longer buffer (${ms} ms): the computer was too busy to keep up.` };
+  }
   if (pipeline.isRunning) {
     return {
       tone: 'muted',

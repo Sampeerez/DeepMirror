@@ -1,4 +1,8 @@
-# VoxClone
+<p align="center">
+  <img src="docs/images/logo.svg" width="96" height="96" alt="VoxClone logo" />
+</p>
+
+<h1 align="center">VoxClone</h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" alt="Python 3.13" />
@@ -43,7 +47,8 @@ OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 - **My voice**: read about 90 s of guided lines (Spanish or English) once; every voice is then tuned to your pitch and range when you activate it
 - **Pitch**: automatic register matching (voices trained here know their register; a downloaded voice learns it from a short clip of the original), expressiveness, optional pitch correction, formant shift
 - **Settings per voice**: each voice keeps its own settings and effects; **Back to automatic** drops them
-- **Effects** (13), presets, an A/B switch (<kbd>B</kbd>) and a recorder (<kbd>R</kbd>)
+- **Effects** (13), eight sound presets that never touch the voice's pitch (Radio, Phone, Hall…) plus your own, an A/B switch (<kbd>B</kbd>) and a recorder (<kbd>R</kbd>)
+- **Steady under load**: when the computer is too busy to keep up (a browser, a game, a live wallpaper on the same GPU), the stream moves to a longer buffer by itself instead of cutting the voice; the log says which stage took the time
 - **Converter** for whole files, and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
@@ -85,6 +90,7 @@ its own process; live conversion is slower meanwhile.
 1. Each chunk re-renders the last second of audio plus the new chunk, so the model always has context.
 2. The newest 150 ms are rendered but not played, so window edges never reach the output.
 3. Consecutive renders are joined at the best-matching offset (SOLA).
+   The pitch is tracked on the window itself, never on padding, so a rolled r or a laugh keeps its voicing.
 4. DeepFilterNet3 cleans what the model hears; Silero VAD and a periodicity check decide what is voice (a held vowel or a rolled r count as voice).
 5. The fast loudness movement of your voice (trills, stops) is put back on the converted voice, which the model alone smooths out.
 6. The result is brought to your own level and soft-limited.

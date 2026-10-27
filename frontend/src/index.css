@@ -285,6 +285,12 @@
 }
 
 @layer components {
+  /* Every screen sits on the Studio's three columns: cards span 1, 2 or 3 of
+     them, so their edges line up from one tab to the next. */
+  .page-grid {
+    @apply grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-3;
+  }
+
   /* Flat panel used across the workspace */
   .panel {
     @apply rounded-lg border border-line bg-panel;

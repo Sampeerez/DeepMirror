@@ -142,8 +142,8 @@ function VoiceProfile({ active, activeModel, inputDevices = [] }) {
   const progress = Math.min(100, (recorder.seconds / PROFILE_TARGET_SECONDS) * 100);
 
   return (
-    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-      <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="profile-record-title">
+    <div className="page-grid">
+      <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="profile-record-title">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="panel-kicker">My voice</p>

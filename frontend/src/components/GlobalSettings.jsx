@@ -5,6 +5,7 @@ import StreamDiagnostics from './StreamDiagnostics';
 import Toggle from './Toggle';
 import {
   Activity,
+  Anchor,
   AudioLines,
   Cpu,
   Gauge,
@@ -31,6 +32,8 @@ const THEME_OPTIONS = [
 
 const PROFILE_ICONS = {
   quality: ShieldCheck,
+  steady: Anchor,
+  'steady-plus': Anchor,
   balanced: Gauge,
   responsive: Zap,
   light: Cpu,
@@ -221,7 +224,7 @@ export default function GlobalSettings({
               ) : null}
             </div>
 
-            <div role="group" aria-label="Performance profile" className="mt-3 grid grid-cols-2 gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1 sm:grid-cols-4">
+            <div role="group" aria-label="Performance profile" className="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1">
               {PERFORMANCE_PROFILES.map((profile) => {
                 const Icon = PROFILE_ICONS[profile.id];
                 const selected = activeProfile.id === profile.id;
@@ -400,6 +403,14 @@ export default function GlobalSettings({
               Server delay {config.stream.algorithmic_delay_ms} ms
             </p>
           ) : null}
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-fg-secondary">Longer buffer when the computer is busy</p>
+              <p className="mt-0.5 text-xs text-fg-subtle">Adds up to 85 ms of delay instead of cutting the voice.</p>
+            </div>
+            <Toggle checked={config.autoHeadroom} onChange={(autoHeadroom) => onChange?.({ autoHeadroom })}
+              label="Longer buffer when the computer is busy" />
+          </div>
           <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-fg-secondary">Save my microphone with each take</p>

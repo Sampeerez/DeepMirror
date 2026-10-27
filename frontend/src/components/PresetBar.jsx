@@ -1,35 +1,39 @@
 import React, { memo, useCallback, useEffect, useState } from 'react';
-import { Check, Plus, Trash2, X } from 'lucide-react';
+import {
+  AudioLines, Bot, Building2, Check, Megaphone, Mountain, Phone, Plus, Radio, RadioTower, Sparkles, Trash2, X,
+} from 'lucide-react';
 import Button from './Button';
 import { fetchPresets, savePreset, deletePreset } from '../lib/api';
 
-function PresetChip({ preset, active, onApply, onDelete }) {
+// One glyph per built-in sound; anything new falls back to the sparkle.
+const PRESET_ICONS = {
+  clean: AudioLines,
+  radio: Radio,
+  telephone: Phone,
+  walkie: RadioTower,
+  megaphone: Megaphone,
+  robot: Bot,
+  stadium: Building2,
+  cave: Mountain,
+};
+
+function PresetTile({ preset, active, onApply }) {
+  const Icon = PRESET_ICONS[preset.id] || Sparkles;
   return (
-    <div className="group relative shrink-0">
-      <Button size="md" onClick={() => onApply(preset)} title={preset.description} aria-pressed={active}
-        selected={active} className={`max-w-48 ${active ? 'text-fg' : ''}`}>
-        {preset.emoji ? <span aria-hidden="true" className="mr-1.5">{preset.emoji}</span> : null}
-        {preset.name}
-      </Button>
-      {onDelete && (
-        /* reveal-on-hover: tucked away until hover/focus on a mouse-driven
-           device, always visible where there is no hover to reveal it. */
-        <button
-          onClick={(event) => {
-            event.stopPropagation();
-            onDelete(preset);
-          }}
-          title="Delete preset"
-          aria-label={`Delete ${preset.name} preset`}
-          className="reveal-on-hover absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-md border border-danger-line-strong bg-panel text-danger-fg shadow-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]"
-        >
-          <Trash2 className="h-3 w-3" aria-hidden="true" />
-        </button>
-      )}
-    </div>
+    <button type="button" onClick={() => onApply(preset)} title={preset.description} aria-pressed={active}
+      data-selected={active}
+      className={`frost-control flex h-14 min-w-0 flex-col items-center justify-center gap-1 px-2 ${
+        active ? 'text-fg' : 'text-fg-muted'}`}>
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className="max-w-full truncate text-xs font-medium">{preset.name}</span>
+    </button>
   );
 }
 
+/**
+ * The Studio's sound presets: the built-in ones as a row of equal tiles, the
+ * user's own in a menu beside them, with saving in place.
+ */
 function PresetBar({ activePresetId, onApplyPreset, getCurrentSettings, refreshRevision = 0 }) {
   const [presets, setPresets] = useState({ builtin: [], user: [] });
   const [saving, setSaving] = useState(false);
@@ -71,33 +75,27 @@ function PresetBar({ activePresetId, onApplyPreset, getCurrentSettings, refreshR
     }
   };
 
-  const handleDelete = async (preset) => {
+  const activeUser = presets.user.find((preset) => preset.id === activePresetId) || null;
+
+  const handleDelete = async () => {
+    if (!activeUser) return;
     try {
-      await deletePreset(preset.id);
+      await deletePreset(activeUser.id);
       await load();
     } catch (err) {
       setError(err.message || 'Failed to delete preset');
     }
   };
 
-  // One row of fixed height: the chips scroll sideways, saving happens in place.
   return (
-    <section id="presets" className="panel flex flex-wrap items-center gap-3 p-3 sm:flex-nowrap">
-      <p className="shrink-0 text-xs font-semibold text-fg-secondary">Presets</p>
-
-      <div className="order-last flex min-w-0 basis-full gap-2 overflow-x-auto py-1 sm:order-none sm:basis-auto sm:flex-1">
+    <section id="presets" aria-label="Presets" className="panel flex flex-col gap-3 p-3 lg:flex-row lg:items-center">
+      <div className="grid min-w-0 flex-1 grid-cols-4 gap-2 sm:grid-cols-8">
         {presets.builtin.map((preset) => (
-          <PresetChip key={preset.id} preset={preset} active={activePresetId === preset.id} onApply={onApplyPreset} />
+          <PresetTile key={preset.id} preset={preset} active={activePresetId === preset.id} onApply={onApplyPreset} />
         ))}
-        {presets.user.length > 0 && <div className="mx-1 w-px shrink-0 self-stretch bg-line-strong" />}
-        {presets.user.map((preset) => (
-          <PresetChip key={preset.id} preset={preset} active={activePresetId === preset.id} onApply={onApplyPreset}
-            onDelete={handleDelete} />
-        ))}
-        {error ? <p className="self-center truncate text-xs text-danger-fg" role="alert" title={error}>{error}</p> : null}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2 lg:w-80">
         {showSave ? (
           <>
             <input
@@ -111,14 +109,33 @@ function PresetBar({ activePresetId, onApplyPreset, getCurrentSettings, refreshR
               aria-label="Preset name"
               maxLength={40}
               autoFocus
-              className="field w-40"
+              className="field min-w-0 flex-1"
             />
             <Button size="md" icon={Check} variant="primary" onClick={handleSave} loading={saving}
               disabled={!saveName.trim()} aria-label="Save preset" title="Save preset" />
             <Button size="md" icon={X} onClick={() => setShowSave(false)} aria-label="Cancel preset save" title="Cancel" />
           </>
+        ) : error ? (
+          <p className="min-w-0 flex-1 truncate text-xs text-danger-fg" role="alert" title={error}>{error}</p>
         ) : (
-          <Button size="md" icon={Plus} onClick={() => setShowSave(true)} className="w-40">Save current</Button>
+          <>
+            <select aria-label="My presets" value={activeUser?.id || ''} disabled={presets.user.length === 0}
+              onChange={(event) => {
+                const preset = presets.user.find((item) => item.id === event.target.value);
+                if (preset) onApplyPreset(preset);
+              }}
+              className="native-select-safe field min-w-0 flex-1">
+              <option value="" disabled>{presets.user.length ? 'My presets' : 'No presets of mine yet'}</option>
+              {presets.user.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+            </select>
+            {activeUser ? (
+              <Button size="md" icon={Trash2} variant="danger" onClick={handleDelete}
+                aria-label={`Delete ${activeUser.name} preset`} title="Delete this preset" />
+            ) : null}
+            <Button size="md" icon={Plus} onClick={() => setShowSave(true)} title="Save the current sound as a preset">
+              Save
+            </Button>
+          </>
         )}
       </div>
     </section>

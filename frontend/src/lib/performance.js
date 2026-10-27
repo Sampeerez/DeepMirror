@@ -1,9 +1,12 @@
 // Streaming quality profiles. Each one trades latency for conversion quality:
 // a larger chunk gives the server more time per render, and more past/future
 // context gives the model steadier timbre and intonation at window seams.
-// Ordered from highest quality to lowest latency.
+// Ordered from highest quality to lowest latency; "Steady" keeps the quality
+// context with a longer chunk, for a computer busy with other work.
 export const PERFORMANCE_PROFILES = [
   { id: 'quality', label: 'Quality', chunkSize: 8192, lookbackSeconds: 1.0, lookaheadSeconds: 0.15 },
+  { id: 'steady', label: 'Steady', chunkSize: 10240, lookbackSeconds: 1.0, lookaheadSeconds: 0.15 },
+  { id: 'steady-plus', label: 'Steady+', chunkSize: 12288, lookbackSeconds: 1.0, lookaheadSeconds: 0.15 },
   { id: 'balanced', label: 'Balanced', chunkSize: 4096, lookbackSeconds: 1.0, lookaheadSeconds: 0.1 },
   { id: 'responsive', label: 'Responsive', chunkSize: 2048, lookbackSeconds: 0.5, lookaheadSeconds: 0.05 },
   // For CPU-only machines: a long chunk with lighter context still renders in realtime.
@@ -35,6 +38,18 @@ export function profileForChunkSize(chunkSize) {
     label: 'Custom',
     chunkSize: size,
   };
+}
+
+// Automatic headroom never goes past this (about 256 ms at 48 kHz).
+const MAX_AUTO_CHUNK_SIZE = 12288;
+
+/** The next longer chunk to try when the stream cannot keep up, or null at the limit. */
+export function roomierProfile(chunkSize) {
+  const size = Number(chunkSize);
+  return PERFORMANCE_PROFILES
+    .filter((profile) => profile.chunkSize > size && profile.chunkSize <= MAX_AUTO_CHUNK_SIZE
+      && profile.lookbackSeconds >= 1.0)
+    .sort((a, b) => a.chunkSize - b.chunkSize)[0] || null;
 }
 
 /** Context timing the server should use for a chunk size (custom sizes keep server defaults). */

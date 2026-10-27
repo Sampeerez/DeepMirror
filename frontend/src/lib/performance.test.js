@@ -4,6 +4,7 @@ import {
   percentile,
   profileForChunkSize,
   recommendPerformanceProfile,
+  roomierProfile,
   streamTimingForChunkSize,
 } from './performance';
 
@@ -24,7 +25,7 @@ describe('performance profile recommendation', () => {
   });
 
   it('moves to a longer chunk when network jitter exceeds the quality budget', () => {
-    expect(recommendation({ latencyHistory: Array(12).fill(400) }).profile.id).toBe('light');
+    expect(recommendation({ latencyHistory: Array(12).fill(400) }).profile.id).toBe('steady-plus');
   });
 
   it('falls back to the roomiest profile and marks overload when nothing fits', () => {
@@ -60,5 +61,12 @@ describe('performance helpers', () => {
 
   it('uses a nearest-rank percentile', () => {
     expect(percentile([10, 20, 30, 40], 0.95)).toBe(40);
+  });
+
+  it('steps a busy stream to a longer chunk with the same context, up to 256 ms', () => {
+    expect(roomierProfile(8192).chunkSize).toBe(10240);
+    expect(roomierProfile(10240).chunkSize).toBe(12288);
+    expect(roomierProfile(12288)).toBeNull();
+    expect(roomierProfile(4096).chunkSize).toBe(8192);
   });
 });

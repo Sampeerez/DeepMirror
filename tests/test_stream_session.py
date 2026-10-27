@@ -250,3 +250,12 @@ class TestHealth:
             session.note_timing(1.0)
             session.note_timing(session.chunk_size * 1000.0 / session.sample_rate + 50)
         assert any("longer than real time" in r.getMessage() for r in caplog.records)
+
+    def test_sustained_lateness_marks_the_stream_overloaded(self, session):
+        budget = session.chunk_size * 1000.0 / session.sample_rate
+        for _ in range(10):
+            session.note_timing(0.5 * budget)
+        assert not session.overloaded and session.status()["overloaded"] is False
+        for _ in range(5):
+            session.note_timing(0.99 * budget)   # barely in time still counts: no headroom left
+        assert session.overloaded and session.status()["overloaded"] is True

@@ -1,7 +1,7 @@
-"""Voice presets: the built-in characters plus user presets stored as JSON.
+"""Voice presets: the built-in sound colours plus user presets stored as JSON.
 
-A preset restores a voice in one click: pitch/formant, the effect rack and,
-optionally, the RVC controls. Optional fields are kept only when present, so
+A preset restores a sound in one click: the effect rack and, in user presets,
+pitch/formant and optionally the RVC controls. Optional fields are kept only when present, so
 built-in presets (which describe a character, not a pitch tracker) never
 override a user's detector or retrieval settings.
 """
@@ -22,155 +22,20 @@ logger = logging.getLogger(__name__)
 MAX_USER_PRESETS = 100
 OPTIONAL_CONTROLS = ("index_rate", "filter_radius", "rms_mix_rate", "protect", "crepe_hop_length")
 
+# Built-in presets only colour the sound: they never touch the pitch or the
+# formant, which each voice calibrates to the speaker.
 BUILTIN_PRESETS = [
     {
         "id": "clean",
-        "name": "Clean",
-        "emoji": "🎙️",
-        "description": "No coloration: raw model or mic output",
-        "settings": {"pitch_shift": 0, "formant_shift": 0, "effects": {}},
-    },
-    {
-        "id": "chipmunk",
-        "name": "Chipmunk",
-        "emoji": "🐿️",
-        "description": "High pitch, bright formants",
-        "settings": {
-            "pitch_shift": 7,
-            "formant_shift": 4,
-            "effects": {},
-        },
-    },
-    {
-        "id": "helium",
-        "name": "Helium",
-        "emoji": "🎈",
-        "description": "Balloon-gas timbre, mostly formants",
-        "settings": {
-            "pitch_shift": 3,
-            "formant_shift": 7,
-            "effects": {},
-        },
-    },
-    {
-        "id": "deep",
-        "name": "Deep Voice",
-        "emoji": "🎩",
-        "description": "Lowered pitch with darker formants",
-        "settings": {
-            "pitch_shift": -6,
-            "formant_shift": -4,
-            "effects": {"eq": {"enabled": True, "low": 4, "high": -2}},
-        },
-    },
-    {
-        "id": "monster",
-        "name": "Monster",
-        "emoji": "👹",
-        "description": "Growling low pitch with drive",
-        "settings": {
-            "pitch_shift": -9,
-            "formant_shift": -5,
-            "effects": {
-                "distortion": {"enabled": True, "drive": 0.45},
-                "reverb": {"enabled": True, "size": 0.35, "mix": 0.25},
-            },
-        },
-    },
-    {
-        "id": "robot",
-        "name": "Robot",
-        "emoji": "🤖",
-        "description": "Ring-mod metal voice with bit reduction",
-        "settings": {
-            "pitch_shift": 0,
-            "formant_shift": 0,
-            "effects": {
-                "robot": {"enabled": True, "freq": 90},
-                "bitcrush": {"enabled": True, "bits": 10, "down": 2},
-            },
-        },
-    },
-    {
-        "id": "alien",
-        "name": "Alien",
-        "emoji": "👽",
-        "description": "Slow ring-mod wobble with chorus",
-        "settings": {
-            "pitch_shift": 2,
-            "formant_shift": 2,
-            "effects": {
-                "robot": {"enabled": True, "freq": 28},
-                "chorus": {"enabled": True, "rate": 1.6, "depth": 0.7, "mix": 0.5},
-            },
-        },
-    },
-    {
-        "id": "whisper",
-        "name": "Whisper",
-        "emoji": "🤫",
-        "description": "Breathy noise-excited voice",
-        "settings": {
-            "pitch_shift": 0,
-            "formant_shift": 0,
-            "effects": {
-                "whisper": {"enabled": True, "mix": 0.85},
-                "gain": {"enabled": True, "db": 4},
-            },
-        },
-    },
-    {
-        "id": "ghost",
-        "name": "Ghost",
-        "emoji": "👻",
-        "description": "Whispery echoes in a large space",
-        "settings": {
-            "pitch_shift": -2,
-            "formant_shift": 0,
-            "effects": {
-                "whisper": {"enabled": True, "mix": 0.6},
-                "reverb": {"enabled": True, "size": 0.85, "mix": 0.5},
-                "echo": {"enabled": True, "time": 0.42, "feedback": 0.45, "mix": 0.3},
-            },
-        },
-    },
-    {
-        "id": "telephone",
-        "name": "Telephone",
-        "emoji": "📞",
-        "description": "Narrowband landline call",
-        "settings": {
-            "pitch_shift": 0,
-            "formant_shift": 0,
-            "effects": {
-                "telephone": {"enabled": True},
-                "compressor": {"enabled": True, "threshold": -24, "ratio": 4},
-            },
-        },
-    },
-    {
-        "id": "megaphone",
-        "name": "Megaphone",
-        "emoji": "📣",
-        "description": "Distorted PA horn",
-        "settings": {
-            "pitch_shift": 0,
-            "formant_shift": 0,
-            "effects": {
-                "telephone": {"enabled": True},
-                "distortion": {"enabled": True, "drive": 0.55},
-                "gain": {"enabled": True, "db": 3},
-            },
-        },
+        "name": "Natural",
+        "description": "No effects: the voice as converted",
+        "settings": {"effects": {}},
     },
     {
         "id": "radio",
-        "name": "Radio DJ",
-        "emoji": "📻",
+        "name": "Radio",
         "description": "Broadcast warmth and compression",
         "settings": {
-            "pitch_shift": 0,
-            "formant_shift": 0,
             "effects": {
                 "eq": {"enabled": True, "low": 3, "high": 2},
                 "compressor": {"enabled": True, "threshold": -26, "ratio": 5},
@@ -179,28 +44,57 @@ BUILTIN_PRESETS = [
         },
     },
     {
-        "id": "cave",
-        "name": "Cave",
-        "emoji": "🕳️",
-        "description": "Long dark echoes",
+        "id": "telephone",
+        "name": "Phone",
+        "description": "Narrowband landline call",
         "settings": {
-            "pitch_shift": 0,
-            "formant_shift": 0,
             "effects": {
-                "reverb": {"enabled": True, "size": 0.85, "mix": 0.45},
-                "echo": {"enabled": True, "time": 0.35, "feedback": 0.5, "mix": 0.35},
-                "eq": {"enabled": True, "low": 2, "high": -4},
+                "telephone": {"enabled": True},
+                "compressor": {"enabled": True, "threshold": -24, "ratio": 4},
+            },
+        },
+    },
+    {
+        "id": "walkie",
+        "name": "Walkie-talkie",
+        "description": "Crackly two-way radio",
+        "settings": {
+            "effects": {
+                "telephone": {"enabled": True},
+                "distortion": {"enabled": True, "drive": 0.3},
+                "bitcrush": {"enabled": True, "bits": 10, "down": 2},
+                "compressor": {"enabled": True, "threshold": -24, "ratio": 6},
+            },
+        },
+    },
+    {
+        "id": "megaphone",
+        "name": "Megaphone",
+        "description": "Distorted PA horn",
+        "settings": {
+            "effects": {
+                "telephone": {"enabled": True},
+                "distortion": {"enabled": True, "drive": 0.55},
+                "gain": {"enabled": True, "db": 3},
+            },
+        },
+    },
+    {
+        "id": "robot",
+        "name": "Robot",
+        "description": "Ring-mod metal voice with bit reduction",
+        "settings": {
+            "effects": {
+                "robot": {"enabled": True, "freq": 90},
+                "bitcrush": {"enabled": True, "bits": 10, "down": 2},
             },
         },
     },
     {
         "id": "stadium",
-        "name": "Stadium",
-        "emoji": "🏟️",
-        "description": "Huge announcement reverb",
+        "name": "Hall",
+        "description": "Big announcement reverb",
         "settings": {
-            "pitch_shift": 0,
-            "formant_shift": 0,
             "effects": {
                 "echo": {"enabled": True, "time": 0.6, "feedback": 0.4, "mix": 0.4},
                 "reverb": {"enabled": True, "size": 1.0, "mix": 0.5},
@@ -209,35 +103,18 @@ BUILTIN_PRESETS = [
         },
     },
     {
-        "id": "underwater",
-        "name": "Underwater",
-        "emoji": "🌊",
-        "description": "Muffled, slowly wobbling depths",
+        "id": "cave",
+        "name": "Cave",
+        "description": "Long dark echoes",
         "settings": {
-            "pitch_shift": 0,
-            "formant_shift": -2,
             "effects": {
-                "eq": {"enabled": True, "low": 6, "high": -12},
-                "chorus": {"enabled": True, "rate": 0.3, "depth": 0.8, "mix": 0.6},
-            },
-        },
-    },
-    {
-        "id": "arcade",
-        "name": "Arcade",
-        "emoji": "🕹️",
-        "description": "8-bit crushed game cabinet voice",
-        "settings": {
-            "pitch_shift": 2,
-            "formant_shift": 0,
-            "effects": {
-                "bitcrush": {"enabled": True, "bits": 6, "down": 6},
-                "eq": {"enabled": True, "low": -2, "high": 4},
+                "reverb": {"enabled": True, "size": 0.85, "mix": 0.45},
+                "echo": {"enabled": True, "time": 0.35, "feedback": 0.5, "mix": 0.35},
+                "eq": {"enabled": True, "low": 2, "high": -4},
             },
         },
     },
 ]
-
 
 
 def normalize_settings(settings: object) -> dict:
@@ -304,7 +181,7 @@ class PresetStore:
         with self._lock:
             return [{**p, "builtin": False} for p in self._presets.values()]
 
-    def save(self, name: str, settings: dict, emoji: str = "⭐") -> dict:
+    def save(self, name: str, settings: dict) -> dict:
         name = name.strip()
         if not name:
             raise ValueError("Preset name is empty")
@@ -317,7 +194,6 @@ class PresetStore:
         preset = {
             "id": preset_id,
             "name": name,
-            "emoji": (emoji or "⭐")[:4],
             "description": "Custom preset",
             # Stores the full Voice Lab state, not just pitch/formant/effects,
             # so applying a preset restores everything the user tuned.

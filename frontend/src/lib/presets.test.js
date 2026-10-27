@@ -29,8 +29,7 @@ const TUNED_VOICE = {
   crepeHopLength: 128,
 };
 
-// A preset saved before the advanced fields existed, and a built-in preset:
-// both describe only pitch/formant/effects.
+// A preset saved before the advanced fields existed: only pitch/formant/effects.
 const LEGACY_PRESET = {
   id: 'user-old',
   settings: { pitch_shift: 7, formant_shift: 4, effects: { reverb: { enabled: true } } },
@@ -131,7 +130,7 @@ describe('voiceFromPreset', () => {
   it('keeps the current advanced values for a legacy preset', () => {
     const next = voiceFromPreset(LEGACY_PRESET, TUNED_VOICE);
 
-    // pitch/formant still follow the preset, the long-standing behaviour.
+    // pitch/formant follow the preset when it saved them.
     expect(next.pitch).toBe(7);
     expect(next.formant).toBe(4);
     // ...but nothing the preset does not mention gets reset.
@@ -143,10 +142,10 @@ describe('voiceFromPreset', () => {
     expect(next.crepeHopLength).toBe(TUNED_VOICE.crepeHopLength);
   });
 
-  it('defaults pitch and formant to zero when the preset omits them', () => {
-    const next = voiceFromPreset({ id: 'x', settings: { effects: {} } }, TUNED_VOICE);
-    expect(next.pitch).toBe(0);
-    expect(next.formant).toBe(0);
+  it('keeps the calibrated pitch and formant for an effects-only (built-in) preset', () => {
+    const next = voiceFromPreset({ id: 'radio', settings: { effects: {} } }, TUNED_VOICE);
+    expect(next.pitch).toBe(TUNED_VOICE.pitch);
+    expect(next.formant).toBe(TUNED_VOICE.formant);
   });
 
   it('keeps current values when a preset carries an unusable advanced value', () => {
@@ -170,7 +169,7 @@ describe('voiceFromPreset', () => {
 
   it('tolerates a missing preset', () => {
     const next = voiceFromPreset(undefined, TUNED_VOICE);
-    expect(next.pitch).toBe(0);
+    expect(next.pitch).toBe(TUNED_VOICE.pitch);
     expect(next.indexRate).toBe(TUNED_VOICE.indexRate);
   });
 

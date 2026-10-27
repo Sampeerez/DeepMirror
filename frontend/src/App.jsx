@@ -24,6 +24,7 @@ import { APP_NAME } from './lib/brand';
 import { defaultEffects } from './lib/effects';
 import { effectsFromPresetSettings, presetSettingsFromVoice, voiceFromPreset } from './lib/presets';
 import { buildTabUrl, readTabFromSearch } from './lib/navigation';
+import { roomierProfile } from './lib/performance';
 import { shouldTriggerShortcut } from './lib/shortcuts';
 import { readStored, writeStored } from './lib/storage';
 import { applyTheme, readAppliedTheme, storeTheme } from './lib/theme';
@@ -37,6 +38,8 @@ const VoiceProfile = lazy(() => import('./components/VoiceProfile'));
 
 const ACTIVE_MODEL_POLL_MS = 5000;
 const CAPTURE_SAMPLES_KEY = 'ovc_capture_samples_v1';
+// After a longer chunk is chosen, the server measures it for this long before another step.
+const HEADROOM_SETTLE_MS = 5000;
 
 /** Drop ?settings from the address bar without adding a history entry. */
 function clearSettingsParam() {
@@ -209,6 +212,21 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [isRunning, underruns, dropped, timedOut, sendSettings]);
 
+  // A computer too busy to keep up gets a longer chunk, one step at a time (each
+  // step waits for the server to measure the new size before judging it).
+  const { changeLiveChunkSize } = runtime;
+  const { setChunkSize } = pipeline;
+  const overloaded = isRunning && runtimeConfig.autoHeadroom && serverStats.overloaded;
+  const lastHeadroomStepRef = useRef(0);
+  useEffect(() => {
+    if (!overloaded || Date.now() - lastHeadroomStepRef.current < HEADROOM_SETTLE_MS) return;
+    const next = roomierProfile(runtimeConfig.chunkSize);
+    if (!next) return;
+    lastHeadroomStepRef.current = Date.now();
+    setChunkSize(next.chunkSize);
+    changeLiveChunkSize(next.chunkSize);
+  }, [overloaded, serverStats, runtimeConfig.chunkSize, setChunkSize, changeLiveChunkSize]);
+
   // No stream, no latency to show.
   useEffect(() => {
     if (!isRunning) resetLatency();
@@ -327,7 +345,24 @@ export default function App() {
           onRetryConnection={retryNow}
         />
 
-        <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-3">
+        <div className="page-grid">
+          <MonitorDisplay
+            meters={pipeline.meters}
+            latency={latency}
+            latencyHistory={latencyHistory}
+            serverMs={serverMs}
+            serverStats={serverStats}
+            bypass={bypass}
+            visualizer={(
+              <Visualizer
+                getAnalysers={pipeline.getAnalysers}
+                isRunning={pipeline.isRunning}
+                theme={theme}
+                active={tab === 'studio'}
+              />
+            )}
+            recorder={<Recorder pipeline={pipeline} />}
+          />
           <VoiceLab
             voice={voice}
             onChange={handleVoiceChange}
@@ -350,23 +385,6 @@ export default function App() {
             effects={effects}
             onEffectsChange={handleEffectsChange}
             denoiser={pipeline.isRunning ? serverStats.denoiser : null}
-          />
-          <MonitorDisplay
-            meters={pipeline.meters}
-            latency={latency}
-            latencyHistory={latencyHistory}
-            serverMs={serverMs}
-            serverStats={serverStats}
-            bypass={bypass}
-            visualizer={(
-              <Visualizer
-                getAnalysers={pipeline.getAnalysers}
-                isRunning={pipeline.isRunning}
-                theme={theme}
-                active={tab === 'studio'}
-              />
-            )}
-            recorder={<Recorder pipeline={pipeline} />}
           />
         </div>
 

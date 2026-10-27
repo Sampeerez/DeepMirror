@@ -15,8 +15,10 @@ const FALLBACK_COLORS = {
   idle: 'rgba(255, 255, 255, 0.07)',
 };
 
-// The idle animation is decoration; it does not need a full 60 fps.
+// The idle animation is decoration; it does not need a full 60 fps. Nor does the
+// live spectrum: every frame drawn competes with the voice model for the GPU.
 const IDLE_FRAME_INTERVAL_MS = 1000 / 24;
+const LIVE_FRAME_INTERVAL_MS = 1000 / 30;
 
 // Real-time canvas visualizer: flat single-color output spectrum with the
 // input spectrum as a dim layer behind it, plus a quiet idle animation.
@@ -34,8 +36,8 @@ function Visualizer({ getAnalysers, isRunning, theme, active = true }) {
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
-  // Resolved once per theme change and cached in a ref. The draw loop runs at
-  // 60fps, so it must never call getComputedStyle itself, that would force a
+  // Resolved once per theme change and cached in a ref. The draw loop runs
+  // every animation frame, so it must never call getComputedStyle itself, that would force a
   // style recalc on every frame.
   useEffect(() => {
     const resolved = readThemeColors(CANVAS_COLORS, document.documentElement);
@@ -73,7 +75,7 @@ function Visualizer({ getAnalysers, isRunning, theme, active = true }) {
 
     const inputData = new Uint8Array(1024);
     const outputData = new Uint8Array(1024);
-    let lastIdleFrame = 0;
+    let lastFrame = 0;
 
     const draw = (timestamp) => {
       animRef.current = requestAnimationFrame(draw);
@@ -83,10 +85,8 @@ function Visualizer({ getAnalysers, isRunning, theme, active = true }) {
       const colors = colorsRef.current;
       const running = isRunningRef.current && (input || output);
 
-      if (!running) {
-        if (timestamp - lastIdleFrame < IDLE_FRAME_INTERVAL_MS) return;
-        lastIdleFrame = timestamp;
-      }
+      if (timestamp - lastFrame < (running ? LIVE_FRAME_INTERVAL_MS : IDLE_FRAME_INTERVAL_MS)) return;
+      lastFrame = timestamp;
 
       ctx.clearRect(0, 0, width, height);
 
