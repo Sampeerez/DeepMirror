@@ -5,8 +5,8 @@ import Toggle from './Toggle';
 import { BigSlider, MiniSlider } from './Sliders';
 
 // Auto only works with voices trained here (they store their pitch); say so when it cannot.
-function pitchHint(voice, autoPitchAvailable, isRunning) {
-  if (voice.autoPitch && isRunning && !autoPitchAvailable) return 'Auto needs a voice trained in this studio.';
+function pitchHint(voice, autoPitchAvailable, isRunning, hasModel) {
+  if (voice.autoPitch && isRunning && hasModel && !autoPitchAvailable) return 'Auto needs a voice trained here';
   return null;
 }
 
@@ -19,11 +19,11 @@ function calibrationText(isRunning, speakerProfile) {
   return `Your voice: ${Math.round(speakerProfile.median_hz)} Hz, ±${speakerProfile.range_semitones} st`;
 }
 
-/** The Voice card: pitch, melody and timbre (the tracker and the model's detail are in Voice › Settings). */
+/** Pitch, melody and timbre (the tracker and the model's detail are in Settings › Voice). */
 function VoiceLab({
   voice, onChange, isRunning, autoPitchAvailable = false, autoPitchShift = null,
   f0Pending = null, tooSlow = false, speakerProfile = null, expressivenessApplied = null, onRecalibrate,
-  f0Methods = FALLBACK_F0_METHODS,
+  f0Methods = FALLBACK_F0_METHODS, hasModel = true,
 }) {
   const autoActive = voice.autoPitch && autoPitchAvailable && autoPitchShift !== null;
   const autoExpressiveness = voice.autoPitch && autoPitchAvailable ? expressivenessApplied : null;
@@ -34,17 +34,8 @@ function VoiceLab({
       : f0Pending === selectedMethod.id ? 'Loading…' : 'Ready';
 
   return (
-    <section className="panel flex h-full min-h-0 flex-col p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="panel-kicker text-ok-fg">Voice</p>
-          <h2 className="panel-title truncate">Pitch & timbre</h2>
-        </div>
-        <span className={`shrink-0 rounded-sm border px-2 py-1 text-[11px] font-medium ${
-          isRunning ? 'border-ok-line bg-ok-bg text-ok-fg' : 'border-line-strong bg-control text-fg-subtle'}`}>
-          {isRunning ? 'Live' : 'Applies on start'}
-        </span>
-      </div>
+    <section className="panel flex min-h-0 flex-1 flex-col p-4">
+      <h2 className="flex h-7 items-center text-sm font-semibold text-fg">Pitch & timbre</h2>
 
       <div className="mt-3 min-h-0 flex-1 space-y-3.5 overflow-y-auto pr-1">
         <BigSlider
@@ -63,7 +54,7 @@ function VoiceLab({
               Auto
             </span>
           )}
-          hint={pitchHint(voice, autoPitchAvailable, isRunning)}
+          hint={pitchHint(voice, autoPitchAvailable, isRunning, hasModel)}
         />
 
         <div>
@@ -108,7 +99,7 @@ function VoiceLab({
         {tooSlow || !selectedMethod.available || f0Pending === selectedMethod.id ? (
           <p className="text-[11px] leading-4 text-warn-fg" role="status">
             Pitch tracker {selectedMethod.label}: {trackerState}.
-            {tooSlow ? ' The voice will stutter: choose RMVPE in Voice › Settings.' : ''}
+            {tooSlow ? ' Choose RMVPE in Settings.' : ''}
           </p>
         ) : null}
       </div>

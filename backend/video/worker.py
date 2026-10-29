@@ -235,7 +235,10 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                             camera = _VirtualCamera(int(width), int(height), int(config.get("fps", 30)))
                             log(logging.INFO, f"Virtual camera on: {camera.device}")
                         except Exception as exc:
-                            send("camera_error", str(exc))
+                            log(logging.WARNING, f"Virtual camera unavailable: {exc}")
+                            missing = "not installed" in str(exc).lower() or "no camera" in str(exc).lower()
+                            send("camera_error", "Virtual camera not installed: Settings › Calls › Set up"
+                                 if missing else f"Virtual camera: {exc}")
                     if camera is not None:
                         camera.delay = max(0.0, float(config.get("delay_ms", 0)) / 1000)
                 elif kind == "convert":

@@ -88,7 +88,7 @@ function AddFace({ face }) {
           <p className="text-sm font-medium text-fg-secondary">
             {files.length ? `${files.length} photo${files.length === 1 ? '' : 's'} chosen` : 'Drop photos or click to choose'}
           </p>
-          <p className="mt-0.5 text-xs text-fg-faint">1 to {MAX_PHOTOS}; several angles make the clone steadier.</p>
+          <p className="mt-0.5 text-xs text-fg-faint">1–{MAX_PHOTOS} photos · several angles</p>
         </div>
       </div>
       {files.length ? (
@@ -105,11 +105,6 @@ function AddFace({ face }) {
         <input id="face-name" className="field mt-1.5" value={name} maxLength={60} placeholder="My character"
           onChange={(event) => setName(event.target.value)} />
       </div>
-      <ul className="space-y-1 text-[11px] leading-4 text-fg-faint">
-        <li>Sharp, well-lit photos where the face is large and unobstructed.</li>
-        <li>Front and three-quarter views; no sunglasses or hands over the face.</li>
-        <li>Use faces you have permission to use.</li>
-      </ul>
       <div className="mt-auto border-t border-line pt-3">
         <Button variant="primary" size="md" icon={Check} onClick={submit} disabled={!files.length}
           loading={face.busy} className="w-40">Add face</Button>
@@ -132,7 +127,7 @@ function FaceTile({ item, wearing, onWear, onDelete, busy }) {
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-fg" title={item?.name}>{item ? item.name : 'My own face'}</p>
           <p className="text-[11px] text-fg-faint">
-            {item ? `${item.photos} photo${item.photos === 1 ? '' : 's'}` : 'No swap, just the camera'}
+            {item ? `${item.photos} photo${item.photos === 1 ? '' : 's'}` : 'No swap'}
           </p>
         </div>
         <div className="mt-auto flex items-center gap-1.5">
@@ -156,10 +151,8 @@ function FaceLibrary({ face }) {
   const active = face.status?.active_face || null;
   return (
     <div className="page-grid">
-      <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="faces-title">
-        <p className="panel-kicker text-video-fg">Face</p>
+      <section className="panel flex min-h-0 flex-col p-4 lg:col-span-2" aria-labelledby="faces-title">
         <h2 id="faces-title" className="panel-title">Faces</h2>
-        <p className="mt-1 text-xs text-fg-subtle">The face you wear in Live. Your expressions, gaze and head stay yours.</p>
         <ul className="mt-4 grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 xl:grid-cols-5">
           <FaceTile item={null} wearing={!active} onWear={() => face.activate(null)} busy={face.busy} />
           {faces.map((item) => (
@@ -170,8 +163,7 @@ function FaceLibrary({ face }) {
         {face.error ? <p className="mt-3 break-words text-xs text-danger-fg" role="alert">{face.error}</p> : null}
       </section>
 
-      <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="faces-add-title">
-        <p className="panel-kicker text-video-fg">Face</p>
+      <section className="panel flex min-h-0 flex-col p-4" aria-labelledby="faces-add-title">
         <h2 id="faces-add-title" className="panel-title">{face.ready ? 'Add a face' : 'Set up the face clone'}</h2>
         <div className="mt-4 flex min-h-0 flex-1 flex-col">
           {face.ready ? <AddFace face={face} /> : <ModelDownload face={face} />}

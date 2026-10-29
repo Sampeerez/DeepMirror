@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 from fastapi import APIRouter, Request
 
@@ -27,6 +28,34 @@ async def virtual_mic_status(request: Request) -> dict:
 async def install_virtual_mic(request: Request) -> dict:
     """Download the official VB-CABLE package and open its installer (Linux: create the devices)."""
     return await asyncio.to_thread(request.app.state.virtual_mic.install)
+
+
+@router.get("/api/virtual-camera")
+async def virtual_camera_status(request: Request) -> dict:
+    return await asyncio.to_thread(request.app.state.virtual_camera.status)
+
+
+@router.get("/api/calls")
+async def calls_status(request: Request) -> dict:
+    """What calls need: the virtual microphone and the virtual camera."""
+    mic, camera = await asyncio.gather(asyncio.to_thread(request.app.state.virtual_mic.status),
+                                       asyncio.to_thread(request.app.state.virtual_camera.status))
+    return {"microphone": mic, "camera": camera}
+
+
+@router.post("/api/calls/setup")
+async def setup_calls(request: Request) -> dict:
+    """Install whatever is missing, the microphone first, then the camera (one prompt each)."""
+    mic, camera = request.app.state.virtual_mic, request.app.state.virtual_camera
+
+    def run() -> None:
+        if mic.status()["supported"] and not mic.status()["installed"]:
+            mic.install(wait=True)
+        if camera.status()["supported"] and not camera.status()["installed"]:
+            camera.install(wait=True)
+
+    threading.Thread(target=run, name="calls-setup", daemon=True).start()
+    return await calls_status(request)
 
 
 @router.get("/api/config")

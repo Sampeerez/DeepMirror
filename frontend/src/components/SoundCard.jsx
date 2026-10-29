@@ -3,12 +3,13 @@ import { RotateCcw } from 'lucide-react';
 import { isRecommendedVoice } from '../lib/voice';
 import Button from './Button';
 import EffectsRack from './EffectsRack';
+import PresetGrid from './PresetGrid';
 import { MiniSlider, SwitchRow } from './Sliders';
 import { readStored, writeStored } from '../lib/storage';
 
 const TABS = [
   { id: 'cleanup', label: 'Clean-up' },
-  { id: 'effects', label: 'Effects' },
+  { id: 'effects', label: 'Effects rack' },
 ];
 const TAB_KEY = 'ovc_sound_tab_v1';
 
@@ -49,8 +50,8 @@ function CleanupTab({ voice, onChange, denoiser }) {
   );
 }
 
-/** The Sound card: what happens around the model (clean-up, effects). */
-function SoundCard({ voice, onChange, onRestoreRecommended, effects, onEffectsChange, denoiser }) {
+/** The Effects card: the presets, then the clean-up and the effects rack. */
+function SoundCard({ voice, onChange, onRestoreRecommended, effects, onEffectsChange, denoiser, presets = null }) {
   const [tab, setTab] = useState(() => {
     const stored = readStored(TAB_KEY);
     return TABS.some(({ id }) => id === stored) ? stored : 'cleanup';
@@ -71,17 +72,15 @@ function SoundCard({ voice, onChange, onRestoreRecommended, effects, onEffectsCh
   };
 
   return (
-    <section className="panel flex h-full min-h-0 flex-col p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="panel-kicker">Sound</p>
-          <h2 className="panel-title truncate">Clean-up & effects</h2>
-        </div>
+    <section className="panel flex h-full min-h-0 flex-col p-4">
+      <div className="flex h-7 items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-fg">Effects</h2>
         <Button icon={RotateCcw} onClick={onRestoreRecommended} disabled={recommended}
-          title="This voice's own changes and effects are dropped">
-          {recommended ? 'Automatic' : 'Back to automatic'}
+          title="Back to this voice's automatic settings">
+          Reset
         </Button>
       </div>
+      {presets ? <div className="mt-3"><PresetGrid {...presets} /></div> : null}
       <div ref={listRef} role="tablist" aria-label="Sound" onKeyDown={onKeyDown}
         className="mt-3 grid grid-cols-2 gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1">
         {TABS.map(({ id, label }) => {

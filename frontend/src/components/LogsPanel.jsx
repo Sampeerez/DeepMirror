@@ -128,7 +128,6 @@ function LogsPanel({ active }) {
     <section className="panel flex h-[75svh] min-h-[420px] flex-col p-5 lg:h-auto lg:min-h-0 lg:flex-1">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="panel-kicker">Logs</p>
           <h2 className="panel-title">What the studio is doing</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">

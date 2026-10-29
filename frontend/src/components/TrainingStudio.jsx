@@ -108,9 +108,8 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
       {job.error ? <p className="mt-3 break-words text-xs text-danger-fg">{job.error}</p> : null}
       {job.exported_epoch ? (
         <p className="mt-3 break-words text-xs text-fg-subtle">
-          {bestEpochSummary(job)} File: <span className="break-all font-mono text-fg-secondary">{jobModelFile(job)}</span>
-          {job.index ? ' with its index' : ''}
-          {job.f0_stats?.median_hz ? ` · voice pitch ${Math.round(job.f0_stats.median_hz)} Hz (used by Auto pitch)` : ''}.
+          {bestEpochSummary(job)}
+          {job.f0_stats?.median_hz ? ` · ${Math.round(job.f0_stats.median_hz)} Hz` : ''}
         </p>
       ) : null}
 
@@ -123,9 +122,8 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
             <Button size="md" variant="primary" icon={Wand2} onClick={() => onUse(job)} disabled={busy}>
               Use this voice
             </Button>
-            <Button size="md" href={modelDownloadUrl(jobModelFile(job))} download icon={Download}
-              title="The trained voice is already saved in Models; this downloads a copy (.pth and .index)">
-              Download .zip
+            <Button size="md" href={modelDownloadUrl(jobModelFile(job))} download icon={Download}>
+              Download
             </Button>
           </div>
         ) : null}
@@ -139,7 +137,7 @@ function JobCard({ job, onStop, onResume, onDelete, onUse, busy }) {
                   className="field w-24 shrink-0" aria-label="Total epochs when continuing" title="Total epochs" />
                 <Button size="md" icon={RotateCcw} disabled={busy} className="min-w-0 flex-1"
                   onClick={() => onResume(job, moreEpochs ? Number(moreEpochs) : null)}>
-                  Continue training
+                  Continue
                 </Button>
               </div>
             ) : <div className="flex-1" />}
@@ -257,14 +255,8 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
 
   return (
     <div className="page-grid">
-      <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="training-title">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="panel-kicker text-ok-fg">Voice</p>
-            <h2 id="training-title" className="panel-title">Create a voice</h2>
-          </div>
-          <GraduationCap className="hidden h-7 w-7 shrink-0 text-fg-subtle sm:block" strokeWidth={1.5} aria-hidden="true" />
-        </div>
+      <section className="panel flex min-h-0 flex-col p-4 lg:col-span-2" aria-labelledby="training-title">
+        <h2 id="training-title" className="panel-title">Create a voice</h2>
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
 
         {info?.device ? (
@@ -297,9 +289,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
           <Upload className="h-6 w-6 shrink-0 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
           <div className="min-w-0 text-left">
             <p className="text-sm font-medium text-fg-secondary">Drop recordings or click to choose</p>
-            <p className="mt-0.5 text-xs text-fg-faint">
-              One speaker; music and noise are removed. 5 min or more; 10–30 min is best.
-            </p>
+            <p className="mt-0.5 text-xs text-fg-faint">One speaker · 10–30 min is best</p>
           </div>
         </div>
 
@@ -317,23 +307,22 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             ))}
           </ul>
         ) : null}
-        <p className={`mt-2 text-xs ${TONE_CLASS[quality.tone]}`} role="status">
-          {totalSeconds ? `${formatDuration(totalSeconds)} in total. ` : ''}{quality.text}
-        </p>
+        {totalSeconds ? (
+          <p className={`mt-2 text-xs ${TONE_CLASS[quality.tone]}`} role="status">
+            {formatDuration(totalSeconds)} · {quality.text}
+          </p>
+        ) : null}
 
         <div className="mt-3 grid gap-x-4 gap-y-3 sm:grid-cols-2">
-          <Field label="Voice name" htmlFor="training-name" hint="Saved in Voices as <name>.pth.">
+          <Field label="Voice name" htmlFor="training-name">
             <input id="training-name" className={inputClass} value={name} maxLength={60}
               onChange={(event) => setName(event.target.value)} placeholder="my_voice" />
           </Field>
-          <Field label="Sample rate" hint="40 kHz suits most microphones.">
+          <Field label="Sample rate">
             <Segmented label="Sample rate" hideLabel accent="voice" size="sm" value={sampleRate} onChange={setSampleRate}
               options={(info?.sample_rates || [40000, 48000]).map((rate) => ({ value: rate, label: `${rate / 1000} kHz` }))} />
           </Field>
-          <Field label={autoPlan ? 'Epochs' : `Epochs: ${epochs}`}
-            hint={autoPlan
-              ? 'Planned from your audio and GPU; the best epoch is kept.'
-              : 'Upper limit; the best epoch is kept. Stop any time: it saves.'}>
+          <Field label={autoPlan ? 'Epochs' : `Epochs: ${epochs}`}>
             <Segmented label="Epochs" hideLabel accent="voice" size="sm" value={autoPlan ? 'auto' : 'manual'}
               onChange={(value) => setAutoPlan(value === 'auto')}
               options={[{ value: 'auto', label: 'Automatic' }, { value: 'manual', label: 'Manual' }]} />
@@ -343,28 +332,25 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
                 className="fx-slider mt-3 w-full" />
             ) : null}
           </Field>
-          <Field label="Batch size" htmlFor="training-batch"
-            hint={autoPlan ? 'Fits your GPU memory.' : 'Empty = automatic.'}>
+          <Field label="Batch size" htmlFor="training-batch">
             <input id="training-batch" type="number" min={1} max={32} className={inputClass} value={autoPlan ? '' : batchSize}
               disabled={autoPlan} onChange={(event) => setBatchSize(event.target.value)} placeholder="Auto" />
           </Field>
-          <Field label="Training quality"
-            hint={trainingQuality === 'high' ? 'Several hours on a mid-range GPU; the best epoch is kept.' : 'Faster.'}>
+          <Field label="Training quality">
             <Segmented label="Training quality" hideLabel accent="voice" size="sm" value={trainingQuality}
               onChange={setTrainingQuality}
               options={[{ value: 'high', label: 'High' }, { value: 'standard', label: 'Standard' }]} />
           </Field>
-          <Field label="Background"
-            hint={isolate ? 'Music, noise and other sounds are removed first.' : 'For recordings already clean.'}>
+          <Field label="Background">
             <Segmented label="Background" hideLabel accent="voice" size="sm" value={isolate ? 'voice' : 'as-is'}
               onChange={(value) => setIsolate(value === 'voice')}
               options={[{ value: 'voice', label: 'Voice only' }, { value: 'as-is', label: 'As it is' }]} />
           </Field>
-          <Field label="Base model" hint="TITAN is tuned on expressive speech (recommended).">
+          <Field label="Base model">
             <Segmented label="Base model" hideLabel accent="voice" size="sm" value={base || 'official'} onChange={setBase}
               options={(info?.bases || ['official', 'titan']).map((id) => ({ value: id, label: BASE_LABELS[id] || id }))} />
           </Field>
-          <Field label="Save every N epochs" htmlFor="training-save" hint="Updates the usable voice.">
+          <Field label="Save every N epochs" htmlFor="training-save">
             <input id="training-save" type="number" min={1} max={500} className={inputClass} value={saveEvery}
               onChange={(event) => setSaveEvery(Number(event.target.value) || 25)} />
           </Field>
@@ -383,8 +369,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
         </div>
       </section>
 
-      <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="training-jobs-title">
-        <p className="panel-kicker text-ok-fg">Voice</p>
+      <section className="panel flex min-h-0 flex-col p-4" aria-labelledby="training-jobs-title">
         <h2 id="training-jobs-title" className="panel-title">Trained voices</h2>
         <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {jobs.length ? jobs.map((job) => (

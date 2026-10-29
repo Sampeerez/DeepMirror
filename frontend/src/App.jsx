@@ -1,18 +1,17 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { Settings2 } from 'lucide-react';
+import { GraduationCap, UserRound } from 'lucide-react';
 import Layout from './components/Layout';
 import StatusIndicator from './components/StatusIndicator';
 import AudioControls from './components/AudioControls';
-import GlobalSettings from './components/GlobalSettings';
 import ModelManager from './components/ModelManager';
-import MonitorDisplay from './components/MonitorDisplay';
+import LiveStage from './components/LiveStage';
 import Visualizer from './components/Visualizer';
 import VoiceLab from './components/VoiceLab';
 import SoundCard from './components/SoundCard';
-import Button from './components/Button';
-import PresetBar from './components/PresetBar';
-import Recorder from './components/Recorder';
+import Segmented from './components/Segmented';
+import { RecordControl } from './components/Recorder';
 import RuntimeReadiness from './components/RuntimeReadiness';
+import useCalls from './hooks/useCalls';
 import usePresence from './hooks/usePresence';
 import useWebSocket from './hooks/useWebSocket';
 import useAudioPipeline from './hooks/useAudioPipeline';
@@ -21,7 +20,7 @@ import useRuntimeConfig from './hooks/useRuntimeConfig';
 import useSettingsSync from './hooks/useSettingsSync';
 import useFaceClone from './hooks/useFaceClone';
 import useVideoPipeline from './hooks/useVideoPipeline';
-import VideoControls from './components/VideoControls';
+import VideoControls, { videoNote } from './components/VideoControls';
 import VideoPreview from './components/VideoPreview';
 import { audioDelayMs } from './lib/avSync';
 import { activateModel, deactivateModel, fetchModels, getActiveModel } from './lib/api';
@@ -37,24 +36,20 @@ import { loadVoiceFor, recommendedVoice, withChanges } from './lib/voice';
 
 // Loaded the first time their tab opens.
 const TrainingStudio = lazy(() => import('./components/TrainingStudio'));
-const FileConverter = lazy(() => import('./components/FileConverter'));
+const Library = lazy(() => import('./components/Library'));
 const VoiceProfile = lazy(() => import('./components/VoiceProfile'));
 const FaceLibrary = lazy(() => import('./components/FaceLibrary'));
-const VideoSettings = lazy(() => import('./components/VideoSettings'));
-const VoiceSettings = lazy(() => import('./components/VoiceSettings'));
+const Settings = lazy(() => import('./components/Settings'));
+
+const TRAIN_VIEWS = [
+  { value: 'new', label: 'New voice', icon: GraduationCap },
+  { value: 'mine', label: 'My voice', icon: UserRound },
+];
 
 const ACTIVE_MODEL_POLL_MS = 5000;
 const CAPTURE_SAMPLES_KEY = 'ovc_capture_samples_v1';
 // After a longer chunk is chosen, the server measures it for this long before another step.
 const HEADROOM_SETTLE_MS = 5000;
-
-/** Drop ?settings from the address bar without adding a history entry. */
-function clearSettingsParam() {
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has('settings')) return;
-  url.searchParams.delete('settings');
-  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-}
 
 export default function App() {
   useEffect(() => { document.title = APP_NAME; }, []);
@@ -64,17 +59,17 @@ export default function App() {
   const pipeline = useAudioPipeline(wsHook);
   const devices = useAudioDevices();
 
-  // Deep links: ?tab=models|converter selects a tab, ?settings opens the modal.
+  // Deep links: ?tab=models|library|... selects a page (?settings opens Settings).
   const [tab, setTab] = useState(() => readTabFromSearch(window.location.search));
+  // Train shows either a new voice or My voice (old ?tab=voice links open My voice).
+  const [trainView, setTrainView] = useState(
+    () => (new URLSearchParams(window.location.search).get('tab') === 'voice' ? 'mine' : 'new'));
   // Tabs opened at least once stay mounted (and keep their state) after that.
   const [visited, setVisited] = useState(() => new Set([readTabFromSearch(window.location.search)]));
   useEffect(() => { setVisited((previous) => (previous.has(tab) ? previous : new Set([...previous, tab]))); }, [tab]);
   const [activeModel, setActiveModel] = useState(null);
   // A voice the server is still preparing (loading, warming up): never shown as active.
   const [loadingModel, setLoadingModel] = useState(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(
-    () => new URLSearchParams(window.location.search).has('settings')
-  );
   // Each voice model keeps its own settings and effects (loaded when it becomes active).
   const [voice, setVoice] = useState(() => recommendedVoice());
   const [effects, setEffects] = useState(defaultEffects);
@@ -159,7 +154,6 @@ export default function App() {
   const videoReady = face.ready && Boolean(face.activeFace);
   useEffect(() => {
     const handleKeyDown = (event) => {
-      if (isSettingsOpen) return;
       if (shouldTriggerShortcut(event, 'b')) {
         event.preventDefault();
         setBypass((prev) => !prev);
@@ -180,7 +174,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSettingsOpen, isRunning, isRecording, startRecording, stopRecording, videoRunning, videoReady, startVideo,
+  }, [isRunning, isRecording, startRecording, stopRecording, videoRunning, videoReady, startVideo,
     stopVideo]);
 
   // SPA-safe anchor scrolling (e.g. /#effects) once the page has rendered.
@@ -345,43 +339,13 @@ export default function App() {
     [voice, effects]
   );
 
-  const [settingsSection, setSettingsSection] = useState('general');
-  const openSettings = useCallback((section = 'general') => {
-    setSettingsSection(typeof section === 'string' ? section : 'general');
-    setIsSettingsOpen(true);
-  }, []);
-  const closeSettings = useCallback(() => {
-    setIsSettingsOpen(false);
-    // Otherwise a reload would reopen the modal the user just closed.
-    clearSettingsParam();
-  }, []);
-
-  useEffect(() => {
-    if (!isSettingsOpen) return undefined;
-
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        closeSettings();
-      }
-    };
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isSettingsOpen, closeSettings]);
+  const calls = useCalls();
+  const openCalls = useCallback(() => {
+    handleTabChange('settings');
+    setTimeout(() => document.getElementById('calls')?.scrollIntoView({ block: 'center' }), 300);
+  }, [handleTabChange]);
 
   // --- Render ----------------------------------------------------------------
-
-  const headerActions = (
-    <>
-      <Button icon={Settings2} onClick={openSettings} title="Settings and diagnostics" aria-label="Open settings" />
-    </>
-  );
 
   // Panels stay mounted (hidden) so switching tabs keeps their state.
   const panelProps = (id) => ({
@@ -403,14 +367,13 @@ export default function App() {
           bypass={bypass}
         />
       )}
-      headerActions={headerActions}
     >
-      {/* Studio: a top bar, three cards of one fixed height (content scrolls
-          inside a card, never the page), and the presets row. On narrow screens
-          the cards stack at their natural height. */}
-      <div {...panelProps('studio')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up gap-4">
-        {/* The two sides, each with its colour, on the same columns as the cards below. */}
-        <div className="grid shrink-0 grid-cols-1 gap-4 lg:grid-cols-3">
+      {/* Live: the voice on the left, the camera and the sound together in the
+          middle, the effects (with their presets) on the right. Cards keep one
+          screen's height and scroll inside; narrow screens stack them. */}
+      <div {...panelProps('studio')}
+        className="grid min-h-0 flex-1 grid-cols-1 gap-4 animate-fade-in-up lg:grid-cols-[minmax(17rem,1fr)_minmax(0,1.7fr)_minmax(17rem,1fr)]">
+        <div className="flex min-h-0 flex-col gap-4">
           <AudioControls
             devices={devices}
             pipeline={pipeline}
@@ -422,30 +385,6 @@ export default function App() {
             voices={voiceNames}
             loadingModel={loadingModel}
             onVoiceChange={changeVoice}
-          />
-          <VideoControls video={video} devices={devices} face={face}
-            onSetUp={() => handleTabChange('faces')} onFaceChange={face.activate} />
-        </div>
-
-        <div className="page-grid">
-          <MonitorDisplay
-            meters={pipeline.meters}
-            latency={latency}
-            latencyHistory={latencyHistory}
-            serverMs={serverMs}
-            serverStats={serverStats}
-            bypass={bypass}
-            videoPreview={video.running ? <VideoPreview canvasRef={video.setPreview} fps={video.shownFps}
-              faceName={face.activeFace?.name} /> : null}
-            visualizer={(
-              <Visualizer
-                getAnalysers={pipeline.getAnalysers}
-                isRunning={pipeline.isRunning}
-                theme={theme}
-                active={tab === 'studio'}
-              />
-            )}
-            recorder={<Recorder pipeline={pipeline} />}
           />
           <VoiceLab
             voice={voice}
@@ -462,21 +401,43 @@ export default function App() {
             isRunning={pipeline.isRunning}
             f0Methods={runtimeConfig.f0Methods}
           />
-          <SoundCard
-            voice={voice}
-            onChange={handleVoiceChange}
-            onRestoreRecommended={handleRestoreRecommended}
-            effects={effects}
-            onEffectsChange={handleEffectsChange}
-            denoiser={pipeline.isRunning ? serverStats.denoiser : null}
-          />
         </div>
 
-        <PresetBar
-          refreshRevision={runtime.revision}
-          activePresetId={activePresetId}
-          onApplyPreset={applyPreset}
-          getCurrentSettings={getCurrentSettings}
+        <LiveStage
+          faceBar={(
+            <VideoControls video={video} devices={devices} face={face} onSetUp={() => handleTabChange('faces')}
+              onFaceChange={face.activate} virtualCamera={calls.calls?.camera} onSetUpCalls={openCalls} />
+          )}
+          videoPreview={video.running ? <VideoPreview canvasRef={video.setPreview} fps={video.shownFps} /> : null}
+          videoNote={face.ready ? videoNote(video, face) : null}
+          visualizer={(
+            <Visualizer
+              getAnalysers={pipeline.getAnalysers}
+              isRunning={pipeline.isRunning}
+              theme={theme}
+              active={tab === 'studio'}
+            />
+          )}
+          meters={pipeline.meters}
+          latency={latency}
+          serverStats={serverStats}
+          bypass={bypass}
+          record={<RecordControl pipeline={pipeline} onOpenLibrary={() => handleTabChange('library')} />}
+        />
+
+        <SoundCard
+          voice={voice}
+          onChange={handleVoiceChange}
+          onRestoreRecommended={handleRestoreRecommended}
+          effects={effects}
+          onEffectsChange={handleEffectsChange}
+          denoiser={pipeline.isRunning ? serverStats.denoiser : null}
+          presets={{
+            refreshRevision: runtime.revision,
+            activePresetId,
+            onApplyPreset: applyPreset,
+            getCurrentSettings,
+          }}
         />
       </div>
 
@@ -493,31 +454,16 @@ export default function App() {
         />
       </div>
 
-      <div {...panelProps('voice')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
-        {visited.has('voice') ? (
-          <Suspense fallback={null}>
-            <VoiceProfile active={tab === 'voice'} activeModel={activeModel} inputDevices={devices.inputDevices} />
-          </Suspense>
-        ) : null}
-      </div>
-
-      <div {...panelProps('training')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
+      <div {...panelProps('training')} className="flex min-h-0 flex-1 flex-col gap-4 animate-fade-in-up">
+        <Segmented label="Train" hideLabel accent="voice" options={TRAIN_VIEWS} value={trainView}
+          onChange={setTrainView} className="w-72 shrink-0" />
         {visited.has('training') ? (
           <Suspense fallback={null}>
-            <TrainingStudio active={tab === 'training'} onActiveModelChange={setActiveModel} />
-          </Suspense>
-        ) : null}
-      </div>
-
-      <div {...panelProps('voice-settings')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
-        {visited.has('voice-settings') ? (
-          <Suspense fallback={null}>
-            <VoiceSettings config={runtimeConfig} onConfigChange={runtime.changeSettings} voice={voice}
-              onVoiceChange={handleVoiceChange} onRestoreRecommended={handleRestoreRecommended}
-              running={pipeline.isRunning} latencyHistory={latencyHistory} serverMs={serverMs}
-              serverStats={serverStats} streamInfo={pipeline.streamInfo} playbackStats={pipeline.playbackStats}
-              transport={wsHook.transport} f0Methods={runtimeConfig.f0Methods}
-              streamSampleRate={pipeline.streamInfo?.sampleRate} />
+            {trainView === 'new' ? (
+              <TrainingStudio active={tab === 'training'} onActiveModelChange={setActiveModel} />
+            ) : (
+              <VoiceProfile active={tab === 'training'} activeModel={activeModel} inputDevices={devices.inputDevices} />
+            )}
           </Suspense>
         ) : null}
       </div>
@@ -530,47 +476,29 @@ export default function App() {
         ) : null}
       </div>
 
-      <div {...panelProps('face-settings')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
-        {visited.has('face-settings') ? (
+      <div {...panelProps('library')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
+        {visited.has('library') ? (
           <Suspense fallback={null}>
-            <VideoSettings face={face} video={video} delayMs={videoDelayMs} />
+            <Library pipeline={pipeline} converter={{
+              voice, effects, activeModel, f0Methods: runtimeConfig.f0Methods, active: tab === 'library', face,
+            }} />
           </Suspense>
         ) : null}
       </div>
 
-      <div {...panelProps('converter')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
-        {visited.has('converter') ? (
+      <div {...panelProps('settings')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
+        {visited.has('settings') ? (
           <Suspense fallback={null}>
-            <FileConverter voice={voice} effects={effects} activeModel={activeModel} f0Methods={runtimeConfig.f0Methods}
-              active={tab === 'converter'} face={face} />
+            <Settings config={runtimeConfig} onConfigChange={runtime.changeSettings} voice={voice}
+              onVoiceChange={handleVoiceChange} running={pipeline.isRunning} latencyHistory={latencyHistory}
+              latency={latency} serverMs={serverMs} serverStats={serverStats} streamInfo={pipeline.streamInfo}
+              playbackStats={pipeline.playbackStats} transport={wsHook.transport} f0Methods={runtimeConfig.f0Methods}
+              face={face} video={video} delayMs={videoDelayMs} theme={theme} onThemeChange={handleThemeChange}
+              captureSamples={captureSamples} onCaptureSamplesChange={changeCaptureSamples} runtime={runtime}
+              calls={calls} />
           </Suspense>
         ) : null}
       </div>
-
-
-      {isSettingsOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 sm:px-6">
-          <button
-            className="absolute inset-0 bg-scrim backdrop-blur-md"
-            onClick={closeSettings}
-            aria-label="Close settings modal"
-          />
-          <div className="relative w-full max-w-5xl">
-            <GlobalSettings
-              runtimeChecking={runtime.checking}
-              runtimeError={runtime.error}
-              onRefreshRuntime={runtime.refresh}
-              config={runtimeConfig}
-              onClose={closeSettings}
-              theme={theme}
-              onThemeChange={handleThemeChange}
-              captureSamples={captureSamples}
-              onCaptureSamplesChange={changeCaptureSamples}
-              initialSection={settingsSection}
-            />
-          </div>
-        </div>
-      ) : null}
     </Layout>
   );
 }

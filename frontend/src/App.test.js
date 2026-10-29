@@ -19,21 +19,21 @@ vi.mock('./lib/api', () => ({
   fetchConfig: vi.fn(), fetchPresets: vi.fn(), savePreset: vi.fn(), deletePreset: vi.fn(),
   getActiveModel: vi.fn().mockResolvedValue({ name: 'mine.pth' }),
   fetchModels: vi.fn().mockResolvedValue([]), activateModel: vi.fn(), deactivateModel: vi.fn(),
-  fetchVideo: vi.fn().mockResolvedValue(null),
+  fetchVideo: vi.fn().mockResolvedValue(null), fetchCalls: vi.fn().mockResolvedValue(null), setupCalls: vi.fn(),
 }));
 vi.mock('./components/Layout', () => ({ default: ({ children }) => children }));
 vi.mock('./components/StatusIndicator', () => ({ default: () => null }));
 vi.mock('./components/AudioControls', () => ({ default: () => null }));
 vi.mock('./components/ModelManager', () => ({ default: () => null }));
-vi.mock('./components/MonitorDisplay', () => ({ default: () => null }));
+vi.mock('./components/LiveStage', () => ({ default: () => null }));
 vi.mock('./components/Visualizer', () => ({ default: () => null }));
 vi.mock('./components/VoiceLab', () => ({ default: ({ f0Methods, voice }) => React.createElement('output', { 'data-testid': 'voice' }, JSON.stringify({ f0Methods, voice })) }));
 vi.mock('./components/EffectsRack', () => ({ default: () => null }));
-vi.mock('./components/Recorder', () => ({ default: () => null }));
+vi.mock('./components/Recorder', () => ({ default: () => null, RecordControl: () => null }));
 vi.mock('./components/FileConverter', () => ({ default: () => null }));
 vi.mock('./components/GitHubStarButton', () => ({ default: () => null }));
 vi.mock('./components/UpdateButton', () => ({ default: () => null }));
-vi.mock('./components/GlobalSettings', () => ({ default: () => null }));
+vi.mock('./components/Settings', () => ({ default: () => null }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 it('recovers capabilities and presets after reconnect without overwriting the voice settings or transport', async () => {

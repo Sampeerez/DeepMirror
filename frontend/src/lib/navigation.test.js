@@ -4,7 +4,7 @@ import { buildTabUrl, isValidTab, readTabFromSearch } from './navigation';
 describe('readTabFromSearch', () => {
   it('reads a valid tab', () => {
     expect(readTabFromSearch('?tab=models')).toBe('models');
-    expect(readTabFromSearch('?tab=converter')).toBe('converter');
+    expect(readTabFromSearch('?tab=library')).toBe('library');
   });
 
   it('falls back to studio for missing, empty or unknown values', () => {
@@ -14,9 +14,17 @@ describe('readTabFromSearch', () => {
     expect(readTabFromSearch(undefined)).toBe('studio');
   });
 
+  it('opens the page that now holds an older page', () => {
+    expect(readTabFromSearch('?tab=converter')).toBe('library');
+    expect(readTabFromSearch('?tab=voice')).toBe('training');
+    expect(readTabFromSearch('?tab=voice-settings')).toBe('settings');
+    expect(readTabFromSearch('?tab=face-settings')).toBe('settings');
+    expect(readTabFromSearch('?settings')).toBe('settings');
+  });
+
   it('keeps the tab list and the validator in agreement', () => {
     expect(isValidTab('studio')).toBe(true);
-    expect(isValidTab('nope')).toBe(false);
+    expect(isValidTab('converter')).toBe(false);
   });
 });
 
@@ -29,15 +37,13 @@ describe('buildTabUrl', () => {
     expect(buildTabUrl('http://localhost:8000/?tab=models', 'studio')).toBe('/');
   });
 
-  it('preserves other query parameters and the hash', () => {
-    expect(buildTabUrl('http://localhost:8000/?settings&tab=models#effects', 'converter'))
-      .toBe('/?settings=&tab=converter#effects');
-    expect(buildTabUrl('http://localhost:8000/?settings&tab=models#effects', 'studio'))
-      .toBe('/?settings=#effects');
+  it('preserves other query parameters and the hash, but not ?settings', () => {
+    expect(buildTabUrl('http://localhost:8000/?settings&x=1&tab=models#effects', 'library'))
+      .toBe('/?x=1&tab=library#effects');
   });
 
   it('round-trips through readTabFromSearch', () => {
-    for (const tab of ['studio', 'models', 'converter']) {
+    for (const tab of ['studio', 'models', 'library', 'settings']) {
       const url = new URL(buildTabUrl('http://localhost:8000/', tab), 'http://localhost:8000');
       expect(readTabFromSearch(url.search)).toBe(tab);
     }

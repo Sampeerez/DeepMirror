@@ -27,6 +27,9 @@
   --color-primary: var(--primary-bg);
   --color-primary-hover: var(--primary-bg-hover);
   --color-primary-fg: var(--primary-fg);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-bg: var(--brand-bg);
+  --color-brand-line: var(--brand-line);
   --color-line: var(--border-subtle);
   --color-line-strong: var(--border-default);
   --color-line-hover: var(--border-hover);
@@ -91,13 +94,13 @@
     color-scheme: dark;
 
     /* Surfaces */
-    --surface-base: #0a0a0c;
-    --surface-panel: #101013;
+    --surface-base: #070a12;
+    --surface-panel: #0c111c;
     --surface-raised: rgba(0, 0, 0, 0.2);
     --surface-sunken: rgba(0, 0, 0, 0.3);
     --surface-input: rgba(0, 0, 0, 0.25);
-    --surface-overlay: rgba(16, 16, 19, 0.96);
-    --surface-header: rgba(10, 10, 12, 0.95);
+    --surface-overlay: rgba(12, 17, 28, 0.97);
+    --surface-header: #090d17;
     --scrim: rgba(0, 0, 0, 0.72);
     --overlay-shadow: rgba(0, 0, 0, 0.55);
 
@@ -112,10 +115,13 @@
     --text-subtle: #a1a1aa;
     --text-faint: #9696a0;
 
-    /* Primary action, highest-contrast surface in the theme */
-    --primary-bg: #f4f4f5;
-    --primary-bg-hover: #ffffff;
-    --primary-fg: #18181b;
+    /* Primary action: the brand's blue */
+    --primary-bg: #2563eb;
+    --primary-bg-hover: #3b82f6;
+    --primary-fg: #ffffff;
+    --brand-fg: #93c5fd;
+    --brand-bg: rgba(59, 130, 246, 0.14);
+    --brand-line: rgba(96, 165, 250, 0.45);
 
     /* Borders */
     --border-subtle: rgba(255, 255, 255, 0.08);
@@ -206,7 +212,7 @@
     --surface-sunken: #e9e9ec;
     --surface-input: #ffffff;
     --surface-overlay: #ffffff;
-    --surface-header: rgba(255, 255, 255, 0.95);
+    --surface-header: #ffffff;
     --scrim: rgba(24, 24, 27, 0.45);
     --overlay-shadow: rgba(24, 24, 27, 0.18);
 
@@ -219,9 +225,12 @@
     --text-subtle: #52525b;
     --text-faint: #63636c;
 
-    --primary-bg: #18181b;
-    --primary-bg-hover: #000000;
-    --primary-fg: #fafafa;
+    --primary-bg: #1d4ed8;
+    --primary-bg-hover: #1e40af;
+    --primary-fg: #ffffff;
+    --brand-fg: #1d4ed8;
+    --brand-bg: #eff6ff;
+    --brand-line: #93c5fd;
 
     --border-subtle: #e4e4e7;
     --border-default: #d4d4d8;
@@ -317,7 +326,7 @@
   }
 
   .panel-title {
-    @apply mt-1 text-base font-semibold tracking-normal text-fg;
+    @apply flex min-h-7 items-center text-sm font-semibold tracking-normal text-fg;
   }
 
   /* Alpha layers and a top highlight keep the Star button's material without

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ChevronLeft, ChevronRight, CircleStop, Mic, RotateCcw, Trash2, Upload, UserRound,
+  ChevronLeft, ChevronRight, CircleStop, Mic, RotateCcw, Trash2, Upload,
 } from 'lucide-react';
 import {
   deleteVoiceProfile, deleteVoiceReference, fetchVoiceProfile, saveVoiceProfile, saveVoiceReference,
@@ -145,25 +145,15 @@ function VoiceProfile({ active, activeModel, inputDevices = [] }) {
 
   return (
     <div className="page-grid">
-      <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="profile-record-title">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="panel-kicker text-ok-fg">Voice</p>
-            <h2 id="profile-record-title" className="panel-title">Read a few lines</h2>
-          </div>
-          <UserRound className="hidden h-7 w-7 shrink-0 text-fg-subtle sm:block" strokeWidth={1.5} aria-hidden="true" />
-        </div>
+      <section className="panel flex min-h-0 flex-col p-4 lg:col-span-2" aria-labelledby="profile-record-title">
+        <h2 id="profile-record-title" className="panel-title">Read a few lines</h2>
         <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
-          <p className="text-xs leading-5 text-fg-secondary">
-            About a minute and a half, once. Your pitch, range and level are measured from it, and every voice
-            (trained or downloaded) is tuned to you automatically when you activate it.
-          </p>
+          <p className="text-xs text-fg-subtle">About 90 s, once: every voice is then tuned to yours.</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Segmented label="Language" accent="voice" value={language} disabled={recorder.recording}
               onChange={(value) => { setLanguage(value); setLine(0); }}
               options={PROFILE_LANGUAGES.map(({ id, label }) => ({ value: id, label }))} />
             <div>
-              <p className="mb-1.5 text-xs font-medium text-fg-muted">Microphone</p>
               <Picker label="Microphone" icon={Mic} accent="voice" value={deviceId} disabled={recorder.recording}
                 onChange={setDeviceId}
                 options={[{ value: '', label: 'System default' },
@@ -219,9 +209,8 @@ function VoiceProfile({ active, activeModel, inputDevices = [] }) {
         </div>
       </section>
 
-      <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="profile-result-title">
+      <section className="panel flex min-h-0 flex-col p-4" aria-labelledby="profile-result-title">
         <div className="min-w-0">
-          <p className="panel-kicker text-ok-fg">Voice</p>
           <h2 id="profile-result-title" className="panel-title">{profile ? 'Your voice' : 'No profile yet'}</h2>
         </div>
         <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
@@ -276,9 +265,7 @@ function VoiceProfile({ active, activeModel, inputDevices = [] }) {
               </div>
             ) : null}
             {voice?.uses_pitch && voice.register_source !== 'training' ? (
-              <p className="mt-2 text-[11px] leading-4 text-fg-faint">
-                10–60 s of that voice speaking alone (no music) tells the studio its register.
-              </p>
+              <p className="mt-2 text-xs text-fg-faint">10–60 s, voice only</p>
             ) : null}
           </div>
 

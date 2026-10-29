@@ -26,12 +26,12 @@ cd DeepMirror
 ./start.sh          # Windows: double-click start.bat
 ```
 
-The studio opens at <http://127.0.0.1:8000>. It runs in the background (log in **Settings › Logs**
+The studio opens at <http://127.0.0.1:8000>. It runs in the background (log in **Settings › Log**
 tab) and stops when you close the page. The first time it asks whether to add a Desktop
 shortcut (set `DEEPMIRROR_SHORTCUTS=yes` or `no` to skip the question). The first
 start downloads the shared models (about 400 MB) and checks each one by SHA-256.
 
-Then add a voice in **Voice › Voices** (an RVC `.pth`, with its `.index` if it has one), press
+Then add a voice in **Voices** (an RVC `.pth`, with its `.index` if it has one), press
 **Activate**, and press **Start** in **Studio**.
 
 ```bash
@@ -42,28 +42,28 @@ OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 
 ## What it does
 
-Four places, always in the same order at the top:
+Every page is in the sidebar:
 
 | | What it is for |
 |---|---|
-| **Live** | Your voice and your face at the same time: one card for each, side by side |
-| **Voice** (teal) | Voices, My voice, Train and the voice's Settings |
-| **Face** (violet) | Faces and the face's Settings |
-| **Files** | Convert an audio file (voice) or a video file (face and voice) |
-
-The gear opens the studio's own settings (theme, engine, test samples) and the log.
+| **Live** | The voice on the left, the camera and the sound together in the middle, the effects and their presets on the right |
+| **Voices** | The RVC voices you have, to add, activate or export |
+| **Faces** | The faces you can wear, from 1–12 photos |
+| **Train** | A new voice from your recordings, or **My voice**: read 90 s once so every voice fits yours |
+| **Library** | The takes recorded in Live, and converting a whole audio or video file |
+| **Settings** | One page: the voice, the face, and the rest (theme, calls, engine, log) |
 
 ### Voice
 
 - **Live conversion** of RVC v1/v2 voices, with 1 s of past and 150 ms of future context per chunk
 - **Only your voice is converted**: room noise, keyboard and breaths are removed before the model hears them, and nothing of your microphone is ever played unconverted
-- **Calls**: a virtual microphone for Discord, Teams or Meet (VB-CABLE on Windows and macOS, PipeWire on Linux)
+- **Calls**: a virtual microphone and camera for Discord, Teams or Meet, set up from **Settings › Calls** with one button (VB-CABLE and OBS Virtual Camera on Windows; PipeWire and v4l2loopback on Linux)
 - **My voice**: read about 90 s of guided lines (Spanish or English) once; every voice is then tuned to your pitch and range when you activate it
 - **Pitch**: automatic register matching (voices trained here know their register; a downloaded voice learns it from a short clip of the original), expressiveness, optional pitch correction, formant shift
-- **Settings per voice**: each voice keeps its own settings and effects; **Back to automatic** drops them
+- **Settings per voice**: each voice keeps its own settings and effects; **Reset** drops them
 - **Effects** (13), eight sound presets that never touch the voice's pitch (Radio, Phone, Hall…) plus your own, an A/B switch (<kbd>B</kbd>) and a recorder (<kbd>R</kbd>)
 - **Steady under load**: when the computer is too busy to keep up (a browser, a game, a live wallpaper on the same GPU), the stream moves to a longer buffer by itself instead of cutting the voice; the log says which stage took the time
-- **Files** for whole recordings with any voice in Voices (not only the active one), and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
+- **Library** for whole files with any voice in Voices (not only the active one), and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
 ### Face
@@ -74,8 +74,9 @@ The gear opens the studio's own settings (theme, engine, test samples) and the l
 - **The voice comes first**: the face runs in its own process and uses the GPU only in the gaps the
   voice leaves, so turning video on never cuts the voice. Frames between two face swaps are blended
   and placed with that frame's own face position, so head movement stays exact at camera rate.
-- **Virtual camera** for Discord, Meet, Teams or OBS (OBS Studio's driver on Windows and macOS,
-  v4l2loopback on Linux).
+- **Virtual camera** for Discord, Meet, Teams or OBS: OBS Virtual Camera, without installing OBS on
+  Windows (only its two camera modules, about 450 KB, are fetched from OBS's official release and checked
+  by SHA-256); OBS Studio on macOS, v4l2loopback on Linux.
 - **Video files**: the face on every frame and the chosen voice on the sound, as one MP4.
 - **Fits the computer**: the face swapper is chosen by measuring this GPU next to the live voice.
   On a GTX 1660 SUPER: 30 fps and about 14 face swaps a second without the voice; about 26 fps and 5–6
@@ -96,7 +97,7 @@ Chosen by measuring them on this project's own tests, not by date.
 
 ### Face clone
 
-The models download the first time you open **Face › Faces** (about 1.8 GB), from FaceFusion's
+The models download the first time you open **Faces** (about 1.8 GB), from FaceFusion's
 releases, and run with ONNX Runtime (CUDA, DirectML or CPU).
 
 | Part | Model | Why |
@@ -179,12 +180,10 @@ make lint test        # ruff, pyright, eslint, pytest, vitest
 ## Screenshots
 
 ![Live](docs/images/main-ui.png)
-![Face settings](docs/images/video-settings.png)
-![Voice settings](docs/images/voice-settings.png)
+![Settings](docs/images/settings.png)
+![Library](docs/images/library.png)
 ![Train](docs/images/training.png)
-![Models](docs/images/models.png)
-![Converter](docs/images/converter.png)
-![Settings](docs/images/settings-modal.png)
+![Voices](docs/images/models.png)
 
 ## Credits
 
@@ -205,7 +204,7 @@ Sioaeko (MIT), since rewritten.
 | [FaceFusion](https://github.com/facefusion/facefusion) model releases | Face models (HyperSwap, XSeg, GPEN, converters), downloaded on first use | Models: non-commercial |
 | [InsightFace](https://github.com/deepinsight/insightface) | inswapper, ArcFace, SCRFD, downloaded on first use | Code MIT, models non-commercial research only |
 | [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam), [LiveFaceCam](https://github.com/huzaifa525/LiveFaceCam) | Ideas (mouth mask) | AGPL-3.0 |
-| [OBS Studio](https://obsproject.com/) virtual camera, via [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) | Virtual camera, installed by you | GPL-2.0 / GPL-2.0 |
+| [OBS Studio](https://obsproject.com/) virtual camera module, via [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) | Virtual camera, fetched and registered on request | GPL-2.0 / GPL-2.0 |
 
 ## License
 

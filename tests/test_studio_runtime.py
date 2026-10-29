@@ -107,3 +107,64 @@ def test_closing_with_the_page_lets_a_training_run_finish(settings):
     assert not (jobs.root / "abcdef123456" / "stop").exists()
     jobs.close()
     assert (jobs.root / "abcdef123456" / "stop").exists()
+
+
+class TestVirtualCamera:
+    def _zip(self, path, modules):
+        import zipfile
+
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, data in modules.items():
+                archive.writestr(name, data)
+            archive.writestr("bin/64bit/obs64.exe", b"not needed")
+        return zipfile.ZipFile(path)
+
+    def test_takes_only_the_camera_modules_checked_by_sha256(self, tmp_path):
+        import hashlib
+
+        from backend.virtual_camera import extract_modules
+
+        modules = {"core/win-dshow/data/obs-virtualcam-module64.dll": b"sixty-four",
+                   "core/win-dshow/data/obs-virtualcam-module32.dll": b"thirty-two"}
+        known = {name: hashlib.sha256(data).hexdigest() for name, data in modules.items()}
+        with self._zip(tmp_path / "obs.zip", modules) as archive:
+            paths = extract_modules(archive, tmp_path / "out", known)
+        assert sorted(path.name for path in paths) == ["obs-virtualcam-module32.dll", "obs-virtualcam-module64.dll"]
+        assert sorted(p.name for p in (tmp_path / "out").iterdir()) == sorted(path.name for path in paths)
+
+    def test_refuses_a_module_that_does_not_match(self, tmp_path):
+        import pytest
+
+        from backend.virtual_camera import extract_modules
+
+        modules = {"core/win-dshow/data/obs-virtualcam-module64.dll": b"tampered"}
+        with self._zip(tmp_path / "obs.zip", modules) as archive, pytest.raises(RuntimeError, match="checksum"):
+            extract_modules(archive, tmp_path / "out", {name: "0" * 64 for name in modules})
+        assert not (tmp_path / "out" / "obs-virtualcam-module64.dll").exists()
+
+    def test_registers_both_modules_with_one_prompt(self, tmp_path, monkeypatch):
+        from backend import virtual_camera
+        from backend.virtual_camera import MODULES, VirtualCamera
+
+        camera = VirtualCamera(tmp_path)
+        camera.folder.mkdir(parents=True)
+        for name in MODULES:
+            (camera.folder / name.rsplit("/", 1)[1]).write_bytes(b"dll")
+        commands = []
+
+        class Done:
+            returncode = 0
+
+        monkeypatch.setattr(virtual_camera, "_run", lambda command, timeout=20.0: commands.append(command) or Done())
+        camera._install_windows()
+        assert len(commands) == 1 and "-Verb RunAs" in commands[0][-1]
+        script = (camera.folder / "register.cmd").read_text()
+        assert script.count("regsvr32.exe /s") == 2
+
+    def test_calls_endpoint_reports_microphone_and_camera(self, client, monkeypatch):
+        monkeypatch.setattr(client.app.state.virtual_mic, "_detect", lambda: True)
+        monkeypatch.setattr(client.app.state.virtual_camera, "_detect", lambda: False)
+        body = client.get("/api/calls").json()
+        assert set(body) == {"microphone", "camera"}
+        assert body["camera"]["installed"] is False
+        assert body["camera"]["device"] == "OBS Virtual Camera"

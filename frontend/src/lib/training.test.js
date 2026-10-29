@@ -31,7 +31,7 @@ describe('training helpers', () => {
   it('describes the kept epoch and the planned budget', () => {
     expect(bestEpochSummary({})).toBeNull();
     expect(bestEpochSummary({ exported_epoch: 140, best_score: 1.234 })).toContain('epoch 140');
-    expect(bestEpochSummary({ exported_epoch: 25 })).toBe('Voice saved at epoch 25.');
+    expect(bestEpochSummary({ exported_epoch: 25 })).toBe('Saved at epoch 25');
     expect(plannedEpochs({ plan: { epochs: 240 } })).toBe(240);
     expect(plannedEpochs({ epochs: null })).toBeNull();
   });

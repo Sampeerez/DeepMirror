@@ -199,8 +199,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
   return (
     <div className="page-grid">
       <div className="flex min-h-0 flex-col gap-4 lg:overflow-y-auto">
-        <section className="panel p-5" aria-labelledby="models-add-title">
-          <p className="panel-kicker text-ok-fg">Voice</p>
+        <section className="panel p-4" aria-labelledby="models-add-title">
           <h2 id="models-add-title" className="panel-title">Add a voice</h2>
           <div
             role="button"
@@ -248,10 +247,9 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
         {engine ? <div className="panel px-5">{engine}</div> : null}
       </div>
 
-      <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="models-list-title">
+      <section className="panel flex min-h-0 flex-col p-4 lg:col-span-2" aria-labelledby="models-list-title">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="panel-kicker text-ok-fg">Voice</p>
             <h2 id="models-list-title" className="panel-title">
               Voices <span className="font-normal text-fg-subtle">· {models.length}</span>
             </h2>

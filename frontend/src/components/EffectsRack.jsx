@@ -21,7 +21,6 @@ const EffectCard = memo(function EffectCard({ def, state, onChange }) {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className={`truncate text-xs font-semibold ${enabled ? 'text-fg' : 'text-fg-muted'}`}>{def.label}</p>
-          <p className="truncate text-[11px] leading-4 text-fg-faint" title={def.tagline}>{def.tagline}</p>
         </div>
         <Toggle checked={enabled} label={`Toggle ${def.label}`}
           onChange={(next) => onChange(def.key, { ...state, enabled: next })} />
@@ -63,11 +62,10 @@ function EffectsRack({ effects, formantShift = 0, onEffectsChange }) {
     <div id="effects" className="space-y-3">
       <div className="flex h-8 items-center justify-between gap-3">
         <p className="min-w-0 truncate text-[11px] text-fg-subtle">
-          {activeCount > 0 ? `${activeCount} effect${activeCount === 1 ? '' : 's'} on` : 'No effects on'}
-          {' · '}applied after the voice model
+          {activeCount > 0 ? `${activeCount} on` : 'None on'}
         </p>
         <Button onClick={() => onEffectsChange(defaultEffects())} disabled={activeCount === 0} className="w-24">
-          Bypass all
+          All off
         </Button>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">

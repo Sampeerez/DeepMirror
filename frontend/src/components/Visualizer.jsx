@@ -149,19 +149,14 @@ function Visualizer({ getAnalysers, isRunning, theme, active = true }) {
     };
   }, [getAnalysers, active]);
 
-  // Compact, inside the Monitor card: the spectrum with its legend in a corner.
+  // A strip under Live's video: the spectrum with its legend in a corner.
   return (
     <div className="relative overflow-hidden rounded-md border border-line bg-raised">
       <div className="absolute right-2 top-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
         <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 bg-fg-faint" />In</span>
         <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 bg-ok-solid" />Out</span>
       </div>
-      <canvas ref={canvasRef} className="h-20 w-full" aria-hidden="true" />
-      {!isRunning && (
-        <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate px-3 text-center text-[11px] font-medium uppercase tracking-[0.16em] text-fg-faint">
-          Press Start to see the spectrum
-        </p>
-      )}
+      <canvas ref={canvasRef} className="h-16 w-full" aria-hidden="true" />
     </div>
   );
 }

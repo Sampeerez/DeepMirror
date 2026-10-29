@@ -145,13 +145,16 @@ class VirtualMic:
 
     # --- Installation -------------------------------------------------------
 
-    def install(self) -> dict:
-        """Start installing (or, on Linux, creating) the virtual cable in the background."""
+    def install(self, wait: bool = False) -> dict:
+        """Start installing (or, on Linux, creating) the virtual cable, in the background unless ``wait``."""
         with self._lock:
             if self._state in {"downloading", "installing"}:
                 return self.status()
             self._state, self._message, self._needs_restart = "downloading", None, False
-        threading.Thread(target=self._install, name="virtual-mic", daemon=True).start()
+        if wait:
+            self._install()
+        else:
+            threading.Thread(target=self._install, name="virtual-mic", daemon=True).start()
         return self.status()
 
     def _install(self) -> None:

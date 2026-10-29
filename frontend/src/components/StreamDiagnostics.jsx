@@ -43,7 +43,6 @@ export default function StreamDiagnostics({ streamInfo, playbackStats, transport
   return (
     <section className="border-t border-line pt-4" aria-label="Stream diagnostics">
       <h3 className="text-sm font-semibold text-fg-secondary">Stream diagnostics</h3>
-      {!running ? <p className="mt-1 text-xs text-fg-faint">Live values appear while the voice changer runs.</p> : null}
       <dl className="mt-3 space-y-2 text-xs">
         {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-3">
           <dt className="min-w-0 truncate text-fg-subtle">{label}</dt><dd className="shrink-0 font-mono tabular-nums text-fg-secondary">{value}</dd>

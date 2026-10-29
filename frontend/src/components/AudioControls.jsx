@@ -12,16 +12,16 @@ const CALL_MODE_KEY = 'ovc_call_mode_v1';
 const TONE_CLASS = { danger: 'text-danger-fg', warn: 'text-warn-fg', muted: 'text-fg-subtle' };
 
 /** The one line under the controls: the most important thing to know right now. */
-function statusLine({ error, devices, captureSupported, pipeline, wsStatus, activeModel, inCall, callInput }) {
+function statusLine({ error, devices, captureSupported, pipeline, wsStatus, inCall, callInput }) {
   if (error) return { tone: 'danger', text: error };
   if (!captureSupported) return { tone: 'danger', text: devices.error };
-  if (devices.permissionState === 'denied') return { tone: 'danger', text: 'Microphone permission is blocked in the browser.' };
+  if (devices.permissionState === 'denied') return { tone: 'danger', text: 'Microphone blocked in the browser' };
   if (devices.error) return { tone: 'warn', text: devices.error };
   if (!pipeline.isRunning && wsStatus !== 'connected') {
     return {
       tone: 'muted',
       retry: true,
-      text: wsStatus === 'connecting' ? 'Connecting to the server…' : 'Server not reachable, retrying…',
+      text: wsStatus === 'connecting' ? 'Connecting…' : 'Server not reachable',
     };
   }
   const info = pipeline.streamInfo;
@@ -29,35 +29,25 @@ function statusLine({ error, devices, captureSupported, pipeline, wsStatus, acti
     return {
       tone: 'warn',
       text: info.inputFallback === 'default'
-        ? 'That microphone is unavailable: using the default one.'
+        ? 'Microphone unavailable: using the default one'
         : info.inputFallback === 'sample-rate'
-          ? 'The microphone runs at another rate; the browser converts it.'
-          : 'Using the closest match to the selected microphone.',
+          ? null
+          : 'Using the closest microphone',
     };
-  }
-  if (info && info.sampleRate !== info.requestedSampleRate) {
-    return { tone: 'muted', text: `Running at ${info.sampleRate.toLocaleString()} Hz.` };
   }
   if (pipeline.isRunning && info?.adaptedFrom && info.chunkSize !== info.adaptedFrom) {
     const ms = Math.round((info.chunkSize * 1000) / info.sampleRate);
-    return { tone: 'warn', text: `Live with a longer buffer (${ms} ms): the computer was too busy to keep up.` };
+    return { tone: 'warn', text: `Longer buffer (${ms} ms): the computer is busy` };
   }
-  if (pipeline.isRunning) {
-    return {
-      tone: 'muted',
-      text: inCall ? `Live, sending to “${callInput}”.` : 'Live. B: A/B · R: record',
-    };
-  }
-  if (!activeModel) return { tone: 'muted', text: 'No voice active: effects only.' };
-  if (!devices.hasLabels) return { tone: 'muted', text: 'Allow the microphone to see device names.' };
-  return { tone: 'muted', text: 'Ready' };
+  if (pipeline.isRunning && inCall) return { tone: 'muted', text: `In the call as “${callInput}”` };
+  return { tone: 'muted', text: null };
 }
 
 const NO_VOICE = '';
 
 /**
  * Live › Voice: start/stop, the voice to speak with, microphone, output, call
- * mode and A/B, and one status line. Spans two of the three columns below.
+ * mode and A/B. A status line appears only when there is something to say.
  */
 function AudioControls({
   devices, pipeline, wsStatus, activeModel, bypass = false, onBypassChange, onRetryConnection,
@@ -106,7 +96,7 @@ function AudioControls({
   };
 
   const status = statusLine({
-    error, devices, captureSupported, pipeline, wsStatus, activeModel, inCall, callInput,
+    error, devices, captureSupported, pipeline, wsStatus, inCall, callInput,
   });
 
   const microphones = [{ value: '', label: 'Default microphone' },
@@ -125,52 +115,54 @@ function AudioControls({
       note: name === loadingModel ? 'loading…' : null }))];
 
   return (
-    <section className="panel flex flex-col p-4 lg:col-span-2" aria-labelledby="live-voice-title">
-      <div className="flex h-8 items-center gap-3">
-        <AudioLines className="h-5 w-5 shrink-0 text-ok-fg" aria-hidden="true" />
+    <section className="panel flex shrink-0 flex-col gap-2.5 p-4" aria-labelledby="live-voice-title">
+      <div className="flex h-7 items-center gap-2.5">
+        <AudioLines className="h-[18px] w-[18px] shrink-0 text-ok-fg" aria-hidden="true" />
         <h2 id="live-voice-title" className="text-sm font-semibold text-fg">Voice</h2>
-        <p className={`min-w-0 flex-1 truncate text-[11px] ${TONE_CLASS[status.tone]}`} role="status"
-          aria-live="polite" title={status.text}>{status.text}</p>
+        <span className="flex-1" />
         {status.retry && onRetryConnection ? (
           /* The back-off grows to 30 s, and an attempt to an unreachable host can
              hang in CONNECTING; retryNow replaces a pending attempt. */
-          <Button icon={RefreshCw} onClick={onRetryConnection}>Retry now</Button>
+          <Button icon={RefreshCw} onClick={onRetryConnection}>Retry</Button>
         ) : null}
         <Button icon={RefreshCw} size="sm" variant="ghost" aria-label="Refresh audio devices" title="Refresh devices"
           disabled={pipeline.isRunning || devices.isRefreshing} className={devices.isRefreshing ? '[&_svg]:animate-spin' : ''}
           onClick={() => devices.refresh?.().catch(() => {})} />
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-[9rem_minmax(0,1fr)_minmax(0,1fr)]">
-        {pipeline.isRunning ? (
-          <Button variant="danger" size="md" icon={Square} onClick={handleStop} className="w-full">Stop</Button>
-        ) : (
-          <Button variant="primary" size="md" icon={Play} onClick={handleStart} disabled={!canStart}
-            loading={starting} className="w-full" title="Start the voice">
-            {starting ? 'Starting…' : 'Start'}
-          </Button>
-        )}
-        <Picker label="Microphone" icon={Mic} accent="voice" value={selectedInput} options={microphones}
-          onChange={setSelectedInput} disabled={pipeline.isRunning} />
-        <Picker label={inCall ? 'Output (call)' : 'Output'} icon={Speaker} accent="voice"
-          value={inCall ? cable.deviceId : selectedOutput} options={speakers} onChange={setSelectedOutput}
-          disabled={pipeline.isRunning || !outputSelectable || inCall} />
-        <Picker label="Speak as" icon={Boxes} accent="voice" className="sm:col-span-2"
-          value={activeModel || loadingModel || NO_VOICE} options={voiceOptions}
-          onChange={(name) => onVoiceChange?.(name || null)} disabled={!onVoiceChange || Boolean(loadingModel)} />
-        <div className="grid grid-cols-2 gap-2">
-          <Button icon={PhoneCall} size="md" selected={inCall} onClick={() => setCallOpen(true)}
-            className={inCall ? 'text-ok-fg' : ''} title="Send the voice to Discord, Teams, Meet…">
-            {inCall ? 'Call: on' : 'Call'}
-          </Button>
-          {/* True A/B: keeps the mic, the WebSocket and the output routing live and
-              returns the raw input instead of the converted signal. */}
-          <Button size="md" variant={bypass ? 'warning' : 'secondary'} role="switch" aria-checked={bypass}
-            aria-label="Hear the original (A/B)" title="Shortcut: B"
-            onClick={() => onBypassChange?.(!bypass)}>
-            {bypass ? 'A/B: original' : 'A/B'}
-          </Button>
-        </div>
+      {pipeline.isRunning ? (
+        <Button variant="danger" size="lg" icon={Square} onClick={handleStop} className="w-full">Stop</Button>
+      ) : (
+        <Button variant="primary" size="lg" icon={Play} onClick={handleStart} disabled={!canStart}
+          loading={starting} className="w-full">
+          {starting ? 'Starting…' : 'Start'}
+        </Button>
+      )}
+      {status.text ? (
+        <p className={`-mt-0.5 truncate text-xs ${TONE_CLASS[status.tone]}`} role="status" aria-live="polite"
+          title={status.text}>{status.text}</p>
+      ) : <p className="sr-only" role="status" aria-live="polite">{pipeline.isRunning ? 'Live' : ''}</p>}
+
+      <Picker label="Speak as" icon={Boxes} accent="voice"
+        value={activeModel || loadingModel || NO_VOICE} options={voiceOptions}
+        onChange={(name) => onVoiceChange?.(name || null)} disabled={!onVoiceChange || Boolean(loadingModel)} />
+      <Picker label="Microphone" icon={Mic} accent="voice" value={selectedInput} options={microphones}
+        onChange={setSelectedInput} disabled={pipeline.isRunning} />
+      <Picker label={inCall ? 'Output (call)' : 'Output'} icon={Speaker} accent="voice"
+        value={inCall ? cable.deviceId : selectedOutput} options={speakers} onChange={setSelectedOutput}
+        disabled={pipeline.isRunning || !outputSelectable || inCall} />
+      <div className="grid grid-cols-2 gap-2">
+        <Button icon={PhoneCall} size="md" selected={inCall} onClick={() => setCallOpen(true)}
+          className={inCall ? 'text-ok-fg' : ''}>
+          {inCall ? 'Call: on' : 'Call'}
+        </Button>
+        {/* True A/B: keeps the mic, the WebSocket and the output routing live and
+            returns the raw input instead of the converted signal. */}
+        <Button size="md" variant={bypass ? 'warning' : 'secondary'} role="switch" aria-checked={bypass}
+          aria-label="Hear the original (A/B)" title="B"
+          onClick={() => onBypassChange?.(!bypass)}>
+          {bypass ? 'A/B: original' : 'A/B'}
+        </Button>
       </div>
 
       {callOpen ? (

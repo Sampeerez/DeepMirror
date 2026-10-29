@@ -20,8 +20,8 @@ describe('Studio cards', () => {
     expect(screen.getByText('Max')).toBeTruthy();
     expect(screen.queryByText(/Light filter/)).toBeNull();   // the normal case needs no note
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Effects' }));
-    expect(screen.getByText('Bypass all')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Effects rack' }));
+    expect(screen.getByText('All off')).toBeTruthy();
     expect(screen.queryByText('Noise removal')).toBeNull();
 
     expect(screen.queryByRole('tab', { name: 'Advanced' })).toBeNull();   // in Voice › Settings now

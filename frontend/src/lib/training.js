@@ -36,13 +36,13 @@ export function datasetQuality(seconds, info) {
   const minimum = info?.min_audio_seconds ?? 60;
   const [low, high] = info?.recommended_audio_seconds ?? [300, 1800];
   const maximum = info?.max_audio_seconds ?? 3600;
-  if (!seconds) return { tone: 'muted', text: 'Add recordings of one voice.' };
-  if (seconds < minimum) return { tone: 'danger', text: `Too short: at least ${formatDuration(minimum)} is needed.` };
-  if (seconds > maximum) return { tone: 'danger', text: `Too long: use at most ${formatDuration(maximum)}.` };
-  if (seconds < low) return { tone: 'warn', text: `Usable. ${formatDuration(low)} or more gives a much steadier voice.` };
-  if (seconds < 600) return { tone: 'ok', text: 'Good length. 10–30 min captures even more of the voice.' };
-  if (seconds > high) return { tone: 'ok', text: 'Plenty of audio. Training takes longer; quality will be excellent.' };
-  return { tone: 'ok', text: 'Great length for a faithful voice.' };
+  if (!seconds) return { tone: 'muted', text: '' };
+  if (seconds < minimum) return { tone: 'danger', text: `Too short: at least ${formatDuration(minimum)}` };
+  if (seconds > maximum) return { tone: 'danger', text: `Too long: at most ${formatDuration(maximum)}` };
+  if (seconds < low) return { tone: 'warn', text: `Usable · ${formatDuration(low)}+ is steadier` };
+  if (seconds < 600) return { tone: 'ok', text: 'Good length' };
+  if (seconds > high) return { tone: 'ok', text: 'Plenty of audio' };
+  return { tone: 'ok', text: 'Great length' };
 }
 
 export function isActiveJob(job) {
@@ -57,9 +57,9 @@ export function canResume(job) {
 export function bestEpochSummary(job) {
   if (!job?.exported_epoch) return null;
   if (job.best_score != null) {
-    return `Best voice so far: epoch ${job.exported_epoch}, chosen on held-out audio (score ${job.best_score.toFixed(2)}, lower is better).`;
+    return `Best epoch ${job.exported_epoch} (score ${job.best_score.toFixed(2)})`;
   }
-  return `Voice saved at epoch ${job.exported_epoch}.`;
+  return `Saved at epoch ${job.exported_epoch}`;
 }
 
 /** Epoch budget shown for a job: the plan's, else the requested count. */

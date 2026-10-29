@@ -6,11 +6,6 @@ import Toggle from './Toggle';
 import { fetchVirtualMic, installVirtualMic } from '../lib/api';
 import { findCableOutput } from '../lib/callMode';
 
-const APPS = [
-  ['Discord', 'User Settings → Voice & Video → Input Device'],
-  ['Teams', 'Settings → Devices → Microphone'],
-  ['Google Meet', 'Settings (⋮) → Audio → Microphone'],
-];
 
 /**
  * Call mode: the converted voice goes to a virtual microphone that Discord,
@@ -63,11 +58,7 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
         <div className="flex min-w-0 items-center gap-2">
           <PhoneCall className="h-4 w-4 shrink-0 text-fg-subtle" aria-hidden="true" />
           <div className="min-w-0">
-            <p className="text-xs font-medium text-fg-muted">Call mode (Discord, Teams, Meet…)</p>
-            <p className="mt-1 break-words text-[11px] text-fg-faint">
-              {enabled && ready ? `Your converted voice goes to “${status.call_input}”.`
-                : 'Send the converted voice to a virtual microphone instead of your speakers.'}
-            </p>
+            <p className="text-sm font-medium text-fg-secondary">Send my voice to calls</p>
           </div>
         </div>
         <Toggle checked={enabled && ready} disabled={!ready || running} onChange={onEnabledChange}
@@ -82,20 +73,19 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
         <div className="mt-3 rounded-md border border-line bg-raised p-3 text-[11px] leading-4 text-fg-subtle">
           {!confirming ? (
             <>
-              A virtual microphone is needed for calls and is not installed yet.
-              <span className="mt-2 flex"><Button onClick={() => setConfirming(true)}>Install virtual microphone</Button></span>
+              <span className="flex items-center justify-between gap-3">
+                Virtual microphone not installed
+                <Button variant="primary" onClick={() => setConfirming(true)}>Set up</Button>
+              </span>
             </>
           ) : status.platform === 'Linux' ? (
             <>
-              The studio will create “{APP_NAME} Microphone” with PipeWire/PulseAudio (nothing is installed;
-              it disappears when the studio closes).
+              Creates “{APP_NAME} Microphone” while {APP_NAME} runs.
               <span className="mt-2 flex"><Button variant="primary" onClick={install}>Create it</Button></span>
             </>
           ) : (
             <>
-              The studio will download VB-CABLE, a free virtual audio cable by VB-Audio (donationware,
-              vb-cable.com), and open its installer. Click <b>Install Driver</b> there and accept the administrator
-              prompt. VB-Audio recommends restarting the computer afterwards.
+              Installs VB-CABLE (free, by VB-Audio): click <b>Install Driver</b> and accept the prompt.
               <span className="mt-2 flex gap-2">
                 <Button variant="primary" onClick={install}>Download and install</Button>
                 <Button onClick={() => setConfirming(false)}>Cancel</Button>
@@ -114,8 +104,7 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
       ) : null}
       {status?.installed && !cable ? (
         <p className="mt-3 text-[11px] text-warn-fg">
-          The virtual cable is installed but the browser does not list it yet: press the refresh button
-          {status.platform !== 'Linux' ? ' (or restart the computer, as VB-Audio recommends)' : ''}.
+          Installed: refresh the devices{status.platform !== 'Linux' ? ' or restart the computer' : ''}.
         </p>
       ) : null}
       {error ? <p className="mt-3 break-words text-[11px] text-danger-fg">{error}</p> : null}
@@ -129,21 +118,16 @@ export default function CallMode({ devices, enabled, onEnabledChange, monitorId,
             <select id="call-monitor" value={monitorId} disabled={running}
               onChange={(event) => onMonitorChange(event.target.value)}
               className="native-select-safe field mt-2">
-              <option value="">No (recommended in calls)</option>
+              <option value="">No</option>
               {devices.outputDevices.filter((device) => device.deviceId !== cable.deviceId).map((device) => (
                 <option key={device.deviceId} value={device.deviceId}>{device.label || 'Speaker'}</option>
               ))}
             </select>
           </div>
-          <div className="rounded-md border border-line bg-raised p-3 text-[11px] leading-4 text-fg-subtle">
-            In your call app choose <b>{status.call_input}</b> as the microphone:
-            <ul className="mt-1 list-disc pl-4">
-              {APPS.map(([app, where]) => <li key={app}><b>{app}</b>: {where}</li>)}
-            </ul>
-            Use headphones, so the other people&apos;s voices do not reach your microphone. Turn off the call
-            app&apos;s own noise suppression if your voice sounds muffled.
-          </div>
-          {running ? <p className="text-[11px] text-fg-faint">Changes apply the next time you start the stream.</p> : null}
+          <p className="rounded-md border border-line bg-raised p-3 text-xs text-fg-subtle">
+            In the call app, microphone: <b className="text-fg-secondary">{status.call_input}</b>
+            {' '}· camera: <b className="text-fg-secondary">OBS Virtual Camera</b>
+          </p>
         </div>
       ) : null}
     </div>

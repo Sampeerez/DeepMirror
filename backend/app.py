@@ -28,6 +28,7 @@ from backend.security import cors_origins
 from backend.training.jobs import TrainingJobs
 from backend.video.files import VideoJobs
 from backend.video.service import FaceService
+from backend.virtual_camera import VirtualCamera
 from backend.virtual_mic import VirtualMic
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         logging.getLogger().addHandler(logbook)
     app.state.lifecycle = lifecycle or Lifecycle(enabled=False)
     app.state.virtual_mic = VirtualMic(settings.DATA_DIR / "downloads")
+    app.state.virtual_camera = VirtualCamera(settings.DATA_DIR / "drivers")
     manager_ = app.state.model_manager
     app.state.video_jobs = VideoJobs(settings.DATA_DIR)
     app.state.faces = FaceService(assets, manager_.arbiter, settings.DATA_DIR,

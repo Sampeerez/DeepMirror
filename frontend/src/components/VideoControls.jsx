@@ -1,31 +1,40 @@
 import React, { memo } from 'react';
-import { Camera, ScanFace, Square, Video, Webcam } from 'lucide-react';
+import { Camera, ScanFace, Square, UserRound, Video, Webcam } from 'lucide-react';
 import Button from './Button';
 import Picker from './Picker';
 import { faceThumbnailUrl } from '../lib/api';
 
 const TONE = { danger: 'text-danger-fg', warn: 'text-warn-fg', muted: 'text-fg-subtle' };
 
-/** One line on the face clone's state, for the Live bar's status line. */
+/** The face clone's state in a few words, or null when there is nothing to say. */
 export function videoNote(video, face) {
-  const { ready, activeFace } = face;
   const stats = video.stats;
   if (video.error) return { tone: 'danger', text: video.error };
   if (face.downloading) return { tone: 'muted', text: 'Downloading the face models…' };
-  if (!ready) return { tone: 'muted', text: 'Download the face models once (Set up).' };
-  if (!video.running) return { tone: 'muted', text: activeFace ? `Ready to wear ${activeFace.name}.` : 'Your own face.' };
-  if (stats?.face === false) return { tone: 'warn', text: 'No face in view.' };
-  return {
-    tone: 'muted',
-    text: `${video.shownFps} fps · ${stats?.keys_per_second ?? 0} swaps/s${stats?.camera ? ` · ${stats.camera}` : ''}`,
-  };
+  if (!face.ready) return { tone: 'muted', text: 'Face models not downloaded' };
+  if (video.running && stats?.face === false) return { tone: 'warn', text: 'No face in view' };
+  return null;
+}
+
+function FaceChoice({ selected, label, thumb, onClick, disabled }) {
+  return (
+    <button type="button" role="radio" aria-checked={selected} aria-label={label} title={label} disabled={disabled}
+      onClick={onClick}
+      className={`relative h-9 w-9 shrink-0 overflow-hidden rounded-md border-2 transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] ${
+        selected ? 'border-video-solid' : 'border-transparent hover:border-line-hover'}`}>
+      {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" />
+        : <span className="flex h-full w-full items-center justify-center bg-sunken text-fg-subtle">
+          <UserRound className="h-4 w-4" aria-hidden="true" />
+        </span>}
+    </button>
+  );
 }
 
 /**
- * Live › Face: start/stop the camera, which camera, which face to wear, and
- * the virtual camera, with its own status line. One column wide.
+ * Live › the stage's header: the face to wear (thumbnails, one click), start
+ * or stop the camera, which camera, and the virtual camera for calls.
  */
-function VideoControls({ video, devices, face, onSetUp, onFaceChange }) {
+function VideoControls({ video, devices, face, onSetUp, onFaceChange, virtualCamera = null, onSetUpCalls }) {
   const { status, ready, activeFace } = face;
   const faces = status?.faces || [];
   const note = videoNote(video, face);
@@ -33,47 +42,47 @@ function VideoControls({ video, devices, face, onSetUp, onFaceChange }) {
     ...(devices.cameraDevices || []).map((device) => ({
       value: device.deviceId, label: device.label || `Camera (${device.deviceId.slice(0, 8)}…)`,
     }))];
-  const faceOptions = [{ value: '', label: 'My own face' },
-    ...faces.map((item) => ({ value: item.id, label: item.name, thumb: faceThumbnailUrl(item.id) }))];
+  // Without the virtual camera installed the switch leads to Settings › Calls.
+  const camMissing = virtualCamera && !virtualCamera.installed;
 
   return (
-    <section className="panel flex flex-col p-4" aria-labelledby="live-face-title">
-      <div className="flex h-8 items-center gap-3">
-        <ScanFace className="h-5 w-5 shrink-0 text-video-fg" aria-hidden="true" />
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2">
+        <ScanFace className="h-[18px] w-[18px] shrink-0 text-video-fg" aria-hidden="true" />
         <h2 id="live-face-title" className="text-sm font-semibold text-fg">Face</h2>
-        <p className={`min-w-0 flex-1 truncate text-[11px] ${TONE[note.tone]}`} role="status" aria-live="polite"
-          title={note.text}>{note.text}</p>
       </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-[9rem_minmax(0,1fr)]">
+      {ready ? (
+        <div role="radiogroup" aria-labelledby="live-face-title"
+          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto px-1 py-0.5">
+          <FaceChoice selected={!activeFace} label="My own face" onClick={() => onFaceChange(null)} disabled={face.busy} />
+          {faces.map((item) => (
+            <FaceChoice key={item.id} selected={activeFace?.id === item.id} label={item.name}
+              thumb={faceThumbnailUrl(item.id)} onClick={() => onFaceChange(item.id)} disabled={face.busy} />
+          ))}
+        </div>
+      ) : (
+        <p className={`min-w-0 flex-1 truncate text-xs ${note ? TONE[note.tone] : ''}`} role="status">{note?.text}</p>
+      )}
+      <div className="flex items-center gap-2">
         {!ready ? (
-          <Button size="md" icon={ScanFace} onClick={onSetUp} className="w-full text-video-fg">Set up</Button>
+          <Button size="md" icon={ScanFace} onClick={onSetUp} className="text-video-fg">Set up</Button>
         ) : video.running ? (
-          <Button variant="danger" size="md" icon={Square} onClick={video.stop} className="w-full">Stop</Button>
+          <Button variant="danger" size="md" icon={Square} onClick={video.stop} className="w-28">Stop</Button>
         ) : (
           <Button size="md" icon={Video} onClick={video.start} loading={video.starting}
-            className="w-full border-video-line text-video-fg" title="Start the camera (shortcut: V)">
-            {video.starting ? 'Starting…' : 'Start'}
+            className="w-28 border-video-line text-video-fg" title="V">
+            {video.starting ? 'Starting…' : 'Camera'}
           </Button>
         )}
         <Picker label="Camera" icon={Camera} accent="face" value={video.cameraId} options={cameras}
-          onChange={video.setCameraId} disabled={video.running} />
-        <Picker label="Wear" icon={ScanFace} accent="face" value={activeFace?.id || ''} options={faceOptions}
-          onChange={(id) => onFaceChange(id || null)} disabled={!ready || face.busy}
-          render={(option) => (
-            <span className="flex min-w-0 flex-1 items-center gap-2">
-              {option.thumb ? <img src={option.thumb} alt="" className="h-6 w-6 shrink-0 rounded-sm object-cover" />
-                : <span className="h-6 w-6 shrink-0 rounded-sm bg-sunken" aria-hidden="true" />}
-              <span className="min-w-0 truncate">{option.label}</span>
-            </span>
-          )} />
-        <Button size="md" icon={Webcam} selected={video.virtualCamera} role="switch" aria-checked={video.virtualCamera}
-          onClick={() => video.setVirtualCamera(!video.virtualCamera)}
-          className={video.virtualCamera ? 'text-video-fg' : ''}
-          title="Sends the face to OBS Virtual Camera (install OBS Studio once): pick it as the camera in Discord, Meet, Teams…">
-          {video.virtualCamera ? 'Virtual cam: on' : 'Virtual cam'}
-        </Button>
+          onChange={video.setCameraId} disabled={video.running} className="w-44 max-sm:hidden" />
+        <Button size="md" icon={Webcam} selected={video.virtualCamera && !camMissing} role="switch"
+          aria-checked={Boolean(video.virtualCamera && !camMissing)} aria-label="Virtual camera"
+          title={camMissing ? 'Set up the virtual camera in Settings' : 'Virtual camera for calls'}
+          onClick={() => (camMissing ? onSetUpCalls?.() : video.setVirtualCamera(!video.virtualCamera))}
+          className={video.virtualCamera && !camMissing ? 'text-video-fg' : ''} />
       </div>
-    </section>
+    </div>
   );
 }
 
