@@ -37,6 +37,11 @@
   --color-ok-line: var(--ok-line);
   --color-ok-line-strong: var(--ok-line-strong);
   --color-ok-solid: var(--ok-solid);
+  /* The face clone's accent (the voice keeps the teal one). */
+  --color-video-fg: var(--video-fg);
+  --color-video-bg: var(--video-bg);
+  --color-video-line: var(--video-line);
+  --color-video-solid: var(--video-solid);
   --color-warn-fg: var(--warn-fg);
   --color-warn-fg-soft: var(--warn-fg-soft);
   --color-warn-bg: var(--warn-bg);
@@ -125,6 +130,12 @@
     --ok-line: rgba(110, 231, 183, 0.3);
     --ok-line-strong: rgba(110, 231, 183, 0.5);
     --ok-solid: #34d399;
+
+    /* The face clone */
+    --video-fg: #ddd6fe;
+    --video-bg: rgba(139, 92, 246, 0.1);
+    --video-line: rgba(167, 139, 250, 0.4);
+    --video-solid: #8b5cf6;
 
     /* Status, warning / bypass */
     --warn-fg: #fde68a;
@@ -223,6 +234,11 @@
     --ok-line: #a7f3d0;
     --ok-line-strong: #6ee7b7;
     --ok-solid: #059669;
+
+    --video-fg: #5b21b6;
+    --video-bg: #f5f3ff;
+    --video-line: #c4b5fd;
+    --video-solid: #7c3aed;
 
     --warn-fg: #854d0e;
     --warn-fg-soft: #92400e;

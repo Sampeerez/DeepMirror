@@ -65,8 +65,11 @@ function DeviceSelect({ id, label, Icon, value, onChange, disabled, title, child
   );
 }
 
-/** The studio's top bar: start/stop, microphone, output, call mode and A/B, and a status line. */
-function AudioControls({ devices, pipeline, wsStatus, activeModel, bypass = false, onBypassChange, onRetryConnection }) {
+/** The Live bar: the voice (start/stop, microphone, output, call mode, A/B), the video row, and a status line. */
+function AudioControls({
+  devices, pipeline, wsStatus, activeModel, bypass = false, onBypassChange, onRetryConnection, videoRow = null,
+  videoStatus = null,
+}) {
   const [selectedInput, setSelectedInput] = useState('');
   const [selectedOutput, setSelectedOutput] = useState('');
   const [starting, setStarting] = useState(false);
@@ -167,8 +170,14 @@ function AudioControls({ devices, pipeline, wsStatus, activeModel, bypass = fals
         </DeviceSelect>
       </div>
 
+      {videoRow}
+
       <div className="mt-2 flex h-8 items-center justify-between gap-3" role="status">
         <p className={`min-w-0 truncate text-[11px] ${TONE_CLASS[status.tone]}`} title={status.text}>{status.text}</p>
+        {videoStatus ? (
+          <p className={`ml-auto min-w-0 truncate text-right text-[11px] ${TONE_CLASS[videoStatus.tone] || 'text-warn-fg'}`}
+            title={videoStatus.text}>{videoStatus.text}</p>
+        ) : null}
         {status.retry && onRetryConnection ? (
           /* The back-off grows to 30 s, and an attempt to an unreachable host can
              hang in CONNECTING; retryNow replaces a pending attempt. */

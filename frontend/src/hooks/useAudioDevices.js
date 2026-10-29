@@ -5,6 +5,7 @@ import { uniqueDevices } from '../lib/devices';
 export default function useAudioDevices() {
   const [inputDevices, setInputDevices] = useState([]);
   const [outputDevices, setOutputDevices] = useState([]);
+  const [cameraDevices, setCameraDevices] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasLabels, setHasLabels] = useState(false);
   const [permissionState, setPermissionState] = useState('prompt');
@@ -28,6 +29,7 @@ export default function useAudioDevices() {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const inputs = uniqueDevices(devices.filter((d) => d.kind === 'audioinput'));
       const outputs = uniqueDevices(devices.filter((d) => d.kind === 'audiooutput'));
+      setCameraDevices(uniqueDevices(devices.filter((d) => d.kind === 'videoinput')));
       setInputDevices(inputs);
       setOutputDevices(outputs);
       setHasLabels([...inputs, ...outputs].some((d) => d.label));
@@ -115,6 +117,7 @@ export default function useAudioDevices() {
   return useMemo(() => ({
     inputDevices,
     outputDevices,
+    cameraDevices,
     refresh,
     isRefreshing,
     hasLabels,
@@ -124,7 +127,7 @@ export default function useAudioDevices() {
     insecureContext: Boolean(support.insecureContext),
     outputSelectionSupported,
   }), [
-    inputDevices, outputDevices, refresh, isRefreshing, hasLabels, permissionState, error,
+    inputDevices, outputDevices, cameraDevices, refresh, isRefreshing, hasLabels, permissionState, error,
     support.supported, support.insecureContext, outputSelectionSupported,
   ]);
 }

@@ -292,3 +292,22 @@ export const fetchTrainingLog = (jobId, lines = 800) => request(`/training/jobs/
 
 /** Direct link to a voice as a .zip (its .pth plus its .index). */
 export const modelDownloadUrl = (name) => `${API_BASE}/models/${encodeURIComponent(name)}/download`;
+
+// --- Face clone -------------------------------------------------------------
+
+export const fetchVideo = () => request('/video/', { timeoutMs: 15000 });
+export const prepareVideo = () => request('/video/prepare', { method: 'POST' });
+export const updateVideoSettings = (settings) => request('/video/settings', {
+  method: 'PATCH', body: JSON.stringify(settings),
+});
+export function addFace(files, name) {
+  const formData = new FormData();
+  for (const file of files) formData.append('files', file);
+  formData.append('name', name || '');
+  return request('/video/faces', { method: 'POST', body: formData });
+}
+export const activateFace = (faceId) => request(`/video/faces/${encodeURIComponent(faceId || 'none')}/activate`, {
+  method: 'POST',
+});
+export const deleteFace = (faceId) => request(`/video/faces/${encodeURIComponent(faceId)}`, { method: 'DELETE' });
+export const faceThumbnailUrl = (faceId) => `${API_BASE}/video/faces/${encodeURIComponent(faceId)}/thumbnail`;

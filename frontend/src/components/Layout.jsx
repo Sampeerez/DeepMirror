@@ -1,69 +1,81 @@
-import React, { useRef } from 'react';
-import { Boxes, FileDown, GraduationCap, Mic2, ScrollText, UserRound } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  AudioLines, Boxes, FileDown, GraduationCap, Radio, ScanFace, ScrollText, SlidersHorizontal, UserRound, Video,
+} from 'lucide-react';
 import { APP_NAME, APP_TAGLINE } from '../lib/brand';
+import { ZONES, zoneOf } from '../lib/navigation';
 import logoUrl from '../assets/logo.svg';
 
-// Ids match lib/navigation TAB_IDS; the matching panels in App carry
+// Page ids match lib/navigation; the matching panels in App carry
 // id="panel-<id>" and aria-labelledby="tab-<id>".
-const TABS = [
-  {
-    id: 'studio',
-    label: 'Studio',
-    Icon: Mic2,
-  },
-  {
-    id: 'models',
-    label: 'Models',
-    Icon: Boxes,
-  },
-  {
-    id: 'voice',
-    label: 'My voice',
-    Icon: UserRound,
-  },
-  {
-    id: 'training',
-    label: 'Train',
-    Icon: GraduationCap,
-  },
-  {
-    id: 'converter',
-    label: 'Converter',
-    Icon: FileDown,
-  },
-  {
-    id: 'logs',
-    label: 'Logs',
-    Icon: ScrollText,
-  },
-];
+const PAGES = {
+  studio: { label: 'Live', Icon: Radio },
+  models: { label: 'Models', Icon: Boxes },
+  voice: { label: 'My voice', Icon: UserRound },
+  training: { label: 'Train', Icon: GraduationCap },
+  faces: { label: 'Faces', Icon: ScanFace },
+  'face-settings': { label: 'Video settings', Icon: SlidersHorizontal },
+  converter: { label: 'Convert', Icon: FileDown },
+  logs: { label: 'Logs', Icon: ScrollText },
+};
+const ZONE_ICONS = { voice: AudioLines, video: Video };
+// The voice and the face each have their colour, so it is always clear which side a page belongs to.
+const ZONE_ACCENT = {
+  voice: { text: 'text-ok-fg', group: 'border-ok-line bg-ok-bg', chip: 'text-ok-fg' },
+  video: { text: 'text-video-fg', group: 'border-video-line bg-video-bg', chip: 'text-video-fg' },
+};
+
+function TabButton({ id, label, Icon, selected, onSelect, accent = '' }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      id={`tab-${id}`}
+      aria-selected={selected}
+      aria-controls={`panel-${id}`}
+      tabIndex={selected ? 0 : -1}
+      data-tab={id}
+      data-selected={selected}
+      onClick={() => onSelect(id)}
+      className={`flex h-8 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 text-xs font-medium sm:gap-2 sm:px-3 ${
+        selected
+          ? `frost-control ${accent || 'text-fg'}`
+          : 'border-transparent text-fg-muted transition-colors duration-150 ease-out hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]'
+      }`}
+    >
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+      {label}
+    </button>
+  );
+}
 
 /**
- * Top-level view switcher.
+ * Top-level navigation: Live, Voice, Video, Convert, Logs. The zone in use
+ * opens in place to show its own pages (Voice: Models, My voice, Train;
+ * Video: Faces, Video settings), in the zone's colour.
  *
- * Marked up as a tablist (not a nav) because the three views are panels of one
- * document rather than separate pages: assistive tech announces "tab 2 of 3,
- * selected", and arrow keys move between them while only the selected tab
- * sits in the Tab order, as the WAI-ARIA pattern prescribes.
+ * One tablist: arrow keys move across every visible tab and only the
+ * selected one sits in the Tab order (WAI-ARIA tabs pattern).
  */
 function TabList({ tab, onTabChange }) {
   const listRef = useRef(null);
+  const current = zoneOf(tab);
+  // A zone reopens on the page last used in it.
+  const [lastInZone, setLastInZone] = useState({});
+  useEffect(() => {
+    setLastInZone((previous) => (previous[current.id] === tab ? previous : { ...previous, [current.id]: tab }));
+  }, [current.id, tab]);
 
+  const select = (id) => onTabChange?.(id);
   const handleKeyDown = (event) => {
-    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
-    if (!keys.includes(event.key)) return;
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-
-    const currentIndex = Math.max(0, TABS.findIndex(({ id }) => id === tab));
-    const nextIndex = event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? TABS.length - 1
-        : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length;
-    const nextId = TABS[nextIndex].id;
-
-    onTabChange?.(nextId);
-    listRef.current?.querySelector(`[data-tab="${nextId}"]`)?.focus();
+    const buttons = [...(listRef.current?.querySelectorAll('[role="tab"]') || [])];
+    const index = Math.max(0, buttons.findIndex((button) => button.dataset.selected === 'true'));
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+      : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+    select(buttons[next].dataset.tab);
+    requestAnimationFrame(() => listRef.current?.querySelector(`[data-tab="${buttons[next].dataset.tab}"]`)?.focus());
   };
 
   return (
@@ -72,33 +84,28 @@ function TabList({ tab, onTabChange }) {
       role="tablist"
       aria-label="Workspace"
       onKeyDown={handleKeyDown}
-      className="order-3 flex w-full items-center gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1 sm:order-none sm:w-auto"
+      className="order-3 flex w-full flex-wrap items-center gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1 sm:order-none sm:w-auto"
     >
-      {TABS.map((item) => {
-        const selected = tab === item.id;
-        const Icon = item.Icon;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            id={`tab-${item.id}`}
-            aria-selected={selected}
-            aria-controls={`panel-${item.id}`}
-            tabIndex={selected ? 0 : -1}
-            data-tab={item.id}
-            data-selected={selected}
-            onClick={() => onTabChange?.(item.id)}
-            className={`flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-xs font-medium sm:flex-initial sm:gap-2 sm:px-4 ${
-              selected
-                ? 'frost-control text-fg'
-                : 'border-transparent text-fg-muted transition-colors duration-150 ease-out hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]'
-            }`}
-          >
-            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-            {item.label}
-          </button>
-        );
+      {ZONES.map((zone) => {
+        const accent = ZONE_ACCENT[zone.id];
+        if (zone.id === current.id && zone.tabs.length > 1) {
+          const ZoneIcon = ZONE_ICONS[zone.id];
+          return (
+            <div key={zone.id} className={`flex items-center gap-0.5 rounded-md border py-0.5 pl-2.5 pr-0.5 ${accent.group}`}>
+              <span className={`mr-1 flex items-center gap-1.5 text-xs font-semibold ${accent.chip}`}>
+                <ZoneIcon className="h-4 w-4" aria-hidden="true" />
+                {zone.label}
+              </span>
+              {zone.tabs.map((id) => (
+                <TabButton key={id} id={id} {...PAGES[id]} selected={tab === id} onSelect={select}
+                  accent={accent.text} />
+              ))}
+            </div>
+          );
+        }
+        const target = lastInZone[zone.id] || zone.tabs[0];
+        const page = zone.tabs.length > 1 ? { label: zone.label, Icon: ZONE_ICONS[zone.id] } : PAGES[target];
+        return <TabButton key={zone.id} id={target} {...page} selected={tab === target} onSelect={select} />;
       })}
     </div>
   );

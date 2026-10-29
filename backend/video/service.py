@@ -124,6 +124,13 @@ class FaceService:
         self.library.delete(face_id)
         self._send_identity()
 
+    def _cached_swap_ms(self) -> dict | None:
+        """Swapper timings measured on an earlier run (per GPU), so the settings show them before the camera starts."""
+        try:
+            return _merge(json.loads((self.data_dir / "cache" / "face_swap_ms.json").read_text(encoding="utf-8"))) or None
+        except (OSError, ValueError):
+            return None
+
     def status(self) -> dict:
         return {
             "models_ready": self.models_ready,
@@ -133,9 +140,17 @@ class FaceService:
             "settings": self.settings,
             "swappers": [{"id": spec.id, "label": spec.label} for spec in SWAPPERS.values()],
             "running": self._worker is not None and self._worker.running,
-            "swap_ms": (self._worker.info or {}).get("swap_ms") if self._worker else None,
+            "swap_ms": ((self._worker.info or {}).get("swap_ms") if self._worker else None) or self._cached_swap_ms(),
             "stats": self.last_stats,
         }
+
+
+def _merge(tables: dict) -> dict:
+    merged: dict = {}
+    for table in tables.values():
+        if isinstance(table, dict):
+            merged.update(table)
+    return merged
 
 
 def _thumbnail(photo: bytes) -> bytes:

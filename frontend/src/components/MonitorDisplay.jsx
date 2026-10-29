@@ -116,7 +116,7 @@ function StatChip({ label, value }) {
   );
 }
 
-/** The Monitor card: spectrum, levels, latency and the recorder. */
+/** The Monitor card: the cloned video (or the spectrum), levels, latency and the recorder. */
 function MonitorDisplay({
   meters,
   latency,
@@ -125,6 +125,7 @@ function MonitorDisplay({
   serverStats,
   bypass = false,
   visualizer = null,
+  videoPreview = null,
   recorder = null,
 }) {
   const latencyMs = Math.round(latency);
@@ -143,7 +144,7 @@ function MonitorDisplay({
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="panel-kicker">Monitor</p>
-          <h2 className="panel-title truncate">Levels & recorder</h2>
+          <h2 className="panel-title truncate">{videoPreview ? 'Video, levels & recorder' : 'Levels & recorder'}</h2>
         </div>
         {bypass ? (
           <span className="rounded-sm border border-warn-line-strong bg-warn-bg px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-warn-fg">
@@ -161,8 +162,8 @@ function MonitorDisplay({
         ) : null}
       </div>
 
-      <div className="mt-4 shrink-0 space-y-3">
-        {visualizer}
+      <div className={`mt-4 space-y-3 ${videoPreview ? 'min-h-0 flex-1 overflow-y-auto pr-1' : 'shrink-0'}`}>
+        {videoPreview || visualizer}
         {serverStats?.processingError && !bypass ? (
           <p role="alert" className="truncate text-xs text-danger-fg" title={serverStats.processingError}>
             {serverStats.processingError}
@@ -188,7 +189,11 @@ function MonitorDisplay({
         </div>
       </div>
 
-      {recorder ? <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-line pt-3">{recorder}</div> : null}
+      {recorder ? (
+        <div className={`mt-4 flex min-h-0 flex-col border-t border-line pt-3 ${videoPreview ? 'shrink-0' : 'flex-1'}`}>
+          {recorder}
+        </div>
+      ) : null}
     </section>
   );
 }

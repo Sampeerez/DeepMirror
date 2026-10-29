@@ -19,6 +19,11 @@ import useAudioPipeline from './hooks/useAudioPipeline';
 import useAudioDevices from './hooks/useAudioDevices';
 import useRuntimeConfig from './hooks/useRuntimeConfig';
 import useSettingsSync from './hooks/useSettingsSync';
+import useFaceClone from './hooks/useFaceClone';
+import useVideoPipeline from './hooks/useVideoPipeline';
+import VideoControls, { videoNote } from './components/VideoControls';
+import VideoPreview from './components/VideoPreview';
+import { audioDelayMs } from './lib/avSync';
 import { getActiveModel } from './lib/api';
 import { APP_NAME } from './lib/brand';
 import { defaultEffects } from './lib/effects';
@@ -35,6 +40,8 @@ const TrainingStudio = lazy(() => import('./components/TrainingStudio'));
 const FileConverter = lazy(() => import('./components/FileConverter'));
 const LogsPanel = lazy(() => import('./components/LogsPanel'));
 const VoiceProfile = lazy(() => import('./components/VoiceProfile'));
+const FaceLibrary = lazy(() => import('./components/FaceLibrary'));
+const VideoSettings = lazy(() => import('./components/VideoSettings'));
 
 const ACTIVE_MODEL_POLL_MS = 5000;
 const CAPTURE_SAMPLES_KEY = 'ovc_capture_samples_v1';
@@ -99,6 +106,19 @@ export default function App() {
 
   const runtime = useRuntimeConfig({ wsHook, isRunning, onRecommendedF0: adoptRecommendedF0 });
   const { runtimeConfig } = runtime;
+
+  // The face clone. Its frames are shown (and sent to the virtual camera) as late as the
+  // converted voice is heard, so lips and voice stay together.
+  const face = useFaceClone();
+  const videoDelayMs = isRunning ? audioDelayMs({
+    chunkSize: runtimeConfig.chunkSize, sampleRate: pipeline.streamInfo?.sampleRate, roundTripMs: latency,
+    algorithmicMs: serverStats.algorithmicDelayMs, bufferedSamples: pipeline.playbackStats?.bufferedSamples,
+    outputLatency: pipeline.streamInfo?.outputLatency,
+  }) : 0;
+  const videoDelayRef = useRef(0);
+  useEffect(() => { videoDelayRef.current = videoDelayMs; }, [videoDelayMs]);
+  const getVideoDelayMs = useCallback(() => videoDelayRef.current, []);
+  const video = useVideoPipeline({ getDelayMs: getVideoDelayMs });
   useSettingsSync({ voice, effects, bypass, runtimeConfig, wsHook, activeModel });
 
   // A newly active voice brings its own settings; nothing carries over from the previous one.
@@ -134,13 +154,21 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // B: A/B bypass. R: start/stop a take.
+  // B: A/B bypass. R: start/stop a take. V: video on/off.
+  const { running: videoRunning, start: startVideo, stop: stopVideo } = video;
+  const videoReady = face.ready && Boolean(face.activeFace);
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (isSettingsOpen) return;
       if (shouldTriggerShortcut(event, 'b')) {
         event.preventDefault();
         setBypass((prev) => !prev);
+        return;
+      }
+      if (shouldTriggerShortcut(event, 'v') && (videoRunning || videoReady)) {
+        event.preventDefault();
+        if (videoRunning) stopVideo();
+        else startVideo();
         return;
       }
       if (shouldTriggerShortcut(event, 'r') && isRunning) {
@@ -152,7 +180,8 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSettingsOpen, isRunning, isRecording, startRecording, stopRecording]);
+  }, [isSettingsOpen, isRunning, isRecording, startRecording, stopRecording, videoRunning, videoReady, startVideo,
+    stopVideo]);
 
   // SPA-safe anchor scrolling (e.g. /#effects) once the page has rendered.
   useEffect(() => {
@@ -354,6 +383,11 @@ export default function App() {
           bypass={bypass}
           onBypassChange={setBypass}
           onRetryConnection={retryNow}
+          videoRow={(
+            <VideoControls video={video} devices={devices} face={face}
+              onSetUp={() => handleTabChange('faces')} onFaceChange={face.activate} />
+          )}
+          videoStatus={videoNote(video, face)}
         />
 
         <div className="page-grid">
@@ -364,6 +398,8 @@ export default function App() {
             serverMs={serverMs}
             serverStats={serverStats}
             bypass={bypass}
+            videoPreview={video.running ? <VideoPreview canvasRef={video.setPreview} fps={video.shownFps}
+              faceName={face.activeFace?.name} /> : null}
             visualizer={(
               <Visualizer
                 getAnalysers={pipeline.getAnalysers}
@@ -432,6 +468,22 @@ export default function App() {
         {visited.has('training') ? (
           <Suspense fallback={null}>
             <TrainingStudio active={tab === 'training'} onActiveModelChange={setActiveModel} />
+          </Suspense>
+        ) : null}
+      </div>
+
+      <div {...panelProps('faces')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
+        {visited.has('faces') ? (
+          <Suspense fallback={null}>
+            <FaceLibrary face={face} />
+          </Suspense>
+        ) : null}
+      </div>
+
+      <div {...panelProps('face-settings')} className="flex min-h-0 flex-1 flex-col animate-fade-in-up">
+        {visited.has('face-settings') ? (
+          <Suspense fallback={null}>
+            <VideoSettings face={face} video={video} delayMs={videoDelayMs} />
           </Suspense>
         ) : null}
       </div>
