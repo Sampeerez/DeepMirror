@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.svg" width="96" height="96" alt="DeepMirror logo" />
+  <img src="docs/images/deepmirror-logo.svg" width="96" height="96" alt="DeepMirror logo" />
 </p>
 
 <h1 align="center">DeepMirror</h1>
@@ -179,11 +179,11 @@ make lint test        # ruff, pyright, eslint, pytest, vitest
 
 ## Screenshots
 
-![Live](docs/images/main-ui.png)
+![Live](docs/images/live.png)
 ![Settings](docs/images/settings.png)
 ![Library](docs/images/library.png)
-![Train](docs/images/training.png)
-![Voices](docs/images/models.png)
+![Train](docs/images/train.png)
+![Voices](docs/images/voices.png)
 
 ## Credits
 
