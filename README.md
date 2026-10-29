@@ -67,8 +67,12 @@ Every page is in the sidebar:
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
 ### Face
-- **Face clone, live**: wear a face from 1–12 photos on your camera. Your expressions, gaze and head
-  stay yours; hands, hair and glasses in front of the face stay in front.
+- **Whole head** (the default): the person's head, hair, beard and ears, not only the inside of the
+  face. The sharpest front-facing photo is animated with your pose and expressions (LivePortrait), so
+  hair and skin are the photo's own; the face swap on top keeps your eyes, brows and mouth live. Your
+  own hair where the new head does not reach is filled in from the background around it.
+- **Face only**: the inside of the face, faster. Its mask follows the parsed outline of the face and
+  fades inside it, so there is no halo around it; hands and glasses in front stay in front.
 - **In sync with the voice**: every camera frame carries its capture time and is shown when the
   converted voice is heard, so lips and voice line up, in the preview and on the virtual camera.
 - **The voice comes first**: the face runs in its own process and uses the GPU only in the gaps the
@@ -77,10 +81,12 @@ Every page is in the sidebar:
 - **Virtual camera** for Discord, Meet, Teams or OBS: OBS Virtual Camera, without installing OBS on
   Windows (only its two camera modules, about 450 KB, are fetched from OBS's official release and checked
   by SHA-256); OBS Studio on macOS, v4l2loopback on Linux.
-- **Video files** in Library: choose the face (any in Faces, or keep the original) and the voice (any in Voices, or keep the original sound), as one MP4.
-- **Fits the computer**: the face swapper is chosen by measuring this GPU next to the live voice.
-  On a GTX 1660 SUPER: 30 fps and about 14 face swaps a second without the voice; about 26 fps and 5–6
-  swaps a second with the voice streaming, with your real mouth kept so every syllable shows.
+- **Video files** in Library: choose the face (any in Faces, or keep the original) and the voice (any in Voices, or keep the original sound), as one MP4. In whole head mode every frame gets its own render.
+- **Fits the computer**: the face swapper is chosen by measuring this GPU next to the live voice, and
+  a head render is cut into stages short enough for the voice's GPU gaps. On a GTX 1660 SUPER the output
+  stays at 30 fps; the whole head is re-rendered about 1.6 times a second without the voice, and while
+  the voice streams non-stop it is re-rendered in its pauses (between renders it moves with your head
+  on every frame). A 5 s clip converts in about 90 s in whole head mode, 25 s in face only.
 
 ## Models used
 
@@ -97,8 +103,8 @@ Chosen by measuring them on this project's own tests, not by date.
 
 ### Face clone
 
-The models download the first time you open **Faces** (about 1.8 GB), from FaceFusion's
-releases, and run with ONNX Runtime (CUDA, DirectML or CPU).
+The models download the first time you open **Faces** (about 2.4 GB), from FaceFusion's
+releases and LivePortrait's, and run with ONNX Runtime (CUDA, DirectML or CPU) and PyTorch (the head).
 
 | Part | Model | Why |
 |---|---|---|
@@ -107,10 +113,13 @@ releases, and run with ONNX Runtime (CUDA, DirectML or CPU).
 | Swap | HyperSwap 1b (256 px), inswapper (128 px), GHOST (256 px) | Compared on generated faces: inswapper keeps identity best (ArcFace 0.80–0.90), HyperSwap is the sharpest and masks hands and hair itself, GHOST is the fastest (29 ms). SimSwap kept identity worst (0.58–0.66) and was left out. HyperSwap is stored in fp32 here: its fp16 weights gave NaN on CUDA without tensor cores, and fp32 runs in 43 ms instead of 117 |
 | Occlusion | XSeg | Hands and objects in front of the face, for swappers without their own mask |
 | Detail | GPEN-BFR 256 | Only on close faces when the GPU has room: it costs a little identity |
+| Whole head | LivePortrait (human), run here in PyTorch fp32 in 33 stages of at most ~33 ms | No swap model changes hair or the head's outline (FaceFusion, Deep-Live-Cam, HyperSwap, inswapper, GHOST all replace the inside of the face); animating the photo itself does. fp16 is slower on this GPU and gave NaN |
+| Parsing | BiSeNet (ResNet-34) | Hair, ears and neck of the worn head, and the speaker's own hair to fill in |
 
 Also reviewed: Deep-Live-Cam and LiveFaceCam (inswapper/HyperSwap with a mouth mask; the real-mouth
-option here comes from them), DeepFaceLive (needs a model trained per face), LivePortrait (animates
-a photo rather than swapping a face).
+option here comes from them), DeepFaceLive (its HEAD models do include hair, but each needs a model
+trained per face for days), FasterLivePortrait (30+ fps only with TensorRT on an RTX 3090; ONNX
+Runtime has no 5-D grid_sample on CUDA, which is why the head runs in PyTorch here).
 
 ## Train a voice
 
@@ -204,6 +213,8 @@ Sioaeko (MIT), since rewritten.
 | [FaceFusion](https://github.com/facefusion/facefusion) model releases | Face models (HyperSwap, XSeg, GPEN, converters), downloaded on first use | Models: non-commercial |
 | [InsightFace](https://github.com/deepinsight/insightface) | inswapper, ArcFace, SCRFD, downloaded on first use | Code MIT, models non-commercial research only |
 | [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam), [LiveFaceCam](https://github.com/huzaifa525/LiveFaceCam) | Ideas (mouth mask) | AGPL-3.0 |
+| [LivePortrait](https://github.com/KlingTeam/LivePortrait) | Whole head: its networks (vendored in `backend/video/liveportrait`) and weights, downloaded on first use | MIT |
+| [BiSeNet face parser](https://huggingface.co/facefusion/models-3.0.0) | Face and hair regions, from FaceFusion's release | MIT |
 | [OBS Studio](https://obsproject.com/) virtual camera module, via [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) | Virtual camera, fetched and registered on request | GPL-2.0 / GPL-2.0 |
 
 ## License

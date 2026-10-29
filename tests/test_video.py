@@ -160,8 +160,11 @@ class TestApi:
         response = client.patch("/api/video/settings", json={"swapper": "ghost_1_256", "mouth": "on",
                                                              "enhance": "sometimes", "occlusion": False})
         settings = response.json()["settings"]
-        assert settings == {"swapper": "ghost_1_256", "enhance": "auto", "mouth": "on", "occlusion": False}
+        assert settings == {"mode": "head", "swapper": "ghost_1_256", "enhance": "auto", "mouth": "on",
+                            "occlusion": False}
         assert client.get("/api/video/").json()["settings"]["swapper"] == "ghost_1_256"
+        assert client.patch("/api/video/settings", json={"mode": "face"}).json()["settings"]["mode"] == "face"
+        assert client.patch("/api/video/settings", json={"mode": "body"}).json()["settings"]["mode"] == "face"
 
     def test_an_unknown_face_is_a_404(self, client):
         assert client.post("/api/video/faces/0123456789ab/activate").status_code == 404
@@ -248,3 +251,63 @@ class TestVideoFiles:
             assert result.streams.video and result.streams.audio
         audio = read_audio(tmp_path / "out.mp4")
         assert audio is not None and abs(len(audio) / 48000 - 1.0) < 0.1
+
+
+class TestWholeHead:
+    def test_the_motion_mask_in_depth_slices_equals_the_whole_convolution(self):
+        torch = pytest.importorskip("torch")
+        from backend.video.head import conv3d_depth_slice
+
+        torch.manual_seed(0)
+        conv = torch.nn.Conv3d(6, 4, kernel_size=7, padding=3)
+        volume = torch.randn(1, 6, 16, 12, 12)
+        whole = conv(volume)
+        padded = torch.nn.functional.pad(volume, (0, 0, 0, 0, 3, 3))
+        parts = [conv3d_depth_slice(padded, conv, lo, hi) for lo, hi in ((0, 4), (4, 9), (9, 16))]
+        assert torch.allclose(torch.cat(parts, dim=2), whole, atol=1e-5)
+
+    def test_the_head_is_made_from_the_photo_with_the_largest_face(self, tmp_path):
+        library = FaceLibrary(tmp_path)
+        face = library.add("Alex", [b"a", b"b", b"c"], np.ones(512, np.float32),
+                           [{"face": True, "size": 120}, {"face": False}, {"face": True, "size": 300}], b"thumb")
+        assert library.portrait(face["id"]).name == "photo_2.jpg"
+
+    def test_a_job_waiting_for_a_big_gap_does_not_hold_up_one_that_fits(self):
+        now = [100.0]
+        arbiter = GpuArbiter(clock=lambda: now[0])
+        try:
+            started = threading.Event()
+
+            def long_wait() -> None:
+                started.set()
+                with arbiter.video(10_000.0, timeout=1.0):
+                    pass
+
+            thread = threading.Thread(target=long_wait)
+            thread.start()
+            started.wait()
+            with arbiter.video(5.0, timeout=0.2) as granted:
+                assert granted   # no voice streaming: a short job fits at once
+            thread.join()
+        finally:
+            arbiter.close()
+
+    def test_masks_follow_the_face_and_fade_inside_it(self):
+        from backend.video.parser import feather, region
+
+        labels = np.zeros((64, 64), np.uint8)
+        labels[16:48, 16:48] = 1        # skin
+        labels[8:16, 16:48] = 17        # hair
+        face = feather(region(labels, (1,)), erode=0.05, soft=0.05)
+        assert face[32, 32] == 1.0 and face[16, 32] == 0.0 and face[10, 32] == 0.0
+        assert 0.0 < face[21, 32] < 1.0   # a soft edge, inside the face's outline
+
+    def test_the_mode_is_a_setting(self):
+        from backend.video.engine import VideoSettings
+
+        settings = VideoSettings()
+        assert settings.mode == "head"
+        settings.apply({"mode": "face"})
+        assert settings.mode == "face"
+        settings.apply({"mode": "everything"})
+        assert settings.mode == "face"

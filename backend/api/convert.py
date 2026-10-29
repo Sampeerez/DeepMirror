@@ -196,12 +196,13 @@ async def convert_video(
 
     choice = face.strip()
     face_id = None if choice.lower() == "off" else faces.library.active() if choice.lower() == "on" else choice
-    identity = None
+    identity = portrait = None
     if face_id is not None or choice.lower() == "on":
         if not faces.models_ready:
             raise HTTPException(status_code=409, detail="Download the face models in Faces first.")
         try:
             identity = faces.library.identity(face_id) if face_id else None
+            portrait = faces.library.portrait(face_id) if face_id else None
         except (FaceNotFoundError, OSError):
             identity = None
         if identity is None:
@@ -227,7 +228,7 @@ async def convert_video(
         return render(audio, rate, converter, conversion, formant, effects_payload, auto_pitch)
 
     swap = None if identity is None else (
-        lambda source, target, report: faces.worker().convert_video(source, target, report, identity))
+        lambda source, target, report: faces.worker().convert_video(source, target, report, identity, portrait))
     change_voice = converter is not None or any(
         isinstance(value, dict) and value.get("enabled") for value in effects_payload.values()) or formant != 0 or (
         pitch_shift != 0 and not auto_pitch)

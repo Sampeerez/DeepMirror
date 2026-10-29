@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, memo, useMemo, useState } from 'react';
 import {
   Activity, AudioLines, AudioWaveform, Camera, ChevronRight, FlaskConical, Hand, Mic, Moon, Palette, PhoneCall,
-  ScanFace, ScrollText, Settings2, Smile, Sparkles, Sun, Timer,
+  ScanFace, ScrollText, Settings2, Smile, Sparkles, Sun, Timer, UserRound,
 } from 'lucide-react';
 import Button from './Button';
 import Dialog from './Dialog';
@@ -210,6 +210,12 @@ function Settings({
 
       <Column id="face" title="Face" Icon={ScanFace} accent="text-video-fg">
         <SettingsSection>
+          <SettingRow label="Clone" icon={UserRound}>
+            <Segmented label="Clone" hideLabel accent="face" size="sm" value={faceSettings.mode || 'head'}
+              onChange={(mode) => changeFace({ mode })} className="w-full"
+              options={[{ value: 'head', label: 'Whole head', hint: 'Hair, beard and head from the photo' },
+                { value: 'face', label: 'Face only', hint: 'The inside of the face; faster' }]} />
+          </SettingRow>
           <SettingRow label="Face model" icon={ScanFace}>
             <Segmented label="Face model" hideLabel accent="face" size="sm" value={faceSettings.swapper || 'auto'}
               onChange={(value) => changeFace({ swapper: value })} className="w-full"
@@ -236,6 +242,7 @@ function Settings({
           <dl className="divide-y divide-line">
             <Stat label="Shown" value={video.running ? `${video.shownFps} fps` : '—'} />
             <Stat label="Face swaps" value={stats ? `${stats.keys_per_second}/s` : '—'} />
+            <Stat label="Head renders" value={stats?.mode === 'head' ? `${stats.heads_per_second}/s` : '—'} />
             <Stat label="Face model" value={SWAPPER_NAMES[stats?.swapper] || stats?.swapper || '—'} />
             <Stat label="One swap" value={ms(stats?.swap_ms)} />
             <Stat label="GPU left by the voice" value={stats ? `${Math.round(stats.gpu_share * 100)}%` : '—'} />

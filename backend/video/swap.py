@@ -111,8 +111,9 @@ class FaceEnhancer:
         return cv2.addWeighted(restored, blend, face, 1 - blend, 0)
 
 
-def match_colour(swapped: np.ndarray, original: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Shift the swapped face's colour statistics (LAB, inside the mask) onto the original's lighting."""
+def match_colour(swapped: np.ndarray, original: np.ndarray, mask: np.ndarray, full: bool = False) -> np.ndarray:
+    """Shift the swapped face's colour statistics (LAB, inside the mask) onto the original's lighting
+    (``full``: its colour too, for a face going onto skin that is already the worn person's)."""
     weight = mask > 0.5
     if weight.sum() < 64:
         return swapped
@@ -121,8 +122,9 @@ def match_colour(swapped: np.ndarray, original: np.ndarray, mask: np.ndarray) ->
     s_mean, s_std = source[weight].mean(0), source[weight].std(0) + 1e-3
     t_mean, t_std = target[weight].mean(0), target[weight].std(0) + 1e-3
     # Only the lighting moves: luminance fully, colour cast half way (keeps the new skin tone).
+    share = 1.0 if full else 0.5
     gain = np.array([t_std[0] / s_std[0], 1.0, 1.0], np.float32)
-    shift = np.array([t_mean[0] - s_mean[0] * gain[0], 0.5 * (t_mean[1] - s_mean[1]),
-                      0.5 * (t_mean[2] - s_mean[2])], np.float32)
+    shift = np.array([t_mean[0] - s_mean[0] * gain[0], share * (t_mean[1] - s_mean[1]),
+                      share * (t_mean[2] - s_mean[2])], np.float32)
     adjusted = np.clip(source * gain + shift, 0, 255).astype(np.uint8)
     return cv2.cvtColor(adjusted, cv2.COLOR_LAB2BGR)

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from backend.video.engine import FaceEngine, Key, Tracked
+from backend.video.engine import FaceEngine, HeadLayer, Key, Tracked
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +42,16 @@ class LiveFaceSession:
         self._condition = threading.Condition()
         self._closed = False
         self._key_times: deque[float] = deque(maxlen=30)
+        self._head: HeadLayer | None = None
+        self._head_times: deque[float] = deque(maxlen=10)
         self.frames_in = self.frames_out = self.keys_made = self.keys_skipped = 0
         self.track_ms = self.compose_ms = 0.0
+        engine.reset_head()
         self._worker = threading.Thread(target=self._keyframes, name="face-keyframes", daemon=True)
         self._worker.start()
+        # The whole head renders on its own thread, in the GPU gaps the swaps leave.
+        self._head_worker = threading.Thread(target=self._heads, name="face-head", daemon=True)
+        self._head_worker.start()
 
     # --- Stats ------------------------------------------------------------
 
@@ -56,9 +62,18 @@ class LiveFaceSession:
             return 0.0
         return (len(times) - 1) / max(times[-1] - times[0], 1e-3)
 
+    @property
+    def heads_per_second(self) -> float:
+        times = list(self._head_times)
+        if len(times) < 2 or time.monotonic() - times[-1] > 5.0:
+            return 0.0
+        return (len(times) - 1) / max(times[-1] - times[0], 1e-3)
+
     def stats(self) -> dict:
         swapper = self.engine._swapper_id
         return {"keys_per_second": round(self.keys_per_second, 1), "swapper": swapper,
+                "mode": "head" if self.engine.wants_head else "face",
+                "heads_per_second": round(self.heads_per_second, 2),
                 "swap_ms": self.engine.models.swap_ms.get(swapper or "", None),
                 "track_ms": round(self.track_ms, 1), "compose_ms": round(self.compose_ms, 1),
                 "face": self._records[-1].tracked.face is not None if self._records else None,
@@ -111,6 +126,28 @@ class LiveFaceSession:
                 self.keys_made += 1
                 self._condition.notify_all()
 
+    # --- The whole head (its own thread) ------------------------------------
+
+    def _heads(self) -> None:
+        while not self._closed:
+            if not self.engine.wants_head:
+                time.sleep(0.2)
+                continue
+            with self._condition:
+                record = next((r for r in reversed(self._records) if r.tracked.face is not None), None)
+            if record is None:
+                time.sleep(0.03)
+                continue
+            try:
+                layer = self.engine.head_layer(record.frame, record.tracked, record.t, wait=1.0)
+            except Exception:
+                logger.exception("Head render failed")
+                time.sleep(1.0)
+                continue
+            if layer is not None:
+                self._head = layer
+                self._head_times.append(time.monotonic())
+
     # --- Output -----------------------------------------------------------
 
     def _around(self, t: float) -> tuple[Key | None, Key | None]:
@@ -142,7 +179,7 @@ class LiveFaceSession:
                 frame = record.frame
             else:
                 frame = self.engine.compose(record.frame, record.tracked, record.t, before, after,
-                                            self.keys_per_second)
+                                            self.keys_per_second, head=self._head)
             self.compose_ms = 0.9 * self.compose_ms + 0.1 * (time.perf_counter() - started) * 1000
             self.frames_out += 1
             out.append((record.t, frame))
@@ -153,3 +190,4 @@ class LiveFaceSession:
             self._closed = True
             self._condition.notify_all()
         self._worker.join(timeout=2)
+        self._head_worker.join(timeout=2)

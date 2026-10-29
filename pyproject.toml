@@ -102,6 +102,8 @@ addopts = "-q"
 [tool.ruff]
 line-length = 110
 target-version = "py312"
+# LivePortrait's networks, vendored unchanged.
+extend-exclude = ["backend/video/liveportrait"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
@@ -109,6 +111,7 @@ ignore = ["E501", "RUF001", "RUF002", "RUF003", "SIM108"]
 
 [tool.pyright]
 include = ["backend"]
+exclude = ["backend/video/liveportrait"]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "basic"

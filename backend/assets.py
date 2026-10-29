@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 FACEFUSION = "https://huggingface.co/facefusion/models"
+LIVEPORTRAIT = "https://huggingface.co/KlingTeam/LivePortrait/resolve/main/liveportrait"
 
 PINNED_REVISION = ("https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/"
                    "e6d0c1a17da07c33557852f9dfa2bd44cc75737d")
@@ -112,6 +113,24 @@ ASSETS = (
            "Occlusion mask (XSeg)"),
           ("gpen_bfr_256", "3.0.0", "bad8bf0426873828df2dbf4e3b3d9ababba9da7965b8b72426569486f7ae5c25",
            75792988, None, "Face enhancer (GPEN)"),
+          ("bisenet_resnet_34", "3.0.0", "4a0b8c958a3c938913bd06a8365dbb3c8761afba6ecbf0d14b3b1f77eb230c96",
+           93632546, None, "Face parser (BiSeNet)"),
+      )),
+    # The whole head (hair, beard, ears): LivePortrait (MIT, KlingTeam) animates the photo of the face
+    # worn with the speaker's pose and expressions.
+    *(Asset(f"liveportrait_{name}", f"liveportrait_{name}.pth", f"{LIVEPORTRAIT}/{path}/{name}.pth", sha, size,
+            False, group="video", folder="face", label=label)
+      for name, path, sha, size, label in (
+          ("appearance_feature_extractor", "base_models",
+           "5279bb8654293dbdf327030b397f107237dd9212fb11dd75b83dfb635211ceb5", 3387959, "Head appearance"),
+          ("motion_extractor", "base_models",
+           "251e6a94ad667a1d0c69526d292677165110ef7f0cf0f6d199f0e414e8aa0ca5", 112545506, "Head motion"),
+          ("warping_module", "base_models",
+           "2f61a6f265fe344f14132364859a78bdbbc2068577170693da57fb96d636e282", 182180086, "Head warping"),
+          ("spade_generator", "base_models",
+           "4780afc7909a9f84e24c01d73b31a555ef651521a1fe3b2429bd04534d992aee", 221813590, "Head renderer"),
+          ("stitching_retargeting_module", "retargeting_models",
+           "3652d5a3f95099141a56986aaddec92fadf0a73c87a20fac9a2c07c32b28b611", 2393098, "Head stitching"),
       )),
 )
 

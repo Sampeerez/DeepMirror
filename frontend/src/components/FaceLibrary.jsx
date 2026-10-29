@@ -88,7 +88,7 @@ function AddFace({ face }) {
           <p className="text-sm font-medium text-fg-secondary">
             {files.length ? `${files.length} photo${files.length === 1 ? '' : 's'} chosen` : 'Drop photos or click to choose'}
           </p>
-          <p className="mt-0.5 text-xs text-fg-faint">1–{MAX_PHOTOS} photos · several angles</p>
+          <p className="mt-0.5 text-xs text-fg-faint">1–{MAX_PHOTOS} photos · the sharpest one, front-facing, makes the head</p>
         </div>
       </div>
       {files.length ? (
@@ -105,6 +105,7 @@ function AddFace({ face }) {
         <input id="face-name" className="field mt-1.5" value={name} maxLength={60} placeholder="My character"
           onChange={(event) => setName(event.target.value)} />
       </div>
+      <p className="text-xs text-fg-subtle">Only use faces you have permission to use.</p>
       <div className="mt-auto border-t border-line pt-3">
         <Button variant="primary" size="md" icon={Check} onClick={submit} disabled={!files.length}
           loading={face.busy} className="w-40">Add face</Button>

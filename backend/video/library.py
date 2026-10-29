@@ -61,6 +61,20 @@ class FaceLibrary:
     def identity(self, face_id: str) -> np.ndarray:
         return np.load(self._folder(face_id) / "identity.npy")
 
+    def portrait(self, face_id: str) -> Path | None:
+        """The photo the whole head is made from: the one where the face is largest."""
+        folder = self._folder(face_id)
+        try:
+            notes = json.loads((folder / "face.json").read_text(encoding="utf-8")).get("notes", [])
+        except (OSError, ValueError):
+            notes = []
+        photos = sorted(folder.glob("photo_*.jpg"), key=lambda path: int(path.stem.split("_")[1]))
+        if not photos:
+            return None
+        sizes = [note.get("size", 0) if note.get("face") else -1 for note in notes]
+        best = max(range(len(photos)), key=lambda i: sizes[i] if i < len(sizes) else -1)
+        return photos[best]
+
     def thumbnail(self, face_id: str) -> Path:
         return self._folder(face_id) / "thumb.jpg"
 

@@ -33,12 +33,22 @@ def swap_video(engine: FaceEngine, source: Path, target: Path, on_progress: Call
             encoder.pix_fmt = "yuv420p"
             encoder.options = {"crf": "17", "preset": "veryfast"}
             count = 0
+            # Whole head: every frame gets its own render (pose and expression of that frame).
+            whole_head = engine.wants_head
+            engine.reset_head()
             for frame in container.decode(stream):
                 image = frame.to_ndarray(format="bgr24")[: encoder.height, : encoder.width]
                 t = float(frame.time or count / float(rate))
                 tracked = engine.track(image, t)
                 result = image
-                if engine.identity is not None and tracked.face is not None:
+                if whole_head and tracked.face is not None:
+                    layer = None
+                    for _ in range(20):
+                        layer = engine.head_layer(image, tracked, t, wait=SWAP_WAIT_SECONDS)
+                        if layer is not None:
+                            break
+                    result = engine.compose(image, tracked, t, None, None, 30.0, head=layer)
+                elif engine.identity is not None and tracked.face is not None:
                     key = None
                     while key is None:   # every frame gets its own swap
                         key = engine.keyframe(image, tracked, t, 30.0, wait=SWAP_WAIT_SECONDS)

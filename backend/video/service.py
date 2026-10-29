@@ -18,8 +18,8 @@ from backend.video.worker import FaceWorker, decode_image, encode_jpeg
 
 logger = logging.getLogger(__name__)
 
-SETTING_KEYS = ("swapper", "enhance", "mouth", "occlusion")
-DEFAULT_SETTINGS = {"swapper": "auto", "enhance": "auto", "mouth": "auto", "occlusion": True}
+SETTING_KEYS = ("mode", "swapper", "enhance", "mouth", "occlusion")
+DEFAULT_SETTINGS = {"mode": "head", "swapper": "auto", "enhance": "auto", "mouth": "auto", "occlusion": True}
 
 
 class FaceService:
@@ -46,6 +46,8 @@ class FaceService:
 
     def update_settings(self, payload: dict) -> dict:
         settings = dict(self.settings)
+        if payload.get("mode") in ("head", "face"):
+            settings["mode"] = payload["mode"]
         if payload.get("swapper") == "auto" or payload.get("swapper") in SWAPPERS:
             settings["swapper"] = payload["swapper"]
         for name in ("enhance", "mouth"):
@@ -95,7 +97,11 @@ class FaceService:
         if self._worker is None:
             return
         face_id = self.library.active()
-        self._worker.send("identity", self.library.identity(face_id) if face_id else None)
+        if face_id is None:
+            self._worker.send("identity", None, None)
+            return
+        portrait = self.library.portrait(face_id)
+        self._worker.send("identity", self.library.identity(face_id), str(portrait) if portrait else None)
 
     def close(self) -> None:
         if self._worker is not None:

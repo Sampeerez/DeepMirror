@@ -16,6 +16,7 @@ clock in both processes.
 from __future__ import annotations
 
 import contextlib
+import threading
 import time
 from collections.abc import Callable, Iterator
 from multiprocessing import shared_memory
@@ -47,6 +48,8 @@ class GpuArbiter:
             self._shm = shared_memory.SharedMemory(name=name)
             self._owner = False
         self._state = np.ndarray((_SLOTS,), np.float64, buffer=self._shm.buf)
+        # One video job at a time in this process (the face swap and the head render share the gaps).
+        self._video_lock = threading.Lock()
         if self._owner:
             self._state[:] = 0.0
 
@@ -122,11 +125,18 @@ class GpuArbiter:
         return max(0.0, 1.0 - self.render_ms / 1000 / self.period)
 
     def _fits(self, seconds: float, now: float) -> bool:
+        return self._room(now) >= seconds
+
+    def room_ms(self) -> float:
+        """GPU time left before the next voice render (safety margin taken off); inf when no voice."""
+        return self._room(self.clock()) * 1000
+
+    def _room(self, now: float) -> float:
         s = self._state
         if s[_RENDERING]:
-            return False
+            return 0.0
         if not self._streaming(now) or s[_PERIOD] <= 0:
-            return True
+            return float("inf")
         period, render = s[_PERIOD], s[_RENDER_MS] / 1000
         next_render = s[_ARRIVAL] + s[_DELAY]
         # This chunk's render is done, or it was skipped (the silence saver): the next chunk's counts.
@@ -136,8 +146,8 @@ class GpuArbiter:
         while next_render + period < now:   # chunks overdue (the client paused): plan from now
             next_render += period
         if next_render <= now:              # a render is due right now
-            return False
-        return next_render - now >= seconds + SAFETY_SECONDS
+            return 0.0
+        return max(0.0, next_render - now - SAFETY_SECONDS)
 
     @contextlib.contextmanager
     def video(self, expected_ms: float, timeout: float = 0.5) -> Iterator[bool]:
@@ -146,13 +156,17 @@ class GpuArbiter:
         granted = False
         while True:
             now = self.clock()
-            if self._fits(expected_ms / 1000, now):
-                self._state[_VIDEO_BUSY] = 1.0
-                # The voice may have started in between: then step back.
-                if not self._state[_RENDERING]:
-                    granted = True
-                    break
-                self._state[_VIDEO_BUSY] = 0.0
+            # The process's video lock is taken only once the job fits, never while waiting:
+            # a long job waiting for a big gap does not hold up a short one that fits now.
+            if self._fits(expected_ms / 1000, now) and self._video_lock.acquire(blocking=False):
+                if self._fits(expected_ms / 1000, self.clock()):
+                    self._state[_VIDEO_BUSY] = 1.0
+                    # The voice may have started in between: then step back.
+                    if not self._state[_RENDERING]:
+                        granted = True
+                        break
+                    self._state[_VIDEO_BUSY] = 0.0
+                self._video_lock.release()
             if now >= deadline:
                 break
             time.sleep(POLL_SECONDS)
@@ -161,3 +175,4 @@ class GpuArbiter:
         finally:
             if granted:
                 self._state[_VIDEO_BUSY] = 0.0
+                self._video_lock.release()

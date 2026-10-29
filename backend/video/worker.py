@@ -40,6 +40,17 @@ def encode_jpeg(frame: np.ndarray, quality: int = JPEG_QUALITY) -> bytes:
     return data.tobytes()
 
 
+def _read_image(path: str | None) -> np.ndarray | None:
+    """A photo from the face library (None when there is none or it cannot be read)."""
+    if not path:
+        return None
+    import cv2
+
+    data = np.fromfile(path, np.uint8)
+    image = cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
+    return image
+
+
 def decode_image(data: bytes) -> np.ndarray:
     import cv2
 
@@ -140,6 +151,16 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
             except Exception:
                 logger.exception("Face tracking failed")
 
+    planning = threading.Event()
+
+    def replan() -> None:
+        try:
+            engine.plan(running=True)
+        except Exception:
+            logger.exception("Choosing the face swapper failed")
+        finally:
+            planning.clear()
+
     def emit_frames() -> None:
         nonlocal last_stats, last_plan
         while not stopping.is_set():
@@ -153,8 +174,12 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                 if camera is not None and offset is not None:
                     camera.push(t + offset, frame)
             now = time.monotonic()
-            if now - last_plan > 10.0:   # the voice started or stopped: maybe another swapper fits better
-                engine.plan()
+            if now - last_plan > 10.0 and not planning.is_set():
+                # The voice started or stopped: maybe another swapper fits better. On its own
+                # thread: loading and warming a swapper waits for GPU gaps, and the frames must
+                # keep going out meanwhile.
+                planning.set()
+                threading.Thread(target=replan, name="face-plan", daemon=True).start()
                 last_plan = now
             if now - last_stats > STATS_SECONDS:
                 send("stats", {**session.stats(), "camera": camera.device if camera else None, "dropped": dropped[0]})
@@ -168,7 +193,20 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     def log(level: int, text: str) -> None:
         send("log", level, text)
 
-    def _convert(job: str, source: str, target: str, identity: np.ndarray | None = None) -> None:
+    class _Forward(logging.Handler):
+        """This process's own log lines go to the server's log."""
+
+        def emit(self, record: logging.LogRecord) -> None:
+            with contextlib.suppress(Exception):
+                send("log", record.levelno, self.format(record))
+
+    forward = _Forward(logging.INFO)
+    forward.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    logging.getLogger("backend").addHandler(forward)
+    logging.getLogger("backend").setLevel(logging.INFO)
+
+    def _convert(job: str, source: str, target: str, identity: np.ndarray | None = None,
+                 portrait: str | None = None) -> None:
         """A whole video file, with its own engine (its own tracking) next to the live one."""
         from backend.video.offline import swap_video
 
@@ -177,6 +215,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         offline = FaceEngine(models, arbiter, replace(engine.settings, mouth="off", swapper=swapper))
         # The face chosen for this file, else the one worn live.
         offline.set_identity(identity if identity is not None else engine.identity)
+        offline.set_portrait(_read_image(portrait) if portrait else engine.portrait)
         try:
             frames = swap_video(offline, Path(source), Path(target), lambda done: send("convert_progress", job, done))
             send("convert_done", job, None, frames)
@@ -190,6 +229,10 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         if models.available():
             engine.plan()
             last_plan = time.monotonic()
+        if models.heads_ready:
+            # The whole head's networks too (a few seconds, and a CUDA context of their own):
+            # now, while the camera is starting, not in the middle of a call.
+            models.head_models()
         send("ready", {"swap_ms": models.swap_ms, "available": models.available()})
         while True:
             if not conn.poll(0.05):
@@ -213,6 +256,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                     incoming.put_nowait((live, t, data))
                 elif kind == "identity":
                     engine.set_identity(message[1])
+                    engine.set_portrait(_read_image(message[2]) if len(message) > 2 else None)
                 elif kind == "settings":
                     before = engine.settings.swapper
                     engine.settings.apply(message[1])
@@ -244,7 +288,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                         camera.delay = max(0.0, float(config.get("delay_ms", 0)) / 1000)
                 elif kind == "convert":
                     _, job, source, target, *rest = message
-                    threading.Thread(target=_convert, args=(job, source, target, rest[0] if rest else None),
+                    threading.Thread(target=_convert, args=(job, source, target, *rest[:2]),
                                      name="face-convert",
                                      daemon=True).start()
                 elif kind == "reset":
@@ -334,7 +378,8 @@ class FaceWorker:
         return done[1][0], done[1][1]
 
     def convert_video(self, source: Path, target: Path, on_progress: Callable[[float], None],
-                      identity: np.ndarray | None = None, timeout: float = 6 * 3600) -> int:
+                      identity: np.ndarray | None = None, portrait: Path | None = None,
+                      timeout: float = 6 * 3600) -> int:
         """Swap ``identity`` (default: the face worn live) into every frame of ``source``; returns the frame count."""
         self.start()
         if not self.wait_ready(300):
@@ -353,7 +398,7 @@ class FaceWorker:
 
         unsubscribe = self.subscribe(listen)
         try:
-            self.send("convert", job, str(source), str(target), identity)
+            self.send("convert", job, str(source), str(target), identity, str(portrait) if portrait else None)
             if not done.wait(timeout):
                 raise TimeoutError("The face process did not finish the video")
         finally:
