@@ -92,7 +92,7 @@ its own process; live conversion is slower meanwhile.
 3. Consecutive renders are joined at the best-matching offset (SOLA).
    The pitch is tracked on the window itself, never on padding, so a rolled r or a laugh keeps its voicing.
 4. DeepFilterNet3 cleans what the model hears; Silero VAD and a periodicity check decide what is voice (a held vowel or a rolled r count as voice).
-5. The fast loudness movement of your voice (trills, stops) is put back on the converted voice, which the model alone smooths out.
+5. Where you roll an r, the fast loudness movement of your voice is put back on the converted voice (the model alone smooths a trill into a vowel); everywhere else the model's own envelope stays, which sounds closer to the voice.
 6. The result is brought to your own level and soft-limited.
 
 ## Configuration
