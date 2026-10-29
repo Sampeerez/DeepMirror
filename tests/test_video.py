@@ -36,26 +36,34 @@ class TestArbiter:
         with arbiter.voice(), arbiter.video(10, timeout=0.02) as granted:
             assert not granted
 
-    def test_a_swap_fits_only_before_the_next_render(self, arbiter):
-        period = 0.1
-        for _ in range(4):   # chunks every 100 ms, rendering 40 ms after a 10 ms delay
+    def test_a_swap_fits_only_before_the_next_render(self):
+        # A hand-driven clock: the result cannot depend on how late a CI runner wakes from sleep.
+        now = [100.0]
+        arbiter = GpuArbiter(clock=lambda: now[0])
+        try:
+            for _ in range(4):   # chunks every 100 ms, rendering 40 ms after a 10 ms delay
+                arbiter.chunk_arrived()
+                now[0] += 0.01
+                with arbiter.voice():
+                    now[0] += 0.04
+                now[0] += 0.05
+            assert arbiter.period == pytest.approx(0.1)
+            gap = arbiter.gap()
+            assert gap is not None and gap[0] == pytest.approx(100 - 40 - 6, abs=1)
             arbiter.chunk_arrived()
-            time.sleep(0.01)
+            now[0] += 0.01
             with arbiter.voice():
-                time.sleep(0.04)
-            time.sleep(period - 0.05)
-        assert 0.09 < arbiter.period < 0.12
-        gap = arbiter.gap()
-        assert gap is not None and 30 < gap[0] < 70
-        arbiter.chunk_arrived()
-        time.sleep(0.01)
-        with arbiter.voice():
-            time.sleep(0.04)
-        # About 50 ms left before the next render: 20 ms fits, 80 ms never does.
-        with arbiter.video(20, timeout=0.0) as small:
-            assert small
-        with arbiter.video(80, timeout=0.05) as large:
-            assert not large
+                now[0] += 0.04
+            # 60 ms until the next render: 20 ms fits, 80 ms does not.
+            with arbiter.video(20, timeout=0.0) as small:
+                assert small
+            with arbiter.video(80, timeout=0.0) as large:
+                assert not large
+            now[0] += 0.055   # 5 ms before the next render: not even a short swap
+            with arbiter.video(2, timeout=0.0) as late:
+                assert not late
+        finally:
+            arbiter.close()
 
     def test_the_voice_waits_for_a_running_swap(self, arbiter):
         started = threading.Event()

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from multiprocessing import shared_memory
 
 import numpy as np
@@ -38,7 +38,8 @@ def _smooth(current: float, value: float, weight: float = 0.2) -> float:
 class GpuArbiter:
     """Create it in the server (``name=None``); the face process attaches with its ``name``."""
 
-    def __init__(self, name: str | None = None) -> None:
+    def __init__(self, name: str | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+        self.clock = clock   # injectable for tests; both processes use time.monotonic
         if name is None:
             self._shm = shared_memory.SharedMemory(create=True, size=_SLOTS * 8)
             self._owner = True
@@ -81,7 +82,7 @@ class GpuArbiter:
 
     def chunk_arrived(self) -> None:
         """Every live voice chunk, rendered or not (the silence saver skips renders, not chunks)."""
-        s, now = self._state, time.monotonic()
+        s, now = self._state, self.clock()
         if self._streaming(now):
             s[_PERIOD] = _smooth(s[_PERIOD], now - s[_ARRIVAL])
         s[_ARRIVAL] = now
@@ -90,17 +91,17 @@ class GpuArbiter:
     def voice(self) -> Iterator[None]:
         """Around a voice render: waits only for a face swap already running (one never starts now)."""
         s = self._state
-        now = time.monotonic()
+        now = self.clock()
         if self._streaming(now):
             s[_DELAY] = _smooth(s[_DELAY], now - s[_ARRIVAL])
         s[_RENDERING] = 1.0
         while s[_VIDEO_BUSY]:   # at most one swap, which was planned to end before now
             time.sleep(POLL_SECONDS)
-        started = time.monotonic()
+        started = self.clock()
         try:
             yield
         finally:
-            end = time.monotonic()
+            end = self.clock()
             s[_RENDER_MS] = _smooth(s[_RENDER_MS], (end - started) * 1000)
             s[_RENDER_END] = end
             s[_RENDERING] = 0.0
@@ -109,14 +110,14 @@ class GpuArbiter:
 
     def gap(self) -> tuple[float, float] | None:
         """``(ms free between voice renders, ms between chunks)``, or None when the voice is not streaming."""
-        if not self._streaming(time.monotonic()) or self.period <= 0:
+        if not self._streaming(self.clock()) or self.period <= 0:
             return None
         period_ms = self.period * 1000
         return max(0.0, period_ms - self.render_ms - SAFETY_SECONDS * 1000), period_ms
 
     def free_share(self) -> float:
         """Fraction of the GPU the face can count on (1.0 when the voice is not streaming)."""
-        if not self._streaming(time.monotonic()) or self.period <= 0:
+        if not self._streaming(self.clock()) or self.period <= 0:
             return 1.0
         return max(0.0, 1.0 - self.render_ms / 1000 / self.period)
 
@@ -141,10 +142,10 @@ class GpuArbiter:
     @contextlib.contextmanager
     def video(self, expected_ms: float, timeout: float = 0.5) -> Iterator[bool]:
         """Around one face swap; yields False (holding nothing) when no gap opened within ``timeout``."""
-        deadline = time.monotonic() + timeout
+        deadline = self.clock() + timeout
         granted = False
         while True:
-            now = time.monotonic()
+            now = self.clock()
             if self._fits(expected_ms / 1000, now):
                 self._state[_VIDEO_BUSY] = 1.0
                 # The voice may have started in between: then step back.
