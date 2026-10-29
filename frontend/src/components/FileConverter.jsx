@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
-import { AudioLines, Download, FileAudio, FileVideo, LoaderCircle, X } from 'lucide-react';
+import { AudioLines, Boxes, Download, FileAudio, FileVideo, LoaderCircle, X } from 'lucide-react';
 import {
   convertFile, fetchModels, fetchVideoConversion, isAbortError, startVideoConversion, videoConversionUrl,
 } from '../lib/api';
@@ -7,8 +7,14 @@ import { countActiveEffects } from '../lib/effects';
 import { FALLBACK_F0_METHODS, findF0Method, groupedMethods } from '../lib/f0Methods';
 import { formatBytes } from '../lib/format';
 import Button from './Button';
+import Picker from './Picker';
+import Segmented from './Segmented';
 
-const ACCEPTED = '.wav,.mp3,.flac,.ogg,.m4a,.aiff,.mp4,.mov,.mkv,.webm,.avi,.m4v';
+const ACCEPT = { audio: '.wav,.mp3,.flac,.ogg,.m4a,.aiff', video: '.mp4,.mov,.mkv,.webm,.avi,.m4v' };
+const MODES = [
+  { value: 'audio', label: 'Audio file', icon: FileAudio },
+  { value: 'video', label: 'Video file', icon: FileVideo },
+];
 const VIDEO_FILE = /\.(mp4|mov|mkv|webm|avi|m4v)$/i;
 const VIDEO_STAGES = { queued: 'Starting', face: 'Swapping the face', voice: 'Converting the voice', mux: 'Joining' };
 
@@ -28,6 +34,7 @@ const EFFECTS_ONLY = '';
 // the face worn on every frame as well, returned as an MP4.
 function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_METHODS, active = true, face = null }) {
   const [file, setFile] = useState(null);
+  const [mode, setMode] = useState('audio');
   const [wearFace, setWearFace] = useState(true);
   const [progress, setProgress] = useState(null);   // {stage, fraction} while a video converts
   const [voices, setVoices] = useState([]);
@@ -76,7 +83,12 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
   }, []);
 
   const pickFile = (candidate) => {
-    if (!candidate || converting) return;
+    if (converting) return;
+    if (!candidate) {
+      setFile(null);
+      return;
+    }
+    setMode(isVideoFile(candidate) ? 'video' : 'audio');
     setFile(candidate);
     setError(null);
     setNotice(null);
@@ -86,7 +98,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
     });
   };
 
-  const video = isVideoFile(file);
+  const video = mode === 'video';
   const faceReady = Boolean(face?.ready && face?.activeFace);
   const useFace = video && wearFace && faceReady;
 
@@ -163,21 +175,25 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
       <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="converter-title">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
-            <p className="panel-kicker">Converter</p>
-            <h2 id="converter-title" className="panel-title">Convert a recording or a video</h2>
+            <p className="panel-kicker">Files</p>
+            <h2 id="converter-title" className="panel-title">Convert a file</h2>
           </div>
-          <p className="text-xs text-fg-subtle">
-            Studio settings: pitch {voice.pitch > 0 ? '+' : ''}{voice.pitch} st · formant {voice.formant > 0 ? '+' : ''}
-            {voice.formant} st · {fxCount} effect{fxCount === 1 ? '' : 's'}
-          </p>
+          <Segmented label="What to convert" hideLabel options={MODES} value={mode} disabled={converting}
+            onChange={(next) => { setMode(next); pickFile(null); }} className="w-72" />
         </div>
+        <p className="mt-1 text-xs text-fg-subtle">
+          {video ? 'The face you wear on every frame and the voice on its sound, as one MP4.'
+            : 'Your recording in another voice, as a WAV.'}
+          {' '}Uses Live&apos;s settings: pitch {voice.pitch > 0 ? '+' : ''}{voice.pitch} st, formant
+          {' '}{voice.formant > 0 ? '+' : ''}{voice.formant} st, {fxCount} effect{fxCount === 1 ? '' : 's'}.
+        </p>
 
         {/* The file and how to convert it. */}
         <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
           <div
             role="button"
             tabIndex={converting ? -1 : 0}
-            aria-label="Choose an audio or video file to convert"
+            aria-label={video ? 'Choose a video to convert' : 'Choose a recording to convert'}
             aria-disabled={converting}
             onDrop={(event) => { event.preventDefault(); setDragActive(false); pickFile(event.dataTransfer.files?.[0]); }}
             onDragOver={(event) => { event.preventDefault(); setDragActive(true); }}
@@ -192,7 +208,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
               dragActive ? 'border-line-hover bg-control-hover drag-active' : 'border-line-strong bg-raised hover:border-line-hover hover:bg-control'
             } ${converting ? 'pointer-events-none opacity-60' : 'cursor-pointer'}`}
           >
-            <input ref={fileInputRef} type="file" accept={ACCEPTED} className="hidden"
+            <input ref={fileInputRef} type="file" accept={ACCEPT[mode]} className="hidden"
               onChange={(event) => { pickFile(event.target.files?.[0]); if (fileInputRef.current) fileInputRef.current.value = ''; }} />
             {video
               ? <FileVideo className="mb-2 h-8 w-8 text-video-fg" strokeWidth={1.5} aria-hidden="true" />
@@ -207,61 +223,59 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
                 <p className="text-sm font-medium text-fg-secondary">
                   {dragActive ? 'Drop here' : 'Drop or choose a file'}
                 </p>
-                <p className="mt-1 text-xs text-fg-faint">Audio: wav, mp3, flac, ogg, m4a · Video: mp4, mov, mkv, webm</p>
+                <p className="mt-1 text-xs text-fg-faint">{video ? 'mp4 · mov · mkv · webm' : 'wav · mp3 · flac · ogg · m4a'}</p>
               </>
             )}
           </div>
 
-          <div>
-            <label htmlFor="converter-f0-method" className="block text-xs font-medium text-fg-muted">Pitch tracker</label>
-            <select id="converter-f0-method" value={f0Override} disabled={converting}
-              onChange={(event) => setF0Override(event.target.value)} className="native-select-safe field mt-2">
-              <option value="studio">Studio setting: {findF0Method(f0Methods, voice.f0Method).label}</option>
-              {offlineGroups.map((group) => (
-                <optgroup key={group.section} label={group.section}>
-                  {group.methods.map((method) => (
-                    <option key={method.id} value={method.id} disabled={!method.available}>
-                      {method.label}{method.available ? '' : ' (unavailable)'}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <p className={`mt-1.5 text-[11px] leading-4 ${selectedF0.available ? 'text-fg-subtle' : 'text-warn-fg'}`}>
-              {selectedF0.available ? selectedF0.description : selectedF0.reason}
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="converter-process" className="block text-xs font-medium text-fg-muted">Process with</label>
-            <select id="converter-process" value={processWith} disabled={converting}
-              onChange={(event) => setChosenVoice(event.target.value)} className="native-select-safe field mt-2">
-              <option value={EFFECTS_ONLY}>Studio effects only</option>
-              {voices.map((name) => (
-                <option key={name} value={name}>{name}{name === activeModel ? ' (active)' : ''}</option>
-              ))}
-            </select>
-            <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">
-              {processWith && processWith !== activeModel
-                ? 'Loaded only for this file; the live voice is not changed.'
-                : 'Any voice in Models can convert the file.'}
-            </p>
-          </div>
-
-          {video ? (
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label htmlFor="converter-face" className="block text-xs font-medium text-fg-muted">Face</label>
-              <select id="converter-face" value={useFace ? 'on' : 'off'} disabled={converting || !faceReady}
-                onChange={(event) => setWearFace(event.target.value === 'on')} className="native-select-safe field mt-2">
-                {faceReady ? <option value="on">Wear {face.activeFace.name} on every frame</option> : null}
-                <option value="off">Keep the faces as they are</option>
-              </select>
+              <Picker label="Voice" icon={Boxes} accent="voice" value={processWith} disabled={converting}
+                onChange={setChosenVoice}
+                options={[{ value: EFFECTS_ONLY, label: 'No voice (effects only)' },
+                  ...voices.map((name) => ({ value: name, label: name.replace(/\.(pth|pt)$/i, ''),
+                    note: name === activeModel ? 'live' : null }))]} />
               <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">
-                {faceReady ? 'Every frame gets its own swap: the best quality, slower than live.'
-                  : 'Choose a face in Video › Faces to swap it in the video.'}
+                {processWith && processWith !== activeModel
+                  ? 'Loaded just for this file; the live voice stays.' : 'Any voice in Voices can convert it.'}
               </p>
             </div>
-          ) : null}
+            {video ? (
+              <div>
+                <Segmented label="Face" accent="face" value={useFace ? 'on' : 'off'} disabled={converting || !faceReady}
+                  onChange={(value) => setWearFace(value === 'on')}
+                  options={[{ value: 'on', label: faceReady ? `Wear ${face.activeFace.name}` : 'Wear a face', disabled: !faceReady },
+                    { value: 'off', label: 'Keep the faces' }]} />
+                <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">
+                  {faceReady ? 'Every frame gets its own swap: the best quality.'
+                    : 'Choose a face in Face › Faces to swap it in.'}
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          <details className="group rounded-lg border border-line bg-raised px-3 py-2">
+            <summary className="cursor-pointer text-xs font-medium text-fg-muted">More options</summary>
+            <div className="mt-2">
+              <label htmlFor="converter-f0-method" className="block text-xs font-medium text-fg-muted">Pitch tracker</label>
+              <select id="converter-f0-method" value={f0Override} disabled={converting}
+                onChange={(event) => setF0Override(event.target.value)} className="native-select-safe field mt-1.5">
+                <option value="studio">Same as Live: {findF0Method(f0Methods, voice.f0Method).label}</option>
+                {offlineGroups.map((group) => (
+                  <optgroup key={group.section} label={group.section}>
+                    {group.methods.map((method) => (
+                      <option key={method.id} value={method.id} disabled={!method.available}>
+                        {method.label}{method.available ? '' : ' (unavailable)'}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <p className={`mt-1.5 text-[11px] leading-4 ${selectedF0.available ? 'text-fg-subtle' : 'text-warn-fg'}`}>
+                {selectedF0.available ? selectedF0.description : selectedF0.reason}
+              </p>
+            </div>
+          </details>
 
           <div className="mt-auto flex items-center gap-3">
             {converting ? (
@@ -285,7 +299,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
 
       {/* The result. */}
       <section className="panel flex min-h-48 flex-col p-5" aria-labelledby="converter-result-title">
-        <p className="panel-kicker">Converter</p>
+        <p className="panel-kicker">Files</p>
         <h2 id="converter-result-title" className="panel-title">Result</h2>
         <div className="mt-4 flex min-h-0 flex-1 flex-col rounded-lg border border-line bg-raised p-4">
           {error ? (

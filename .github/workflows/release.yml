@@ -44,5 +44,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" tmp/releases/* --verify-tag --title "VoxClone $GITHUB_REF_NAME" --generate-notes --draft
+          gh release create "$GITHUB_REF_NAME" tmp/releases/* --verify-tag --title "DeepMirror $GITHUB_REF_NAME" --generate-notes --draft
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest

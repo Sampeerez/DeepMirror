@@ -24,8 +24,7 @@ describe('Studio cards', () => {
     expect(screen.getByText('Bypass all')).toBeTruthy();
     expect(screen.queryByText('Noise removal')).toBeNull();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
-    expect(screen.getByText('Index rate')).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Advanced' })).toBeNull();   // in Voice › Settings now
     // The panel keeps the card's height: content scrolls inside it.
     expect(screen.getByRole('tabpanel').className).toContain('overflow-y-auto');
   });
@@ -36,6 +35,6 @@ describe('Studio cards', () => {
     }));
     expect(container.querySelector('details')).toBeNull();
     for (const label of ['Pitch', 'Expressiveness', 'Formant']) expect(screen.getByLabelText(label)).toBeTruthy();
-    expect(screen.getByLabelText(/Pitch tracker/)).toBeTruthy();
+    expect(screen.queryByLabelText(/Pitch tracker/)).toBeNull();   // in Voice › Settings now
   });
 });

@@ -11,6 +11,8 @@ import {
   PROFILE_LANGUAGES, PROFILE_PROMPTS, PROFILE_TARGET_SECONDS, calibrationSummary, formatShift, registerLabel,
 } from '../lib/voiceProfile';
 import Button from './Button';
+import Picker from './Picker';
+import Segmented from './Segmented';
 
 const WORKLET_URL = `${import.meta.env.BASE_URL}audioWorklet.js`;
 const CHUNK_SIZE = 2048;
@@ -146,7 +148,7 @@ function VoiceProfile({ active, activeModel, inputDevices = [] }) {
       <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="profile-record-title">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="panel-kicker">My voice</p>
+            <p className="panel-kicker text-ok-fg">Voice</p>
             <h2 id="profile-record-title" className="panel-title">Read a few lines</h2>
           </div>
           <UserRound className="hidden h-7 w-7 shrink-0 text-fg-subtle sm:block" strokeWidth={1.5} aria-hidden="true" />
@@ -157,22 +159,15 @@ function VoiceProfile({ active, activeModel, inputDevices = [] }) {
             (trained or downloaded) is tuned to you automatically when you activate it.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
+            <Segmented label="Language" accent="voice" value={language} disabled={recorder.recording}
+              onChange={(value) => { setLanguage(value); setLine(0); }}
+              options={PROFILE_LANGUAGES.map(({ id, label }) => ({ value: id, label }))} />
             <div>
-              <label htmlFor="profile-language" className="block text-xs font-medium text-fg-muted">Language</label>
-              <select id="profile-language" className="native-select-safe field mt-2" value={language}
-                disabled={recorder.recording} onChange={(event) => { setLanguage(event.target.value); setLine(0); }}>
-                {PROFILE_LANGUAGES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="profile-device" className="block text-xs font-medium text-fg-muted">Microphone</label>
-              <select id="profile-device" className="native-select-safe field mt-2" value={deviceId}
-                disabled={recorder.recording} onChange={(event) => setDeviceId(event.target.value)}>
-                <option value="">System default</option>
-                {inputDevices.map((device) => (
-                  <option key={device.deviceId} value={device.deviceId}>{device.label || 'Microphone'}</option>
-                ))}
-              </select>
+              <p className="mb-1.5 text-xs font-medium text-fg-muted">Microphone</p>
+              <Picker label="Microphone" icon={Mic} accent="voice" value={deviceId} disabled={recorder.recording}
+                onChange={setDeviceId}
+                options={[{ value: '', label: 'System default' },
+                  ...inputDevices.map((device) => ({ value: device.deviceId, label: device.label || 'Microphone' }))]} />
             </div>
           </div>
 
@@ -226,7 +221,7 @@ function VoiceProfile({ active, activeModel, inputDevices = [] }) {
 
       <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="profile-result-title">
         <div className="min-w-0">
-          <p className="panel-kicker">Profile</p>
+          <p className="panel-kicker text-ok-fg">Voice</p>
           <h2 id="profile-result-title" className="panel-title">{profile ? 'Your voice' : 'No profile yet'}</h2>
         </div>
         <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">

@@ -195,7 +195,7 @@ async def convert_video(
 
     wear_face = face.strip().lower() == "on"
     if wear_face and (not faces.models_ready or faces.library.active() is None):
-        raise HTTPException(status_code=409, detail="Choose a face in Video › Faces first, or keep your own face.")
+        raise HTTPException(status_code=409, detail="Choose a face in Face › Faces first, or keep your own face.")
     apply_model = use_model is None or use_model.strip().lower() not in {"false", "0", "off", "no"}
     converter = None
     if apply_model:

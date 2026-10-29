@@ -200,7 +200,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
     <div className="page-grid">
       <div className="flex min-h-0 flex-col gap-4 lg:overflow-y-auto">
         <section className="panel p-5" aria-labelledby="models-add-title">
-          <p className="panel-kicker">Models</p>
+          <p className="panel-kicker text-ok-fg">Voice</p>
           <h2 id="models-add-title" className="panel-title">Add a voice</h2>
           <div
             role="button"
@@ -251,7 +251,7 @@ function ModelManager({ activeModel = null, onActiveModelChange, active = true, 
       <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="models-list-title">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="panel-kicker">Library</p>
+            <p className="panel-kicker text-ok-fg">Voice</p>
             <h2 id="models-list-title" className="panel-title">
               Voices <span className="font-normal text-fg-subtle">· {models.length}</span>
             </h2>

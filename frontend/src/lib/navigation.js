@@ -1,15 +1,14 @@
 // Tab <-> URL synchronisation, and the two levels of navigation.
 //
-// The header shows zones (Live, Voice, Video, Convert, Logs); Voice and Video
-// have pages of their own. Every page is a tab id in ?tab=, so links and
-// Back/Forward work page by page.
+// The header shows four zones: Live (voice and face together), Voice, Face and
+// Files. Voice and Face have pages of their own, each ending in its settings.
+// Every page is a tab id in ?tab=, so links and Back/Forward work page by page.
 
 export const ZONES = [
   { id: 'live', label: 'Live', tabs: ['studio'] },
-  { id: 'voice', label: 'Voice', tabs: ['models', 'voice', 'training'] },
-  { id: 'video', label: 'Video', tabs: ['faces', 'face-settings'] },
-  { id: 'convert', label: 'Convert', tabs: ['converter'] },
-  { id: 'logs', label: 'Logs', tabs: ['logs'] },
+  { id: 'voice', label: 'Voice', tabs: ['models', 'voice', 'training', 'voice-settings'] },
+  { id: 'face', label: 'Face', tabs: ['faces', 'face-settings'] },
+  { id: 'files', label: 'Files', tabs: ['converter'] },
 ];
 
 export const TAB_IDS = ZONES.flatMap((zone) => zone.tabs);

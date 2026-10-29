@@ -4,7 +4,7 @@ TORCH ?= cpu
 .PHONY: run dev-backend dev-frontend install lint test test-backend test-frontend build release clean
 
 run:
-	uv run --extra $(TORCH) --extra neural-f0 voxclone
+	uv run --extra $(TORCH) --extra neural-f0 deepmirror
 
 dev-backend:
 	uv run --extra $(TORCH) uvicorn --factory backend.app:create_app --reload

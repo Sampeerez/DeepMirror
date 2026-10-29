@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import multiprocessing as mp
+import queue
 import struct
 import threading
 import time
@@ -114,10 +115,55 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     offset: float | None = None     # server monotonic - client capture time (s), smallest seen
     last_stats = 0.0
     last_plan = 0.0
+    send_lock = threading.Lock()
+    stopping = threading.Event()
+    # Frames in: decoded and tracked on their own thread, so reading messages, tracking and
+    # blending/encoding overlap (OpenCV and ONNX Runtime release the GIL). Only the newest few
+    # wait: if tracking falls behind, the oldest frame is dropped, never the newest.
+    incoming: queue.Queue = queue.Queue(maxsize=3)
+    dropped = [0]   # frames tracking could not keep up with
 
     def send(*message) -> None:
-        with contextlib.suppress(BrokenPipeError, EOFError, OSError):
+        with send_lock, contextlib.suppress(BrokenPipeError, EOFError, OSError):
             conn.send(message)
+
+    def track_frames() -> None:
+        while not stopping.is_set():
+            try:
+                session, t, data = incoming.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            try:
+                session.submit(t, decode_image(data))
+            except ValueError:
+                continue
+            except Exception:
+                logger.exception("Face tracking failed")
+
+    def emit_frames() -> None:
+        nonlocal last_stats, last_plan
+        while not stopping.is_set():
+            session = live
+            if session is None:
+                time.sleep(0.01)
+                continue
+            frames = session.ready()
+            for t, frame in frames:
+                send("frame", t * 1000.0, encode_jpeg(frame))
+                if camera is not None and offset is not None:
+                    camera.push(t + offset, frame)
+            now = time.monotonic()
+            if now - last_plan > 10.0:   # the voice started or stopped: maybe another swapper fits better
+                engine.plan()
+                last_plan = now
+            if now - last_stats > STATS_SECONDS:
+                send("stats", {**session.stats(), "camera": camera.device if camera else None, "dropped": dropped[0]})
+                last_stats = now
+            if not frames:
+                time.sleep(0.003)
+
+    threading.Thread(target=track_frames, name="face-track", daemon=True).start()
+    threading.Thread(target=emit_frames, name="face-emit", daemon=True).start()
 
     def log(level: int, text: str) -> None:
         send("log", level, text)
@@ -139,30 +185,31 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
 
     try:
         models.measure(Path(cache_path), arbiter)
+        # Loaded now, not on the first frame: a swapper takes a second or two to load and warm up.
+        if models.available():
+            engine.plan()
+            last_plan = time.monotonic()
         send("ready", {"swap_ms": models.swap_ms, "available": models.available()})
         while True:
-            if not conn.poll(0.004):
-                message = None
-            else:
-                message = conn.recv()
+            if not conn.poll(0.05):
+                continue
+            message = conn.recv()
             if message is not None:
                 kind = message[0]
                 if kind == "stop":
                     break
                 if kind == "frame":
                     _, t_ms, data = message
-                    try:
-                        frame = decode_image(data)
-                    except ValueError:
-                        continue
                     if live is None:
                         live = LiveFaceSession(engine)
-                        engine.plan()
-                        last_plan = time.monotonic()
                     t = t_ms / 1000.0
                     arrival = time.monotonic()
                     offset = arrival - t if offset is None else min(offset, arrival - t)
-                    live.submit(t, frame)
+                    if incoming.full():
+                        with contextlib.suppress(queue.Empty):
+                            incoming.get_nowait()
+                            dropped[0] += 1
+                    incoming.put_nowait((live, t, data))
                 elif kind == "identity":
                     engine.set_identity(message[1])
                 elif kind == "settings":
@@ -196,24 +243,13 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                     threading.Thread(target=_convert, args=(job, source, target), name="face-convert",
                                      daemon=True).start()
                 elif kind == "reset":
-                    if live is not None:
-                        live.close()
-                    live, offset = None, None
-            if live is not None:
-                for t, frame in live.ready():
-                    send("frame", t * 1000.0, encode_jpeg(frame))
-                    if camera is not None and offset is not None:
-                        camera.push(t + offset, frame)
-                now = time.monotonic()
-                if now - last_plan > 10.0:   # the voice started or stopped: maybe another swapper fits better
-                    engine.plan()
-                    last_plan = now
-                if now - last_stats > STATS_SECONDS:
-                    send("stats", {**live.stats(), "camera": camera.device if camera else None})
-                    last_stats = now
+                    previous, live, offset = live, None, None
+                    if previous is not None:
+                        previous.close()
     except (EOFError, BrokenPipeError, KeyboardInterrupt):
         pass
     finally:
+        stopping.set()
         if live is not None:
             live.close()
         if camera is not None:
@@ -248,7 +284,7 @@ class FaceWorker:
         context = mp.get_context("spawn")
         parent, child = context.Pipe()
         self._ready.clear()
-        process = context.Process(target=run, args=(child, *self._args), name="voxclone-face", daemon=True)
+        process = context.Process(target=run, args=(child, *self._args), name="deepmirror-face", daemon=True)
         process.start()
         self._process = process
         child.close()

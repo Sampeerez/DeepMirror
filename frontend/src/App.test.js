@@ -18,6 +18,8 @@ vi.mock('./hooks/useUpdates', () => ({ default: () => ({}) }));
 vi.mock('./lib/api', () => ({
   fetchConfig: vi.fn(), fetchPresets: vi.fn(), savePreset: vi.fn(), deletePreset: vi.fn(),
   getActiveModel: vi.fn().mockResolvedValue({ name: 'mine.pth' }),
+  fetchModels: vi.fn().mockResolvedValue([]), activateModel: vi.fn(), deactivateModel: vi.fn(),
+  fetchVideo: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('./components/Layout', () => ({ default: ({ children }) => children }));
 vi.mock('./components/StatusIndicator', () => ({ default: () => null }));

@@ -1,17 +1,17 @@
 #!/usr/bin/env sh
-# VoxClone launcher for Linux and macOS: ./start.sh [--port 8080] [--device cpu]
+# DeepMirror launcher for Linux and macOS: ./start.sh [--port 8080] [--device cpu]
 # Installs uv (per user, no root) if needed and prepares Python and every
 # dependency in .venv (visible here; the first time takes a few minutes). The
 # studio then runs in the background and opens in the browser: this terminal
 # can be closed, the log is in the studio's Logs tab, and closing the studio
 # page stops it. On Linux it asks once whether to add an app-menu entry
-# (answer kept in data/shortcuts.txt, or set VOXCLONE_SHORTCUTS=yes|no).
+# (answer kept in data/shortcuts.txt, or set DEEPMIRROR_SHORTCUTS=yes|no).
 # Use --foreground to keep it attached to the terminal.
 set -eu
 cd "$(dirname "$0")"
 HERE="$(pwd)"
-APP_NAME="VoxClone"
-APP_SLUG="voxclone"
+APP_NAME="DeepMirror"
+APP_SLUG="deepmirror"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "Installing uv, the Python package manager (one time only)..."
@@ -35,7 +35,7 @@ for arg in "$@"; do [ "$arg" = "--foreground" ] && FOREGROUND=1; done
 ARGS=""
 for arg in "$@"; do [ "$arg" != "--foreground" ] && ARGS="$ARGS $arg"; done
 
-SHORTCUTS="${VOXCLONE_SHORTCUTS:-}"
+SHORTCUTS="${DEEPMIRROR_SHORTCUTS:-${VOXCLONE_SHORTCUTS:-}}"
 if [ -z "$SHORTCUTS" ] && [ -f data/shortcuts.txt ]; then SHORTCUTS="$(cat data/shortcuts.txt)"; fi
 if [ -z "$SHORTCUTS" ] && [ "$(uname)" = "Linux" ] && [ -t 0 ]; then
   printf "Add %s to the applications menu? [y/N] " "$APP_NAME"
@@ -51,8 +51,8 @@ if [ "$(uname)" = "Linux" ] && [ -d "$HOME/.local/share" ] && [ "$SHORTCUTS" = "
 [Desktop Entry]
 Type=Application
 Name=$APP_NAME
-Comment=Realtime voice changer studio
-Exec=sh -c 'cd "$HERE" && exec "$UV_BIN" run --no-sync voxclone'
+Comment=Realtime voice and face cloning
+Exec=sh -c 'cd "$HERE" && exec "$UV_BIN" run --no-sync deepmirror'
 Path=$HERE
 Icon=audio-input-microphone
 Terminal=false
@@ -62,12 +62,12 @@ fi
 
 if [ "$FOREGROUND" = "1" ]; then
   # shellcheck disable=SC2086
-  exec uv run --no-sync voxclone $ARGS
+  exec uv run --no-sync deepmirror $ARGS
 fi
 # shellcheck disable=SC2086
 if command -v setsid >/dev/null 2>&1; then
-  setsid uv run --no-sync voxclone $ARGS >/dev/null 2>&1 < /dev/null &
+  setsid uv run --no-sync deepmirror $ARGS >/dev/null 2>&1 < /dev/null &
 else
-  nohup uv run --no-sync voxclone $ARGS >/dev/null 2>&1 < /dev/null &
+  nohup uv run --no-sync deepmirror $ARGS >/dev/null 2>&1 < /dev/null &
 fi
 echo "$APP_NAME is starting in your browser. You can close this terminal."

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/images/logo.svg" width="96" height="96" alt="VoxClone logo" />
+  <img src="docs/images/logo.svg" width="96" height="96" alt="DeepMirror logo" />
 </p>
 
-<h1 align="center">VoxClone</h1>
+<h1 align="center">DeepMirror</h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" alt="Python 3.13" />
@@ -21,17 +21,17 @@ Windows, Linux or macOS. The start script installs [uv](https://docs.astral.sh/u
 brings Python and every dependency; an NVIDIA GPU is used when there is one.
 
 ```bash
-git clone https://github.com/Sampeerez/VoxClone.git
-cd VoxClone
+git clone https://github.com/Sampeerez/DeepMirror.git
+cd DeepMirror
 ./start.sh          # Windows: double-click start.bat
 ```
 
-The studio opens at <http://127.0.0.1:8000>. It runs in the background (log in the **Logs**
+The studio opens at <http://127.0.0.1:8000>. It runs in the background (log in **Settings › Logs**
 tab) and stops when you close the page. The first time it asks whether to add a Desktop
-shortcut (set `VOXCLONE_SHORTCUTS=yes` or `no` to skip the question). The first
+shortcut (set `DEEPMIRROR_SHORTCUTS=yes` or `no` to skip the question). The first
 start downloads the shared models (about 400 MB) and checks each one by SHA-256.
 
-Then add a voice in **Models** (an RVC `.pth`, with its `.index` if it has one), press
+Then add a voice in **Voice › Voices** (an RVC `.pth`, with its `.index` if it has one), press
 **Activate**, and press **Start** in **Studio**.
 
 ```bash
@@ -42,8 +42,16 @@ OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 
 ## What it does
 
-The app has two sides, each with its own colour: **Voice** (teal) and **Video** (violet).
-**Live** uses both at once; **Convert** takes audio or video files.
+Four places, always in the same order at the top:
+
+| | What it is for |
+|---|---|
+| **Live** | Your voice and your face at the same time: one card for each, side by side |
+| **Voice** (teal) | Voices, My voice, Train and the voice's Settings |
+| **Face** (violet) | Faces and the face's Settings |
+| **Files** | Convert an audio file (voice) or a video file (face and voice) |
+
+The gear opens the studio's own settings (theme, engine, test samples) and the log.
 
 ### Voice
 
@@ -55,10 +63,10 @@ The app has two sides, each with its own colour: **Voice** (teal) and **Video** 
 - **Settings per voice**: each voice keeps its own settings and effects; **Back to automatic** drops them
 - **Effects** (13), eight sound presets that never touch the voice's pitch (Radio, Phone, Hall…) plus your own, an A/B switch (<kbd>B</kbd>) and a recorder (<kbd>R</kbd>)
 - **Steady under load**: when the computer is too busy to keep up (a browser, a game, a live wallpaper on the same GPU), the stream moves to a longer buffer by itself instead of cutting the voice; the log says which stage took the time
-- **Converter** for whole files with any voice in Models (not only the active one), and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
+- **Files** for whole recordings with any voice in Voices (not only the active one), and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
-### Video
+### Face
 - **Face clone, live**: wear a face from 1–12 photos on your camera. Your expressions, gaze and head
   stay yours; hands, hair and glasses in front of the face stay in front.
 - **In sync with the voice**: every camera frame carries its capture time and is shown when the
@@ -88,7 +96,7 @@ Chosen by measuring them on this project's own tests, not by date.
 
 ### Face clone
 
-The models download the first time you open **Video › Faces** (about 1.8 GB), from FaceFusion's
+The models download the first time you open **Face › Faces** (about 1.8 GB), from FaceFusion's
 releases, and run with ONNX Runtime (CUDA, DirectML or CPU).
 
 | Part | Model | Why |
@@ -109,7 +117,7 @@ In **Train**, drop recordings of one speaker, name the voice and press **Start t
 The audio is cleaned and sliced, features are extracted on the GPU, the retrieval index is
 built, and the voice is fine-tuned from TITAN Medium (RVC v2 tuned on expressive speech; the
 official RVC v2 base is also available). A held-out part of the recordings
-picks the best epoch, so the voice in **Models** never gets worse if training over-fits.
+picks the best epoch, so the voice in **Voices** never gets worse if training over-fits.
 
 **Voice only** (on by default) keeps nothing but the voice: when there is music or effects
 under it, Mel-Band RoFormer separates the voice first; DeepFilterNet3 then removes the noise
@@ -171,7 +179,8 @@ make lint test        # ruff, pyright, eslint, pytest, vitest
 ## Screenshots
 
 ![Live](docs/images/main-ui.png)
-![Video settings](docs/images/video-settings.png)
+![Face settings](docs/images/video-settings.png)
+![Voice settings](docs/images/voice-settings.png)
 ![Train](docs/images/training.png)
 ![Models](docs/images/models.png)
 ![Converter](docs/images/converter.png)

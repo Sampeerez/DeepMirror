@@ -8,6 +8,7 @@ import {
 } from '../lib/api';
 import { formatBytes } from '../lib/format';
 import Button from './Button';
+import Segmented from './Segmented';
 import {
   STAGE_LABELS, STATE_LABELS, bestEpochSummary, canResume, datasetQuality, formatDuration, isActiveJob, jobModelFile,
   plannedEpochs, readAudioDuration,
@@ -259,7 +260,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
       <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="training-title">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="panel-kicker">Train</p>
+            <p className="panel-kicker text-ok-fg">Voice</p>
             <h2 id="training-title" className="panel-title">Create a voice</h2>
           </div>
           <GraduationCap className="hidden h-7 w-7 shrink-0 text-fg-subtle sm:block" strokeWidth={1.5} aria-hidden="true" />
@@ -321,27 +322,21 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
         </p>
 
         <div className="mt-3 grid gap-x-4 gap-y-3 sm:grid-cols-2">
-          <Field label="Voice name" htmlFor="training-name" hint="Saved in Models as <name>.pth.">
+          <Field label="Voice name" htmlFor="training-name" hint="Saved in Voices as <name>.pth.">
             <input id="training-name" className={inputClass} value={name} maxLength={60}
               onChange={(event) => setName(event.target.value)} placeholder="my_voice" />
           </Field>
-          <Field label="Sample rate" htmlFor="training-rate" hint="40 kHz for most microphones.">
-            <select id="training-rate" className={`native-select-safe ${inputClass}`} value={sampleRate}
-              onChange={(event) => setSampleRate(Number(event.target.value))}>
-              {(info?.sample_rates || [40000, 48000]).map((rate) => (
-                <option key={rate} value={rate}>{rate / 1000} kHz{rate === 40000 ? ' (recommended)' : ''}</option>
-              ))}
-            </select>
+          <Field label="Sample rate" hint="40 kHz suits most microphones.">
+            <Segmented label="Sample rate" hideLabel accent="voice" size="sm" value={sampleRate} onChange={setSampleRate}
+              options={(info?.sample_rates || [40000, 48000]).map((rate) => ({ value: rate, label: `${rate / 1000} kHz` }))} />
           </Field>
-          <Field label="Epochs" htmlFor="training-plan"
+          <Field label={autoPlan ? 'Epochs' : `Epochs: ${epochs}`}
             hint={autoPlan
               ? 'Planned from your audio and GPU; the best epoch is kept.'
               : 'Upper limit; the best epoch is kept. Stop any time: it saves.'}>
-            <select id="training-plan" className={`native-select-safe ${inputClass}`} value={autoPlan ? 'auto' : 'manual'}
-              onChange={(event) => setAutoPlan(event.target.value === 'auto')}>
-              <option value="auto">Automatic (recommended)</option>
-              <option value="manual">Manual: {epochs} epochs</option>
-            </select>
+            <Segmented label="Epochs" hideLabel accent="voice" size="sm" value={autoPlan ? 'auto' : 'manual'}
+              onChange={(value) => setAutoPlan(value === 'auto')}
+              options={[{ value: 'auto', label: 'Automatic' }, { value: 'manual', label: 'Manual' }]} />
             {!autoPlan ? (
               <input id="training-epochs" type="range" min={20} max={info?.max_epochs || 2000} step={10} value={epochs}
                 aria-label="Epochs" onChange={(event) => setEpochs(Number(event.target.value))}
@@ -353,29 +348,21 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
             <input id="training-batch" type="number" min={1} max={32} className={inputClass} value={autoPlan ? '' : batchSize}
               disabled={autoPlan} onChange={(event) => setBatchSize(event.target.value)} placeholder="Auto" />
           </Field>
-          <Field label="Training quality" htmlFor="training-quality"
+          <Field label="Training quality"
             hint={trainingQuality === 'high' ? 'Several hours on a mid-range GPU; the best epoch is kept.' : 'Faster.'}>
-            <select id="training-quality" className={`native-select-safe ${inputClass}`} value={trainingQuality}
-              onChange={(event) => setTrainingQuality(event.target.value)}>
-              <option value="high">High (recommended)</option>
-              <option value="standard">Standard</option>
-            </select>
+            <Segmented label="Training quality" hideLabel accent="voice" size="sm" value={trainingQuality}
+              onChange={setTrainingQuality}
+              options={[{ value: 'high', label: 'High' }, { value: 'standard', label: 'Standard' }]} />
           </Field>
-          <Field label="Background" htmlFor="training-isolate"
-            hint={isolate ? 'Removes music, noise and other sounds before training.' : 'For recordings already clean.'}>
-            <select id="training-isolate" className={`native-select-safe ${inputClass}`} value={isolate ? 'voice' : 'as-is'}
-              onChange={(event) => setIsolate(event.target.value === 'voice')}>
-              <option value="voice">Keep only the voice (recommended)</option>
-              <option value="as-is">Use the audio as it is</option>
-            </select>
+          <Field label="Background"
+            hint={isolate ? 'Music, noise and other sounds are removed first.' : 'For recordings already clean.'}>
+            <Segmented label="Background" hideLabel accent="voice" size="sm" value={isolate ? 'voice' : 'as-is'}
+              onChange={(value) => setIsolate(value === 'voice')}
+              options={[{ value: 'voice', label: 'Voice only' }, { value: 'as-is', label: 'As it is' }]} />
           </Field>
-          <Field label="Base model" htmlFor="training-base" hint="TITAN is tuned on expressive speech.">
-            <select id="training-base" className={`native-select-safe ${inputClass}`} value={base || 'official'}
-              onChange={(event) => setBase(event.target.value)}>
-              {(info?.bases || ['official', 'titan']).map((id) => (
-                <option key={id} value={id}>{BASE_LABELS[id] || id}{id === info?.default_base ? ' (recommended)' : ''}</option>
-              ))}
-            </select>
+          <Field label="Base model" hint="TITAN is tuned on expressive speech (recommended).">
+            <Segmented label="Base model" hideLabel accent="voice" size="sm" value={base || 'official'} onChange={setBase}
+              options={(info?.bases || ['official', 'titan']).map((id) => ({ value: id, label: BASE_LABELS[id] || id }))} />
           </Field>
           <Field label="Save every N epochs" htmlFor="training-save" hint="Updates the usable voice.">
             <input id="training-save" type="number" min={1} max={500} className={inputClass} value={saveEvery}
@@ -397,7 +384,7 @@ function TrainingStudio({ active = true, onActiveModelChange }) {
       </section>
 
       <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="training-jobs-title">
-        <p className="panel-kicker">Progress</p>
+        <p className="panel-kicker text-ok-fg">Voice</p>
         <h2 id="training-jobs-title" className="panel-title">Trained voices</h2>
         <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {jobs.length ? jobs.map((job) => (

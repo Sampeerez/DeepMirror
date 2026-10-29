@@ -14,8 +14,8 @@ describe('Layout tab list', () => {
     expect(render('studio').match(/role="tab"/g)).toHaveLength(ZONES.length);
     const voice = render('voice');
     expect(voice).toContain('role="tablist"');
-    expect(voice.match(/role="tab"/g)).toHaveLength(ZONES.length - 1 + 3);   // Models, My voice, Train
-    for (const id of ['models', 'voice', 'training']) expect(voice).toContain(`id="tab-${id}"`);
+    expect(voice.match(/role="tab"/g)).toHaveLength(ZONES.length - 1 + 4);   // Voices, My voice, Train, Settings
+    for (const id of ['models', 'voice', 'training', 'voice-settings']) expect(voice).toContain(`id="tab-${id}"`);
     expect(render('faces')).toContain('id="tab-face-settings"');
   });
 

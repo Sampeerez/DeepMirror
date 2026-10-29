@@ -1,8 +1,9 @@
 import React, { memo, useState } from 'react';
-import { Mic, PhoneCall, Play, RefreshCw, Speaker, Square } from 'lucide-react';
+import { AudioLines, Boxes, Mic, PhoneCall, Play, RefreshCw, Speaker, Square } from 'lucide-react';
 import Button from './Button';
 import CallMode from './CallMode';
 import Dialog from './Dialog';
+import Picker from './Picker';
 import { findCableOutput, isCableMicrophone } from '../lib/callMode';
 import { readStored, writeStored } from '../lib/storage';
 
@@ -52,23 +53,15 @@ function statusLine({ error, devices, captureSupported, pipeline, wsStatus, acti
   return { tone: 'muted', text: 'Ready' };
 }
 
-function DeviceSelect({ id, label, Icon, value, onChange, disabled, title, children }) {
-  return (
-    <label htmlFor={id} className="flex min-w-0 items-center gap-2" title={title}>
-      <Icon className="h-4 w-4 shrink-0 text-fg-subtle" aria-hidden="true" />
-      <span className="sr-only">{label}</span>
-      <select id={id} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}
-        className="native-select-safe field">
-        {children}
-      </select>
-    </label>
-  );
-}
+const NO_VOICE = '';
 
-/** The Live bar: the voice (start/stop, microphone, output, call mode, A/B), the video row, and a status line. */
+/**
+ * Live › Voice: start/stop, the voice to speak with, microphone, output, call
+ * mode and A/B, and one status line. Spans two of the three columns below.
+ */
 function AudioControls({
-  devices, pipeline, wsStatus, activeModel, bypass = false, onBypassChange, onRetryConnection, videoRow = null,
-  videoStatus = null,
+  devices, pipeline, wsStatus, activeModel, bypass = false, onBypassChange, onRetryConnection,
+  voices = [], loadingModel = null, onVoiceChange = null,
 }) {
   const [selectedInput, setSelectedInput] = useState('');
   const [selectedOutput, setSelectedOutput] = useState('');
@@ -116,73 +109,68 @@ function AudioControls({
     error, devices, captureSupported, pipeline, wsStatus, activeModel, inCall, callInput,
   });
 
+  const microphones = [{ value: '', label: 'Default microphone' },
+    ...devices.inputDevices.filter((device) => !isCableMicrophone(device)).map((device) => ({
+      value: device.deviceId, label: device.label || `Microphone (${device.deviceId.slice(0, 8)}…)`,
+    }))];
+  // Without setSinkId the browser always plays to the system default: no list to offer.
+  const speakers = inCall
+    ? [{ value: cable.deviceId, label: cable.label || 'Virtual cable' }]
+    : [{ value: '', label: outputSelectable ? 'Default speaker' : 'System default' },
+      ...(outputSelectable ? devices.outputDevices.map((device) => ({
+        value: device.deviceId, label: device.label || `Speaker (${device.deviceId.slice(0, 8)}…)`,
+      })) : [])];
+  const voiceOptions = [{ value: NO_VOICE, label: 'No voice (effects only)' },
+    ...voices.map((name) => ({ value: name, label: name.replace(/\.(pth|pt)$/i, ''),
+      note: name === loadingModel ? 'loading…' : null }))];
+
   return (
-    <section className="panel p-3 sm:p-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-center">
-        {pipeline.isRunning ? (
-          <Button variant="danger" size="md" icon={Square} onClick={handleStop} className="w-full">Stop</Button>
-        ) : (
-          <Button variant="primary" size="md" icon={Play} onClick={handleStart} disabled={!canStart}
-            loading={starting} className="w-full">
-            {starting ? 'Starting…' : 'Start'}
-          </Button>
-        )}
-
-        <div className="flex items-center gap-2 md:justify-end xl:order-last">
-          <Button icon={PhoneCall} size="md" selected={inCall} onClick={() => setCallOpen(true)}
-            className={`w-32 ${inCall ? 'text-fg' : ''}`} title="Discord, Teams, Meet…">
-            {inCall ? 'Call: on' : 'Call mode'}
-          </Button>
-          {/* True A/B: keeps the mic, the WebSocket and the output routing live and
-              returns the raw input instead of the converted signal. */}
-          <Button size="md" variant={bypass ? 'warning' : 'secondary'} role="switch" aria-checked={bypass}
-            aria-label="Conversion bypass" title="Shortcut: B"
-            onClick={() => onBypassChange?.(!bypass)} className="w-32">
-            {bypass ? 'A/B: original' : 'A/B: converted'}
-          </Button>
-          <Button icon={RefreshCw} size="md" variant="ghost" aria-label="Refresh audio devices" title="Refresh devices"
-            disabled={pipeline.isRunning || devices.isRefreshing} className={devices.isRefreshing ? '[&_svg]:animate-spin' : ''}
-            onClick={() => devices.refresh?.().catch(() => {})} />
-        </div>
-
-        <DeviceSelect id="audio-input-device" label="Input" Icon={Mic} value={selectedInput}
-          onChange={setSelectedInput} disabled={pipeline.isRunning}>
-          <option value="">Default microphone</option>
-          {devices.inputDevices.filter((device) => !isCableMicrophone(device)).map((device) => (
-            <option key={device.deviceId} value={device.deviceId}>
-              {device.label || `Microphone (${device.deviceId.slice(0, 8)}…)`}
-            </option>
-          ))}
-        </DeviceSelect>
-
-        <DeviceSelect id="audio-output-device" label="Output" Icon={Speaker}
-          value={inCall ? cable.deviceId : (outputSelectable ? selectedOutput : '')}
-          onChange={setSelectedOutput} disabled={pipeline.isRunning || !outputSelectable || inCall}
-          title={outputSelectable ? undefined : 'This browser always uses the system output.'}>
-          {/* Without setSinkId the browser always plays to the system default,
-              so offering a device list here would be a promise we can't keep. */}
-          <option value="">{outputSelectable ? 'Default speaker' : 'System default (not selectable)'}</option>
-          {outputSelectable && devices.outputDevices.map((device) => (
-            <option key={device.deviceId} value={device.deviceId}>
-              {device.label || `Speaker (${device.deviceId.slice(0, 8)}…)`}
-            </option>
-          ))}
-        </DeviceSelect>
-      </div>
-
-      {videoRow}
-
-      <div className="mt-2 flex h-8 items-center justify-between gap-3" role="status">
-        <p className={`min-w-0 truncate text-[11px] ${TONE_CLASS[status.tone]}`} title={status.text}>{status.text}</p>
-        {videoStatus ? (
-          <p className={`ml-auto min-w-0 truncate text-right text-[11px] ${TONE_CLASS[videoStatus.tone] || 'text-warn-fg'}`}
-            title={videoStatus.text}>{videoStatus.text}</p>
-        ) : null}
+    <section className="panel flex flex-col p-4 lg:col-span-2" aria-labelledby="live-voice-title">
+      <div className="flex h-8 items-center gap-3">
+        <AudioLines className="h-5 w-5 shrink-0 text-ok-fg" aria-hidden="true" />
+        <h2 id="live-voice-title" className="text-sm font-semibold text-fg">Voice</h2>
+        <p className={`min-w-0 flex-1 truncate text-[11px] ${TONE_CLASS[status.tone]}`} role="status"
+          aria-live="polite" title={status.text}>{status.text}</p>
         {status.retry && onRetryConnection ? (
           /* The back-off grows to 30 s, and an attempt to an unreachable host can
              hang in CONNECTING; retryNow replaces a pending attempt. */
           <Button icon={RefreshCw} onClick={onRetryConnection}>Retry now</Button>
         ) : null}
+        <Button icon={RefreshCw} size="sm" variant="ghost" aria-label="Refresh audio devices" title="Refresh devices"
+          disabled={pipeline.isRunning || devices.isRefreshing} className={devices.isRefreshing ? '[&_svg]:animate-spin' : ''}
+          onClick={() => devices.refresh?.().catch(() => {})} />
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-[9rem_minmax(0,1fr)_minmax(0,1fr)]">
+        {pipeline.isRunning ? (
+          <Button variant="danger" size="md" icon={Square} onClick={handleStop} className="w-full">Stop</Button>
+        ) : (
+          <Button variant="primary" size="md" icon={Play} onClick={handleStart} disabled={!canStart}
+            loading={starting} className="w-full" title="Start the voice">
+            {starting ? 'Starting…' : 'Start'}
+          </Button>
+        )}
+        <Picker label="Microphone" icon={Mic} accent="voice" value={selectedInput} options={microphones}
+          onChange={setSelectedInput} disabled={pipeline.isRunning} />
+        <Picker label={inCall ? 'Output (call)' : 'Output'} icon={Speaker} accent="voice"
+          value={inCall ? cable.deviceId : selectedOutput} options={speakers} onChange={setSelectedOutput}
+          disabled={pipeline.isRunning || !outputSelectable || inCall} />
+        <Picker label="Speak as" icon={Boxes} accent="voice" className="sm:col-span-2"
+          value={activeModel || loadingModel || NO_VOICE} options={voiceOptions}
+          onChange={(name) => onVoiceChange?.(name || null)} disabled={!onVoiceChange || Boolean(loadingModel)} />
+        <div className="grid grid-cols-2 gap-2">
+          <Button icon={PhoneCall} size="md" selected={inCall} onClick={() => setCallOpen(true)}
+            className={inCall ? 'text-ok-fg' : ''} title="Send the voice to Discord, Teams, Meet…">
+            {inCall ? 'Call: on' : 'Call'}
+          </Button>
+          {/* True A/B: keeps the mic, the WebSocket and the output routing live and
+              returns the raw input instead of the converted signal. */}
+          <Button size="md" variant={bypass ? 'warning' : 'secondary'} role="switch" aria-checked={bypass}
+            aria-label="Hear the original (A/B)" title="Shortcut: B"
+            onClick={() => onBypassChange?.(!bypass)}>
+            {bypass ? 'A/B: original' : 'A/B'}
+          </Button>
+        </div>
       </div>
 
       {callOpen ? (

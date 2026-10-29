@@ -9,7 +9,6 @@ import { readStored, writeStored } from '../lib/storage';
 const TABS = [
   { id: 'cleanup', label: 'Clean-up' },
   { id: 'effects', label: 'Effects' },
-  { id: 'advanced', label: 'Advanced' },
 ];
 const TAB_KEY = 'ovc_sound_tab_v1';
 
@@ -21,7 +20,7 @@ function noiseHint(voice, denoiser) {
 
 function CleanupTab({ voice, onChange, denoiser }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <SwitchRow label="Convert speech only" checked={voice.isolateVoice}
         onChange={(isolateVoice) => onChange({ isolateVoice })} />
       <MiniSlider
@@ -50,37 +49,14 @@ function CleanupTab({ voice, onChange, denoiser }) {
   );
 }
 
-function AdvancedTab({ voice, onChange, onRestoreRecommended }) {
-  const recommended = isRecommendedVoice(voice);
-  return (
-    <div className="space-y-4">
-      <MiniSlider label="Index rate" value={voice.indexRate} min={0} max={1} step={0.05}
-        onChange={(value) => onChange({ indexRate: value })} />
-      <MiniSlider label="Protect" value={voice.protect} min={0} max={0.5} step={0.01}
-        onChange={(value) => onChange({ protect: value })} />
-      <MiniSlider label="RMS mix" value={voice.rmsMixRate} min={0} max={1} step={0.05}
-        onChange={(value) => onChange({ rmsMixRate: value })} />
-      <MiniSlider label="Filter radius" value={voice.filterRadius} min={0} max={7} step={1}
-        onChange={(value) => onChange({ filterRadius: value })}
-        format={(v) => (v >= 3 ? String(Math.round(v)) : 'Off')} />
-      {voice.f0Method?.startsWith('mangio-crepe') ? (
-        <MiniSlider label="Crepe hop length" value={voice.crepeHopLength} min={64} max={512} step={16}
-          onChange={(value) => onChange({ crepeHopLength: value })} format={(value) => `${Math.round(value)} samples`} />
-      ) : null}
-      <Button icon={RotateCcw} onClick={onRestoreRecommended} disabled={recommended} className="w-full">
-        {recommended ? 'Automatic settings' : 'Back to automatic'}
-      </Button>
-    </div>
-  );
-}
-
-/** The Sound card: what happens around the model, in three fixed-height tabs. */
+/** The Sound card: what happens around the model (clean-up, effects). */
 function SoundCard({ voice, onChange, onRestoreRecommended, effects, onEffectsChange, denoiser }) {
   const [tab, setTab] = useState(() => {
     const stored = readStored(TAB_KEY);
     return TABS.some(({ id }) => id === stored) ? stored : 'cleanup';
   });
   const listRef = useRef(null);
+  const recommended = isRecommendedVoice(voice);
   const select = (id) => {
     setTab(id);
     writeStored(TAB_KEY, id);
@@ -96,12 +72,18 @@ function SoundCard({ voice, onChange, onRestoreRecommended, effects, onEffectsCh
 
   return (
     <section className="panel flex h-full min-h-0 flex-col p-5">
-      <div className="min-w-0">
-        <p className="panel-kicker">Sound</p>
-        <h2 className="panel-title truncate">Clean-up & effects</h2>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="panel-kicker">Sound</p>
+          <h2 className="panel-title truncate">Clean-up & effects</h2>
+        </div>
+        <Button icon={RotateCcw} onClick={onRestoreRecommended} disabled={recommended}
+          title="This voice's own changes and effects are dropped">
+          {recommended ? 'Automatic' : 'Back to automatic'}
+        </Button>
       </div>
       <div ref={listRef} role="tablist" aria-label="Sound" onKeyDown={onKeyDown}
-        className="mt-4 grid grid-cols-3 gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1">
+        className="mt-3 grid grid-cols-2 gap-1 rounded-lg border border-[color:var(--frost-border)] bg-sunken p-1">
         {TABS.map(({ id, label }) => {
           const selected = tab === id;
           return (
@@ -117,13 +99,10 @@ function SoundCard({ voice, onChange, onRestoreRecommended, effects, onEffectsCh
         })}
       </div>
       <div id="sound-panel" role="tabpanel" aria-labelledby={`sound-tab-${tab}`}
-        className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+        className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
         {tab === 'cleanup' ? <CleanupTab voice={voice} onChange={onChange} denoiser={denoiser} /> : null}
         {tab === 'effects' ? (
           <EffectsRack effects={effects} formantShift={voice.formant} onEffectsChange={onEffectsChange} />
-        ) : null}
-        {tab === 'advanced' ? (
-          <AdvancedTab voice={voice} onChange={onChange} onRestoreRecommended={onRestoreRecommended} />
         ) : null}
       </div>
     </section>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  AudioLines, Boxes, FileDown, GraduationCap, Radio, ScanFace, ScrollText, SlidersHorizontal, UserRound, Video,
+  AudioLines, Boxes, Files, GraduationCap, Radio, ScanFace, Settings2, SlidersHorizontal, UserRound,
 } from 'lucide-react';
 import { APP_NAME, APP_TAGLINE } from '../lib/brand';
 import { ZONES, zoneOf } from '../lib/navigation';
@@ -10,19 +10,19 @@ import logoUrl from '../assets/logo.svg';
 // id="panel-<id>" and aria-labelledby="tab-<id>".
 const PAGES = {
   studio: { label: 'Live', Icon: Radio },
-  models: { label: 'Models', Icon: Boxes },
+  models: { label: 'Voices', Icon: Boxes },
   voice: { label: 'My voice', Icon: UserRound },
   training: { label: 'Train', Icon: GraduationCap },
-  faces: { label: 'Faces', Icon: ScanFace },
-  'face-settings': { label: 'Video settings', Icon: SlidersHorizontal },
-  converter: { label: 'Convert', Icon: FileDown },
-  logs: { label: 'Logs', Icon: ScrollText },
+  'voice-settings': { label: 'Settings', Icon: Settings2 },
+  faces: { label: 'Faces', Icon: Boxes },
+  'face-settings': { label: 'Settings', Icon: SlidersHorizontal },
+  converter: { label: 'Files', Icon: Files },
 };
-const ZONE_ICONS = { voice: AudioLines, video: Video };
+const ZONE_ICONS = { voice: AudioLines, face: ScanFace };
 // The voice and the face each have their colour, so it is always clear which side a page belongs to.
 const ZONE_ACCENT = {
   voice: { text: 'text-ok-fg', group: 'border-ok-line bg-ok-bg', chip: 'text-ok-fg' },
-  video: { text: 'text-video-fg', group: 'border-video-line bg-video-bg', chip: 'text-video-fg' },
+  face: { text: 'text-video-fg', group: 'border-video-line bg-video-bg', chip: 'text-video-fg' },
 };
 
 function TabButton({ id, label, Icon, selected, onSelect, accent = '' }) {
@@ -50,9 +50,9 @@ function TabButton({ id, label, Icon, selected, onSelect, accent = '' }) {
 }
 
 /**
- * Top-level navigation: Live, Voice, Video, Convert, Logs. The zone in use
- * opens in place to show its own pages (Voice: Models, My voice, Train;
- * Video: Faces, Video settings), in the zone's colour.
+ * Top-level navigation: Live, Voice, Face, Files. The zone in use opens in
+ * place to show its own pages (Voice: Voices, My voice, Train, Settings;
+ * Face: Faces, Settings), in the zone's colour.
  *
  * One tablist: arrow keys move across every visible tab and only the
  * selected one sits in the Tab order (WAI-ARIA tabs pattern).

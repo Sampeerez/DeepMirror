@@ -1,4 +1,4 @@
-"""Command-line entry point: ``uv run voxclone`` (or ``python -m backend``)."""
+"""Command-line entry point: ``uv run deepmirror`` (or ``python -m backend``)."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from backend.logbook import configure_logging
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="voxclone", description="Realtime RVC voice changer studio")
+    parser = argparse.ArgumentParser(prog="deepmirror", description="Realtime voice and face cloning studio")
     parser.add_argument("--host", help="interface to listen on (default 127.0.0.1)")
     parser.add_argument("--port", type=int, help="port to listen on (default 8000)")
     parser.add_argument("--device", choices=["auto", "cuda", "mps", "xpu", "cpu"], help="inference device")

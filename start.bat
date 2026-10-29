@@ -1,16 +1,16 @@
 @echo off
-rem VoxClone launcher for Windows. Double-click it.
+rem DeepMirror launcher for Windows. Double-click it.
 rem It installs uv (per user, no admin) if needed and prepares Python and every
 rem dependency in .venv (visible here, the first time it takes a few minutes).
 rem The studio then starts WITHOUT a console window and opens in the browser;
 rem its log is in the Logs tab. Closing the studio page stops it.
 rem The first time it asks whether to add a Desktop and Start-menu shortcut
 rem (the answer is kept in data\shortcuts.txt; delete it to be asked again,
-rem or set VOXCLONE_SHORTCUTS=yes or no beforehand).
+rem or set DEEPMIRROR_SHORTCUTS=yes or no beforehand).
 rem Extra arguments are passed through, e.g.  start.bat --port 8080
 setlocal
 cd /d "%~dp0"
-set "APP_NAME=VoxClone"
+set "APP_NAME=DeepMirror"
 
 where uv >nul 2>nul
 if errorlevel 1 (
@@ -42,7 +42,8 @@ if errorlevel 1 (
 
 rem Shortcuts that start the studio with no console window (uvw = uv without a console),
 rem only if the user wants them.
-set "SHORTCUTS=%VOXCLONE_SHORTCUTS%"
+set "SHORTCUTS=%DEEPMIRROR_SHORTCUTS%"
+if not defined SHORTCUTS set "SHORTCUTS=%VOXCLONE_SHORTCUTS%"
 if not defined SHORTCUTS if exist "data\shortcuts.txt" set /p SHORTCUTS=<"data\shortcuts.txt"
 if not defined SHORTCUTS call :ask_shortcuts
 for /f "delims=" %%U in ('where uvw 2^>nul') do set "UVW=%%U"
@@ -50,14 +51,15 @@ if defined UVW (
   if /i "%SHORTCUTS%"=="yes" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$s = New-Object -ComObject WScript.Shell;" ^
     "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {" ^
+    "  Remove-Item -LiteralPath (Join-Path $dir 'VoxClone.lnk') -ErrorAction SilentlyContinue;" ^
     "  $l = $s.CreateShortcut((Join-Path $dir '%APP_NAME%.lnk'));" ^
-    "  $l.TargetPath = '%UVW%'; $l.Arguments = 'run --no-sync voxclone';" ^
+    "  $l.TargetPath = '%UVW%'; $l.Arguments = 'run --no-sync deepmirror';" ^
     "  $l.WorkingDirectory = '%~dp0'; $l.Description = '%APP_NAME%';" ^
     "  $l.IconLocation = 'shell32.dll,168'; $l.Save() }" >nul 2>nul
-  start "" "%UVW%" run --no-sync voxclone %*
+  start "" "%UVW%" run --no-sync deepmirror %*
 ) else (
   rem Older uv without uvw: run here (closing this window stops the studio).
-  uv run --no-sync voxclone %*
+  uv run --no-sync deepmirror %*
 )
 exit /b 0
 

@@ -59,7 +59,7 @@ def download_verified(asset: Asset, target: Path, on_progress: Callable[[int], N
     partial = target.with_suffix(target.suffix + ".part")
     received = 0
     try:
-        request = urllib.request.Request(asset.url, headers={"User-Agent": "VoxClone"})
+        request = urllib.request.Request(asset.url, headers={"User-Agent": "DeepMirror"})
         with urllib.request.urlopen(request, timeout=60) as response, partial.open("wb") as out:
             while block := response.read(1024 * 1024):
                 out.write(block)

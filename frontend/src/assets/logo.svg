@@ -1,21 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="VoxClone">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DeepMirror">
   <defs>
-    <linearGradient id="vox-bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#7c3aed"/>
-      <stop offset="1" stop-color="#06b6d4"/>
-    </linearGradient>
-    <linearGradient id="vox-shine" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff" stop-opacity=".16"/>
-      <stop offset=".55" stop-color="#fff" stop-opacity="0"/>
+    <linearGradient id="dm-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="16" fill="url(#vox-bg)"/>
-  <rect width="64" height="64" rx="16" fill="url(#vox-shine)"/>
-  <!-- A V holding a voice: the letter, with a short waveform in its opening. -->
-  <path d="M15 16 L32 49 L49 16" stroke="#fff" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <g stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-opacity=".92">
-    <line x1="26.5" y1="20.5" x2="26.5" y2="24.5"/>
-    <line x1="32" y1="16" x2="32" y2="30"/>
-    <line x1="37.5" y1="20.5" x2="37.5" y2="24.5"/>
+  <rect width="64" height="64" rx="16" fill="url(#dm-bg)"/>
+  <!-- A mirror: you on the left (solid), your clone on the right (its outline, carrying a voice wave). -->
+  <path d="M30 13a19 19 0 0 0 0 38z" fill="#fff"/>
+  <path d="M34 13a19 19 0 0 1 0 38z" fill="none" stroke="#fff" stroke-width="3.4" stroke-linejoin="round"/>
+  <g stroke="#fff" stroke-width="2.6" stroke-linecap="round">
+    <line x1="40" y1="28" x2="40" y2="36"/>
+    <line x1="45" y1="25" x2="45" y2="39"/>
   </g>
 </svg>

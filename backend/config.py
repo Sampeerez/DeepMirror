@@ -19,8 +19,8 @@ DEFAULT_ALLOWED_ORIGINS = [
 ]
 
 
-APP_NAME = "VoxClone"
-APP_SLUG = "VoxClone"          # for device names and files (no spaces)
+APP_NAME = "DeepMirror"
+APP_SLUG = "DeepMirror"          # for device names and files (no spaces)
 
 
 class Settings(BaseSettings):

@@ -42,7 +42,7 @@ def build_archive(output: Path) -> Path:
 
     files = [Path(name) for name in git("ls-files").splitlines()]
     files += [path.relative_to(ROOT) for path in sorted(dist.rglob("*")) if path.is_file()]
-    prefix = f"VoxClone-{version}"
+    prefix = f"DeepMirror-{version}"
     output.mkdir(parents=True, exist_ok=True)
     archive_path = output / f"{prefix}.zip"
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:

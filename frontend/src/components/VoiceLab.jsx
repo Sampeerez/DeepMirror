@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { FALLBACK_F0_METHODS, findF0Method, groupedMethods } from '../lib/f0Methods';
+import { FALLBACK_F0_METHODS, findF0Method } from '../lib/f0Methods';
 import Button from './Button';
 import Toggle from './Toggle';
 import { BigSlider, MiniSlider } from './Sliders';
@@ -19,9 +19,9 @@ function calibrationText(isRunning, speakerProfile) {
   return `Your voice: ${Math.round(speakerProfile.median_hz)} Hz, ±${speakerProfile.range_semitones} st`;
 }
 
-/** The Voice card: pitch, melody, timbre and the pitch tracker. */
+/** The Voice card: pitch, melody and timbre (the tracker and the model's detail are in Voice › Settings). */
 function VoiceLab({
-  voice, onChange, hasModel, isRunning, autoPitchAvailable = false, autoPitchShift = null,
+  voice, onChange, isRunning, autoPitchAvailable = false, autoPitchShift = null,
   f0Pending = null, tooSlow = false, speakerProfile = null, expressivenessApplied = null, onRecalibrate,
   f0Methods = FALLBACK_F0_METHODS,
 }) {
@@ -29,7 +29,6 @@ function VoiceLab({
   const autoExpressiveness = voice.autoPitch && autoPitchAvailable ? expressivenessApplied : null;
   const shownPitch = autoActive ? autoPitchShift : voice.pitch;
   const selectedMethod = findF0Method(f0Methods, voice.f0Method);
-  const liveGroups = groupedMethods(f0Methods, 'realtime');
   const trackerState = tooSlow ? 'Too slow here'
     : !selectedMethod.available ? selectedMethod.reason
       : f0Pending === selectedMethod.id ? 'Loading…' : 'Ready';
@@ -38,7 +37,7 @@ function VoiceLab({
     <section className="panel flex h-full min-h-0 flex-col p-5">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="panel-kicker">Voice</p>
+          <p className="panel-kicker text-ok-fg">Voice</p>
           <h2 className="panel-title truncate">Pitch & timbre</h2>
         </div>
         <span className={`shrink-0 rounded-sm border px-2 py-1 text-[11px] font-medium ${
@@ -47,7 +46,7 @@ function VoiceLab({
         </span>
       </div>
 
-      <div className="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
+      <div className="mt-3 min-h-0 flex-1 space-y-3.5 overflow-y-auto pr-1">
         <BigSlider
           label="Pitch"
           value={shownPitch}
@@ -106,31 +105,12 @@ function VoiceLab({
           onReset={() => onChange({ formant: 0 })}
         />
 
-        <div>
-          <div className="flex items-center justify-between gap-3">
-            <label htmlFor="voice-f0-method" className="min-w-0 truncate text-xs font-medium text-fg-muted">
-              Pitch tracker{hasModel ? '' : ' · needs a voice'}
-            </label>
-            <span className={`shrink-0 text-[11px] font-medium ${tooSlow || !selectedMethod.available ? 'text-warn-fg' : 'text-ok-fg'}`}>
-              {trackerState}
-            </span>
-          </div>
-          <select id="voice-f0-method" value={selectedMethod.id} onChange={(event) => onChange({ f0Method: event.target.value })}
-            className="native-select-safe field mt-2">
-            {liveGroups.map((group) => (
-              <optgroup key={group.section} label={group.section}>
-                {group.methods.map((method) => (
-                  <option key={method.id} value={method.id} disabled={!method.available}>
-                    {method.label}{method.available ? '' : ' (unavailable)'}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          {tooSlow ? (
-            <p className="mt-1.5 text-[11px] leading-4 text-warn-fg">Too slow here: the voice will stutter. Use RMVPE.</p>
-          ) : null}
-        </div>
+        {tooSlow || !selectedMethod.available || f0Pending === selectedMethod.id ? (
+          <p className="text-[11px] leading-4 text-warn-fg" role="status">
+            Pitch tracker {selectedMethod.label}: {trackerState}.
+            {tooSlow ? ' The voice will stutter: choose RMVPE in Voice › Settings.' : ''}
+          </p>
+        ) : null}
       </div>
     </section>
   );

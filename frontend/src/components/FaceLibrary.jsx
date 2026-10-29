@@ -150,14 +150,14 @@ function FaceTile({ item, wearing, onWear, onDelete, busy }) {
   );
 }
 
-/** Video › Faces: the faces to wear, adding a new one, and the one-time model download. */
+/** Face › Faces: the faces to wear, adding a new one, and the one-time model download. */
 function FaceLibrary({ face }) {
   const faces = face.status?.faces || [];
   const active = face.status?.active_face || null;
   return (
     <div className="page-grid">
       <section className="panel flex min-h-0 flex-col p-5 lg:col-span-2" aria-labelledby="faces-title">
-        <p className="panel-kicker text-video-fg">Video</p>
+        <p className="panel-kicker text-video-fg">Face</p>
         <h2 id="faces-title" className="panel-title">Faces</h2>
         <p className="mt-1 text-xs text-fg-subtle">The face you wear in Live. Your expressions, gaze and head stay yours.</p>
         <ul className="mt-4 grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 xl:grid-cols-5">
@@ -171,7 +171,7 @@ function FaceLibrary({ face }) {
       </section>
 
       <section className="panel flex min-h-0 flex-col p-5" aria-labelledby="faces-add-title">
-        <p className="panel-kicker text-video-fg">Video</p>
+        <p className="panel-kicker text-video-fg">Face</p>
         <h2 id="faces-add-title" className="panel-title">{face.ready ? 'Add a face' : 'Set up the face clone'}</h2>
         <div className="mt-4 flex min-h-0 flex-1 flex-col">
           {face.ready ? <AddFace face={face} /> : <ModelDownload face={face} />}

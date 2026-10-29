@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 def app_version() -> str:
     try:
-        return version("voxclone")
+        return version("deepmirror")
     except PackageNotFoundError:
         return (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
