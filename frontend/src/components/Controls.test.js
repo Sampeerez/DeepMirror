@@ -69,3 +69,17 @@ describe('Picker', () => {
     expect(screen.getByRole('button', { name: 'Microphone: Blue Yeti' })).toBeTruthy();
   });
 });
+
+describe('Picker with long names', () => {
+  it('shows every name whole in the list, so similar devices can be told apart', () => {
+    const long = 'Micrófono (Realtek(R) Audio) — Front panel headset input, 48 kHz';
+    render(h(Picker, {
+      label: 'Microphone', value: '', onChange: () => {},
+      options: [{ value: '', label: 'Default microphone' }, { value: 'a', label: long }],
+    }));
+    fireEvent.click(screen.getByRole('button', { name: /Microphone/ }));
+    const option = screen.getByRole('option', { name: long });
+    expect(option.textContent).toContain(long);
+    expect(option.querySelector('.truncate')).toBeNull();
+  });
+});

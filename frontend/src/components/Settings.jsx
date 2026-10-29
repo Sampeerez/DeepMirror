@@ -1,14 +1,15 @@
 import React, { Suspense, lazy, memo, useMemo, useState } from 'react';
 import {
-  Activity, AudioLines, Camera, ChevronRight, Mic, Moon, ScanFace, ScrollText, Settings2, Sun,
+  Activity, AudioLines, AudioWaveform, Camera, ChevronRight, FlaskConical, Hand, Mic, Moon, Palette, PhoneCall,
+  ScanFace, ScrollText, Settings2, Smile, Sparkles, Sun, Timer,
 } from 'lucide-react';
 import Button from './Button';
 import Dialog from './Dialog';
+import Picker from './Picker';
 import RuntimeReadiness from './RuntimeReadiness';
 import Segmented from './Segmented';
 import SettingRow, { SettingsSection } from './SettingRow';
 import StreamDiagnostics from './StreamDiagnostics';
-import Toggle from './Toggle';
 import { MiniSlider } from './Sliders';
 import { APP_NAME } from '../lib/brand';
 import { groupedMethods, findF0Method } from '../lib/f0Methods';
@@ -25,13 +26,17 @@ const THEMES = [
 ];
 const SWAPPER_NAMES = { hyperswap_1b_256: 'HyperSwap', inswapper_128: 'inswapper', ghost_1_256: 'GHOST' };
 // What each face model is best at, as its button label.
-const SWAPPER_CHOICES = { hyperswap_1b_256: 'Sharp', inswapper_128: 'Likeness', ghost_1_256: 'Fast' };
+const SWAPPER_CHOICES = { hyperswap_1b_256: 'Sharp', inswapper_128: 'Exact', ghost_1_256: 'Fast' };
 // The buffer as one slider, from the shortest delay to the steadiest.
 const BUFFERS = PERFORMANCE_PROFILES.filter((p) => p.id !== 'light').sort((a, b) => a.chunkSize - b.chunkSize);
 const AUTO_ON_OFF = [
   { value: 'auto', label: 'Auto' },
   { value: 'on', label: 'On' },
   { value: 'off', label: 'Off' },
+];
+const OFF_ON = [
+  { value: false, label: 'Off' },
+  { value: true, label: 'On' },
 ];
 const STATE_TEXT = { downloading: 'Downloading…', installing: 'Installing…' };
 
@@ -53,11 +58,11 @@ function Column({ id, title, Icon, accent, children }) {
   );
 }
 
-/** A section folded by default: what most people never need to touch. */
+/** Folded by default: what most people never need to touch. */
 function More({ title, children }) {
   return (
-    <details className="group rounded-lg border border-line bg-raised">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-fg-subtle [&::-webkit-details-marker]:hidden">
+    <details className="group shrink-0 rounded-lg border border-line bg-raised">
+      <summary className="flex h-10 cursor-pointer list-none items-center gap-2 px-3 text-xs font-medium text-fg-muted [&::-webkit-details-marker]:hidden">
         <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" aria-hidden="true" />
         {title}
       </summary>
@@ -68,31 +73,38 @@ function More({ title, children }) {
 
 function Stat({ label, value }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 px-4 py-2 text-xs">
+    <div className="flex items-baseline justify-between gap-3 px-3 py-2 text-xs">
       <dt className="text-fg-subtle">{label}</dt>
       <dd className="font-mono tabular-nums text-fg-secondary">{value}</dd>
     </div>
   );
 }
 
+function Slider({ label, ...props }) {
+  return <input type="range" aria-label={label} className="fx-slider w-full disabled:opacity-40" {...props} />;
+}
+
+/** One thing calls need (the virtual microphone or camera) and whether it is there. */
 function CallDevice({ Icon, label, item }) {
   const state = STATE_TEXT[item?.state];
   const ok = item?.installed;
+  const text = state || (item == null ? '…' : ok ? 'Ready' : item.supported ? 'Missing' : 'Not available');
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
-      <Icon className="h-4 w-4 shrink-0 text-fg-subtle" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate text-sm text-fg-secondary">{label}</span>
-      <span className={`shrink-0 text-xs font-medium ${state ? 'text-fg-subtle' : ok ? 'text-ok-fg' : 'text-warn-fg'}`}>
-        {state || (item == null ? '…' : ok ? 'Ready' : item.supported ? 'Not installed' : 'Not available')}
+    <div className={`flex h-9 min-w-0 items-center gap-2 rounded-md border px-2.5 ${
+      ok ? 'border-line bg-sunken' : 'border-warn-line bg-warn-bg'}`}>
+      <Icon className={`h-4 w-4 shrink-0 ${ok ? 'text-fg-subtle' : 'text-warn-fg'}`} aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-xs text-fg-secondary">{label}</span>
+      <span className={`shrink-0 text-[11px] font-medium ${state ? 'text-fg-subtle' : ok ? 'text-ok-fg' : 'text-warn-fg'}`}>
+        {text}
       </span>
     </div>
   );
 }
 
 /**
- * Settings: one page, three columns. The voice, the face, and the rest
- * (appearance, calls, engine, log). What only matters when something goes
- * wrong is folded away.
+ * Settings: one page, three columns (the voice, the face, the rest). Every
+ * row has the same shape, so every control lines up; what only matters when
+ * something goes wrong is folded away.
  */
 function Settings({
   config, onConfigChange, voice, onVoiceChange, running, latencyHistory = [], latency = 0, serverMs = 0,
@@ -106,7 +118,9 @@ function Settings({
     latencyHistory, sampleRate, serverMs, serverStats, isRunning: running,
   }), [latencyHistory, sampleRate, serverMs, serverStats, running]);
   const tracker = findF0Method(f0Methods, voice.f0Method);
-  const liveGroups = groupedMethods(f0Methods, 'realtime');
+  const trackers = groupedMethods(f0Methods, 'realtime').flatMap((group) => group.methods.map((method) => ({
+    value: method.id, label: method.label, disabled: !method.available, note: group.section,
+  })));
 
   const faceSettings = face.status?.settings || {};
   const swapMs = face.status?.swap_ms || {};
@@ -125,69 +139,51 @@ function Settings({
   return (
     <div className="page-grid">
       <Column id="voice" title="Voice" Icon={AudioLines} accent="text-ok-fg">
-        <SettingsSection title="Delay">
-          <SettingRow label="Buffer" stacked
+        <SettingsSection>
+          <SettingRow label="Buffer" icon={Timer}
             value={`${profile.label} · ${Math.round(bufferDurationMs(config.chunkSize, sampleRate))} ms`}>
-            <input type="range" aria-label="Buffer" min={0} max={BUFFERS.length - 1} step={1}
+            <Slider label="Buffer" min={0} max={BUFFERS.length - 1} step={1}
               value={Math.max(0, BUFFERS.findIndex((p) => p.id === profile.id))}
               aria-valuetext={`${profile.label}, about ${latencyMs(profile, sampleRate)} milliseconds end to end`}
-              onChange={(event) => onConfigChange({ chunkSize: BUFFERS[Number(event.target.value)].chunkSize })}
-              className="fx-slider w-full" />
-            <div className="mt-1 flex justify-between text-[10px] font-medium text-fg-faint">
-              <span>Faster</span><span>Steadier</span>
-            </div>
+              onChange={(event) => onConfigChange({ chunkSize: BUFFERS[Number(event.target.value)].chunkSize })} />
           </SettingRow>
           {recommendation.ready && recommendation.profile.chunkSize !== config.chunkSize ? (
-            <SettingRow label={`${recommendation.profile.label} fits better here`}>
-              <Button icon={Activity} onClick={() => onConfigChange({ chunkSize: recommendation.profile.chunkSize })}>
-                Use it
+            <SettingRow label="Measured on this computer" icon={Activity}>
+              <Button size="md" className="w-full"
+                onClick={() => onConfigChange({ chunkSize: recommendation.profile.chunkSize })}>
+                Use {recommendation.profile.label}
               </Button>
             </SettingRow>
           ) : null}
-          <SettingRow label="Sample rate">
+          <SettingRow label="Sample rate" icon={AudioWaveform}>
             <Segmented label="Sample rate" hideLabel accent="voice" size="sm" value={config.sampleRate}
-              onChange={(rate) => onConfigChange({ sampleRate: rate })}
-              options={SAMPLE_RATES.map((rate) => ({ value: rate, label: `${rate / 1000} kHz` }))} className="w-44" />
+              onChange={(rate) => onConfigChange({ sampleRate: rate })} className="w-full"
+              options={SAMPLE_RATES.map((rate) => ({ value: rate, label: `${rate / 1000} kHz` }))} />
           </SettingRow>
-          <SettingRow label="Pitch tracker" htmlFor="voice-f0-method"
-            hint={tracker.available ? null : tracker.reason}>
-            <select id="voice-f0-method" value={tracker.id} onChange={(event) => onVoiceChange({ f0Method: event.target.value })}
-              className="native-select-safe field w-44">
-              {liveGroups.map((group) => (
-                <optgroup key={group.section} label={group.section}>
-                  {group.methods.map((method) => (
-                    <option key={method.id} value={method.id} disabled={!method.available}>
-                      {method.label}{method.available ? '' : ' (unavailable)'}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+          <SettingRow label="Pitch tracker" icon={Activity} hint={tracker.available ? null : tracker.reason}>
+            <Picker label="Pitch tracker" hideLabel value={tracker.id} options={trackers} className="w-full"
+              onChange={(f0Method) => onVoiceChange({ f0Method })} />
           </SettingRow>
-          {running ? <p className="px-4 py-2 text-xs text-fg-subtle">Applies the next time you press Start.</p> : null}
+          <SettingRow label="Sleep when quiet" icon={Moon}
+            value={config.silenceSaver ? `below ${config.silenceThresholdDb} dB` : null}>
+            <div className="flex w-full items-center gap-3">
+              <Segmented label="Sleep when quiet" hideLabel accent="voice" size="sm" value={Boolean(config.silenceSaver)}
+                onChange={(silenceSaver) => onConfigChange({ silenceSaver })} options={OFF_ON} className="w-28 shrink-0" />
+              <Slider label="Quiet below" min="-80" max="-20" step="1" value={config.silenceThresholdDb}
+                disabled={!config.silenceSaver} aria-valuetext={`${config.silenceThresholdDb} decibels`}
+                onChange={(event) => onConfigChange({ silenceThresholdDb: Number(event.target.value) })} />
+            </div>
+          </SettingRow>
         </SettingsSection>
-
-        <SettingsSection title="Silence">
-          <SettingRow label="Sleep when quiet">
-            <Toggle checked={config.silenceSaver} onChange={(silenceSaver) => onConfigChange({ silenceSaver })}
-              label="Sleep when quiet" />
-          </SettingRow>
-          {config.silenceSaver ? (
-            <SettingRow label="Quiet below" stacked value={`${config.silenceThresholdDb} dB`}>
-              <input type="range" aria-label="Quiet below" min="-80" max="-20" step="1" value={config.silenceThresholdDb}
-                aria-valuetext={`${config.silenceThresholdDb} decibels`}
-                onChange={(event) => onConfigChange({ silenceThresholdDb: Number(event.target.value) })}
-                className="fx-slider w-full" />
-            </SettingRow>
-          ) : null}
-        </SettingsSection>
+        {running ? <p className="px-1 text-xs text-fg-subtle">Applies the next time you press Start.</p> : null}
 
         <More title="Advanced">
-          <SettingRow label="Longer buffer when busy">
-            <Toggle checked={config.autoHeadroom} onChange={(autoHeadroom) => onConfigChange({ autoHeadroom })}
-              label="Longer buffer when busy" />
+          <SettingRow label="Longer buffer when busy" icon={Timer}>
+            <Segmented label="Longer buffer when busy" hideLabel accent="voice" size="sm"
+              value={Boolean(config.autoHeadroom)} onChange={(autoHeadroom) => onConfigChange({ autoHeadroom })}
+              options={OFF_ON} className="w-full" />
           </SettingRow>
-          <div className="grid gap-4 px-4 py-3 sm:grid-cols-2">
+          <div className="grid gap-4 px-3 py-3 sm:grid-cols-2">
             <MiniSlider label="Index rate" value={voice.indexRate} min={0} max={1} step={0.05}
               onChange={(value) => onVoiceChange({ indexRate: value })} />
             <MiniSlider label="Protect" value={voice.protect} min={0} max={0.5} step={0.01}
@@ -202,9 +198,10 @@ function Settings({
             <Stat label="Round trip" value={latency > 0 ? ms(latency) : '—'} />
             <Stat label="Model" value={serverStats?.modelMs > 0 ? ms(serverStats.modelMs) : '—'} />
             <Stat label="Network" value={latency > 0 ? ms(Math.max(0, latency - (serverMs || 0))) : '—'} />
-            <Stat label="GPU duty" value={serverStats?.activeModel ? `${Math.round(serverStats.inferenceDutyPercent || 0)}%` : '—'} />
+            <Stat label="GPU duty"
+              value={serverStats?.activeModel ? `${Math.round(serverStats.inferenceDutyPercent || 0)}%` : '—'} />
           </dl>
-          <div className="px-4 py-3">
+          <div className="px-3 py-3">
             <StreamDiagnostics streamInfo={streamInfo} playbackStats={playbackStats} transport={transport}
               serverMs={serverMs} serverStats={serverStats} />
           </div>
@@ -212,28 +209,27 @@ function Settings({
       </Column>
 
       <Column id="face" title="Face" Icon={ScanFace} accent="text-video-fg">
-        <SettingsSection title="Swap">
-          <SettingRow label="Face model" stacked>
+        <SettingsSection>
+          <SettingRow label="Face model" icon={ScanFace}>
             <Segmented label="Face model" hideLabel accent="face" size="sm" value={faceSettings.swapper || 'auto'}
-              onChange={(value) => changeFace({ swapper: value })}
+              onChange={(value) => changeFace({ swapper: value })} className="w-full"
               options={[{ value: 'auto', label: 'Auto' }, ...(face.status?.swappers || []).map((item) => ({
                 value: item.id, label: SWAPPER_CHOICES[item.id] || item.label,
                 hint: `${SWAPPER_NAMES[item.id] || item.label}${swapMs[item.id] ? ` · ${Math.round(swapMs[item.id])} ms` : ''}`,
               }))]} />
           </SettingRow>
-          <SettingRow label="Hands and hair in front">
-            <Toggle checked={faceSettings.occlusion !== false} onChange={(occlusion) => changeFace({ occlusion })}
-              label="Hands and hair in front" />
+          <SettingRow label="Hands and hair in front" icon={Hand}>
+            <Segmented label="Hands and hair in front" hideLabel accent="face" size="sm" className="w-full"
+              value={faceSettings.occlusion !== false} onChange={(occlusion) => changeFace({ occlusion })}
+              options={OFF_ON} />
           </SettingRow>
-        </SettingsSection>
-        <SettingsSection title="Look">
-          <SettingRow label="Your real mouth" stacked>
+          <SettingRow label="Your real mouth" icon={Smile}>
             <Segmented label="Your real mouth" hideLabel accent="face" size="sm" value={faceSettings.mouth || 'auto'}
-              onChange={(value) => changeFace({ mouth: value })} options={AUTO_ON_OFF} />
+              onChange={(value) => changeFace({ mouth: value })} options={AUTO_ON_OFF} className="w-full" />
           </SettingRow>
-          <SettingRow label="Detail enhancer" stacked>
+          <SettingRow label="Detail enhancer" icon={Sparkles}>
             <Segmented label="Detail enhancer" hideLabel accent="face" size="sm" value={faceSettings.enhance || 'auto'}
-              onChange={(value) => changeFace({ enhance: value })} options={AUTO_ON_OFF} />
+              onChange={(value) => changeFace({ enhance: value })} options={AUTO_ON_OFF} className="w-full" />
           </SettingRow>
         </SettingsSection>
         <More title="Performance">
@@ -253,44 +249,42 @@ function Settings({
       </Column>
 
       <Column id="general" title="General" Icon={Settings2} accent="text-brand-fg">
-        <SettingsSection title="Appearance">
-          <SettingRow label="Theme">
-            <Segmented label="Theme" hideLabel options={THEMES} value={theme} onChange={onThemeChange} className="w-44" />
+        <SettingsSection>
+          <SettingRow label="Theme" icon={Palette}>
+            <Segmented label="Theme" hideLabel size="sm" options={THEMES} value={theme} onChange={onThemeChange}
+              className="w-full" />
           </SettingRow>
-        </SettingsSection>
-
-        <section id="calls" className="rounded-lg border border-line bg-raised" aria-labelledby="calls-title">
-          <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-            <h3 id="calls-title" className="text-xs font-semibold uppercase tracking-[0.12em] text-fg-subtle">Calls</h3>
-            {missing ? (
-              <Button variant="primary" onClick={calls.setUp} loading={calls.busy}>Set up</Button>
-            ) : helpUrl && !calls.calls?.camera?.installed ? (
-              <Button href={helpUrl} target="_blank" rel="noreferrer">Get OBS</Button>
-            ) : null}
-          </header>
-          <div className="divide-y divide-line">
-            <CallDevice Icon={Mic} label="Virtual microphone" item={calls.calls?.microphone} />
-            <CallDevice Icon={Camera} label="Virtual camera" item={calls.calls?.camera} />
-          </div>
-          {callMessage ? (
-            <p role="status" className={`border-t border-line px-4 py-2 text-xs ${callError ? 'text-danger-fg' : 'text-fg-subtle'}`}>
-              {callMessage}
-            </p>
-          ) : null}
-        </section>
-
-        <SettingsSection title="Tests">
-          <SettingRow label="Save my microphone with each take">
-            <Toggle checked={captureSamples} onChange={onCaptureSamplesChange} label="Save my microphone with each take" />
+          <SettingRow label="Calls" icon={PhoneCall}>
+            <div id="calls" className="w-full space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <CallDevice Icon={Mic} label="Mic" item={calls.calls?.microphone} />
+                <CallDevice Icon={Camera} label="Camera" item={calls.calls?.camera} />
+              </div>
+              {missing ? (
+                <Button variant="primary" size="md" onClick={calls.setUp} loading={calls.busy} className="w-full">
+                  Set up
+                </Button>
+              ) : helpUrl && !calls.calls?.camera?.installed ? (
+                <Button href={helpUrl} target="_blank" rel="noreferrer" size="md" className="w-full">Get OBS</Button>
+              ) : null}
+              {callMessage ? (
+                <p role="status" className={`text-xs ${callError ? 'text-danger-fg' : 'text-fg-subtle'}`}>{callMessage}</p>
+              ) : null}
+            </div>
           </SettingRow>
-          <SettingRow label="Log">
-            <Button icon={ScrollText} onClick={() => setLogsOpen(true)}>Open</Button>
+          <SettingRow label="Save my microphone with each take" icon={FlaskConical}>
+            <Segmented label="Save my microphone with each take" hideLabel size="sm" value={Boolean(captureSamples)}
+              onChange={onCaptureSamplesChange} options={OFF_ON} className="w-full" />
+          </SettingRow>
+          <SettingRow label="Log" icon={ScrollText}>
+            <Button size="md" onClick={() => setLogsOpen(true)} className="w-full">Open the log</Button>
           </SettingRow>
         </SettingsSection>
 
         <More title="Engine">
-          <div className="px-4 py-3">
-            <RuntimeReadiness config={config} checking={runtime.checking} error={runtime.error} onRefresh={runtime.refresh} />
+          <div className="px-3 py-3">
+            <RuntimeReadiness config={config} checking={runtime.checking} error={runtime.error}
+              onRefresh={runtime.refresh} />
           </div>
         </More>
         <p className="mt-auto px-1 text-xs text-fg-faint">{APP_NAME}{config.version ? ` ${config.version}` : ''}</p>

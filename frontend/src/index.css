@@ -94,13 +94,13 @@
     color-scheme: dark;
 
     /* Surfaces */
-    --surface-base: #070a12;
-    --surface-panel: #0c111c;
+    --surface-base: #0a0a0c;
+    --surface-panel: #101013;
     --surface-raised: rgba(0, 0, 0, 0.2);
     --surface-sunken: rgba(0, 0, 0, 0.3);
     --surface-input: rgba(0, 0, 0, 0.25);
-    --surface-overlay: rgba(12, 17, 28, 0.97);
-    --surface-header: #090d17;
+    --surface-overlay: rgba(16, 16, 19, 0.96);
+    --surface-header: #0a0a0c;
     --scrim: rgba(0, 0, 0, 0.72);
     --overlay-shadow: rgba(0, 0, 0, 0.55);
 
@@ -115,12 +115,13 @@
     --text-subtle: #a1a1aa;
     --text-faint: #9696a0;
 
-    /* Primary action: the brand's blue */
-    --primary-bg: #2563eb;
-    --primary-bg-hover: #3b82f6;
-    --primary-fg: #ffffff;
-    --brand-fg: #93c5fd;
-    --brand-bg: rgba(59, 130, 246, 0.14);
+    /* Primary action, highest-contrast surface in the theme */
+    --primary-bg: #f4f4f5;
+    --primary-bg-hover: #ffffff;
+    --primary-fg: #18181b;
+    /* The brand's blue: a detail (the page in use, a drop target), never a surface */
+    --brand-fg: #60a5fa;
+    --brand-bg: rgba(255, 255, 255, 0.06);
     --brand-line: rgba(96, 165, 250, 0.45);
 
     /* Borders */
@@ -225,11 +226,11 @@
     --text-subtle: #52525b;
     --text-faint: #63636c;
 
-    --primary-bg: #1d4ed8;
-    --primary-bg-hover: #1e40af;
-    --primary-fg: #ffffff;
+    --primary-bg: #18181b;
+    --primary-bg-hover: #000000;
+    --primary-fg: #fafafa;
     --brand-fg: #1d4ed8;
-    --brand-bg: #eff6ff;
+    --brand-bg: rgba(9, 9, 11, 0.06);
     --brand-line: #93c5fd;
 
     --border-subtle: #e4e4e7;

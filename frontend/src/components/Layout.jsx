@@ -31,7 +31,7 @@ function NavItem({ id, selected, onSelect }) {
       className={`group relative flex h-10 shrink-0 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] ${
         selected ? 'bg-brand-bg text-fg' : 'text-fg-muted hover:bg-control-hover hover:text-fg'}`}
     >
-      <span aria-hidden="true" className={`absolute inset-y-2 left-0 w-[3px] rounded-full ${selected ? 'bg-primary' : 'bg-transparent'}`} />
+      <span aria-hidden="true" className={`absolute inset-y-2 left-0 w-[3px] rounded-full ${selected ? 'bg-brand-fg' : 'bg-transparent'}`} />
       <Icon className={`h-[18px] w-[18px] shrink-0 ${selected ? 'text-brand-fg' : ''}`} aria-hidden="true" />
       <span className="max-lg:sr-only">{label}</span>
     </button>

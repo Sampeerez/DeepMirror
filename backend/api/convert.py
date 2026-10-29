@@ -25,6 +25,7 @@ from backend.config import Settings
 from backend.inference.auto_pitch import compute_f0_stats, semitones_between
 from backend.inference.pipeline import ConversionSettings, VoiceConverter
 from backend.model_manager import ModelManager, ModelNotFoundError
+from backend.video.library import FaceNotFoundError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/convert", tags=["convert"])
@@ -168,13 +169,13 @@ async def convert_video(
     effects: str = Form("{}"),
     use_model: str | None = Form(None),
     model: str | None = Form(None),
-    # "on": wear the active face in every frame; "off": keep the picture as it is.
+    # A face id from the library to wear on every frame, "on" for the active face, "off" to keep the picture.
     face: str = Form("on"),
     index_rate: float | None = Form(None),
     protect: float | None = Form(None),
     pitch_expressiveness: float | None = Form(None),
 ) -> dict:
-    """Start converting a video: the active face on every frame, the chosen voice on its sound."""
+    """Start converting a video: a face on every frame and/or the chosen voice on its sound."""
     settings: Settings = request.app.state.settings
     manager: ModelManager = request.app.state.model_manager
     faces = request.app.state.faces
@@ -193,9 +194,18 @@ async def convert_video(
     if not isinstance(effects_payload, dict):
         effects_payload = {}
 
-    wear_face = face.strip().lower() == "on"
-    if wear_face and (not faces.models_ready or faces.library.active() is None):
-        raise HTTPException(status_code=409, detail="Choose a face in Face › Faces first, or keep your own face.")
+    choice = face.strip()
+    face_id = None if choice.lower() == "off" else faces.library.active() if choice.lower() == "on" else choice
+    identity = None
+    if face_id is not None or choice.lower() == "on":
+        if not faces.models_ready:
+            raise HTTPException(status_code=409, detail="Download the face models in Faces first.")
+        try:
+            identity = faces.library.identity(face_id) if face_id else None
+        except (FaceNotFoundError, OSError):
+            identity = None
+        if identity is None:
+            raise HTTPException(status_code=409, detail="That face is not in Faces.")
     apply_model = use_model is None or use_model.strip().lower() not in {"false", "0", "off", "no"}
     converter = None
     if apply_model:
@@ -216,9 +226,15 @@ async def convert_video(
             raise ValueError(f"Audio too long (max {settings.MAX_CONVERT_SECONDS // 60} minutes)")
         return render(audio, rate, converter, conversion, formant, effects_payload, auto_pitch)
 
-    swap = (lambda source, target, report: faces.worker().convert_video(source, target, report)) if wear_face else None
+    swap = None if identity is None else (
+        lambda source, target, report: faces.worker().convert_video(source, target, report, identity))
+    change_voice = converter is not None or any(
+        isinstance(value, dict) and value.get("enabled") for value in effects_payload.values()) or formant != 0 or (
+        pitch_shift != 0 and not auto_pitch)
+    if swap is None and not change_voice:
+        raise HTTPException(status_code=400, detail="Choose a face or a voice: nothing would change.")
     job = request.app.state.video_jobs.start(Path(file.filename or "video").stem, data, suffix, swap,
-                                             voice if (converter is not None or effects_payload or formant) else None)
+                                             voice if change_voice else None)
     return job.describe()
 
 

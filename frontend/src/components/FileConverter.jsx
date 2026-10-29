@@ -1,5 +1,7 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
-import { AudioLines, Boxes, Download, FileAudio, FileVideo, LoaderCircle, UploadCloud, X } from 'lucide-react';
+import {
+  AudioLines, Ban, Boxes, Download, FileAudio, FileVideo, LoaderCircle, ScanFace, UploadCloud, X,
+} from 'lucide-react';
 import {
   convertFile, faceThumbnailUrl, fetchModels, fetchVideoConversion, isAbortError, startVideoConversion,
   videoConversionUrl,
@@ -8,7 +10,6 @@ import { FALLBACK_F0_METHODS, findF0Method } from '../lib/f0Methods';
 import { formatBytes } from '../lib/format';
 import Button from './Button';
 import Picker from './Picker';
-import Toggle from './Toggle';
 
 const ACCEPT = '.wav,.mp3,.flac,.ogg,.m4a,.aiff,.mp4,.mov,.mkv,.webm,.avi,.m4v';
 const VIDEO_FILE = /\.(mp4|mov|mkv|webm|avi|m4v)$/i;
@@ -24,13 +25,18 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
 });
 
 const EFFECTS_ONLY = '';
+// A video's sound left as it is (no voice, no effects).
+const KEEP_VOICE = '__keep__';
+const KEEP_FACE = '';
 
 // Library › Convert: drop an audio file (back as a WAV in another voice) or a
-// video (back as an MP4, with the face worn on every frame too). Any voice in
-// Voices can convert it; the rest of Live's settings come along.
+// video (back as an MP4): for a video, choose the face to wear on every frame
+// and the voice for its sound, either one or both. Any face in Faces and any
+// voice in Voices; the rest of Live's settings come along.
 function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_METHODS, active = true, face = null }) {
   const [file, setFile] = useState(null);
-  const [wearFace, setWearFace] = useState(true);
+  // null: the face worn in Live; KEEP_FACE or a face id once the user picks.
+  const [chosenFace, setChosenFace] = useState(null);
   const [progress, setProgress] = useState(null);   // {stage, fraction} while a video converts
   const [voices, setVoices] = useState([]);
   // null: follow the active voice; EFFECTS_ONLY or a model name once the user picks.
@@ -62,9 +68,18 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
     return () => { cancelled = true; };
   }, [active]);
 
-  const processWith = chosenVoice !== null && (chosenVoice === EFFECTS_ONLY || voices.includes(chosenVoice))
+  const video = isVideoFile(file);
+  const processWith = chosenVoice !== null
+    && (chosenVoice === EFFECTS_ONLY || voices.includes(chosenVoice) || (video && chosenVoice === KEEP_VOICE))
     ? chosenVoice
     : (activeModel || EFFECTS_ONLY);
+  const faces = face?.ready ? (face.status?.faces || []) : [];
+  const faceId = chosenFace !== null && (chosenFace === KEEP_FACE || faces.some((item) => item.id === chosenFace))
+    ? chosenFace
+    : (face?.activeFace?.id || KEEP_FACE);
+  const keepVoice = processWith === KEEP_VOICE;
+  const changes = video ? [faceId ? 'Face' : null, keepVoice ? null : 'voice'].filter(Boolean) : ['voice'];
+  const changeLabel = changes.length === 2 ? 'Face + voice' : changes[0] === 'voice' ? 'Voice' : changes[0];
   const selectedF0 = findF0Method(f0Methods, voice.f0Method);
 
   // Unmount: abandon a running request and free the last blob URL; neither
@@ -89,15 +104,15 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
     });
   };
 
-  const video = isVideoFile(file);
-  const faceReady = Boolean(face?.ready && face?.activeFace);
-  const useFace = video && wearFace && faceReady;
 
   const convertVideo = async (signal) => {
     let job = await startVideoConversion(file, {
-      face: useFace, useModel: processWith !== EFFECTS_ONLY, model: processWith || null,
-      pitchShift: voice.pitch, autoPitch: voice.autoPitch, formantShift: voice.formant, f0Method: selectedF0.id,
-      effects, indexRate: voice.indexRate, protect: voice.protect, expressiveness: voice.expressiveness,
+      face: faceId || false,
+      ...(keepVoice ? { useModel: false, effects: {}, pitchShift: 0, autoPitch: false, formantShift: 0 } : {
+        useModel: processWith !== EFFECTS_ONLY, model: processWith || null, pitchShift: voice.pitch,
+        autoPitch: voice.autoPitch, formantShift: voice.formant, effects,
+      }),
+      f0Method: selectedF0.id, indexRate: voice.indexRate, protect: voice.protect, expressiveness: voice.expressiveness,
     });
     while (job.state !== 'done' && job.state !== 'error') {
       setProgress({ stage: VIDEO_STAGES[job.state] || 'Converting', fraction: job.progress });
@@ -206,30 +221,54 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
           )}
         </div>
 
-        <Picker label="Voice" icon={Boxes} accent="voice" value={processWith} disabled={converting}
-          onChange={setChosenVoice}
-          options={[{ value: EFFECTS_ONLY, label: 'No voice (effects only)' },
-            ...voices.map((name) => ({ value: name, label: name.replace(/\.(pth|pt)$/i, ''),
-              note: name === activeModel ? 'live' : null }))]} />
-
         {video ? (
-          <div className="flex h-12 shrink-0 items-center gap-3 rounded-lg border border-line bg-raised px-3">
-            {faceReady ? (
-              <img src={faceThumbnailUrl(face.activeFace.id)} alt="" className="h-8 w-8 shrink-0 rounded-md object-cover" />
-            ) : null}
-            <span className="min-w-0 flex-1 truncate text-sm text-fg-secondary">
-              {faceReady ? `Wear ${face.activeFace.name}` : 'No face chosen in Faces'}
-            </span>
-            <Toggle checked={useFace} disabled={converting || !faceReady} onChange={setWearFace} label="Wear the face" />
+          <div className="shrink-0 rounded-lg border border-line bg-raised p-3">
+            <p id="convert-face-label" className="flex items-center gap-2 text-xs font-medium text-fg-muted">
+              <ScanFace className="h-4 w-4 text-video-fg" aria-hidden="true" />
+              Face
+              <span className="ml-auto truncate font-normal text-fg-subtle">
+                {faceId ? faces.find((item) => item.id === faceId)?.name : 'Keep the original'}
+              </span>
+            </p>
+            {face?.ready ? (
+              <div role="radiogroup" aria-labelledby="convert-face-label" className="mt-2 flex flex-wrap gap-1.5">
+                {[{ id: KEEP_FACE, name: 'Keep the original' }, ...faces].map((item) => {
+                  const selected = faceId === item.id;
+                  return (
+                    <button key={item.id || 'keep'} type="button" role="radio" aria-checked={selected}
+                      aria-label={item.name} title={item.name} disabled={converting}
+                      onClick={() => setChosenFace(item.id)}
+                      className={`h-11 w-11 overflow-hidden rounded-md border-2 transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)] ${
+                        selected ? 'border-video-solid' : 'border-transparent hover:border-line-hover'}`}>
+                      {item.id ? <img src={faceThumbnailUrl(item.id)} alt="" className="h-full w-full object-cover" /> : (
+                        <span className="flex h-full w-full items-center justify-center bg-sunken text-fg-subtle">
+                          <Ban className="h-4 w-4" aria-hidden="true" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-fg-subtle">Download the face models in Faces to swap faces.</p>
+            )}
           </div>
         ) : null}
+
+        <Picker label="Voice" icon={Boxes} accent="voice" value={processWith} disabled={converting}
+          onChange={setChosenVoice}
+          options={[...(video ? [{ value: KEEP_VOICE, label: 'Keep the original sound' }] : []),
+            { value: EFFECTS_ONLY, label: 'No voice (effects only)' },
+            ...voices.map((name) => ({ value: name, label: name.replace(/\.(pth|pt)$/i, ''),
+              note: name === activeModel ? 'live' : null }))]} />
 
         <div className="flex shrink-0 items-center gap-3">
           {converting ? (
             <Button variant="danger" size="lg" icon={X} onClick={handleCancel} className="w-36">Cancel</Button>
           ) : (
-            <Button variant="primary" size="lg" icon={AudioLines} onClick={handleConvert} disabled={!file} className="w-36">
-              Convert
+            <Button variant="primary" size="lg" icon={video ? ScanFace : AudioLines} onClick={handleConvert}
+              disabled={!file || !changes.length} className="w-52">
+              {file && changes.length ? `Convert · ${changeLabel}` : 'Convert'}
             </Button>
           )}
           <p className="flex min-w-0 items-center gap-2 text-xs text-fg-subtle" role="status">

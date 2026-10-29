@@ -54,7 +54,7 @@ export default function Segmented({ label, options, value, onChange, disabled = 
               title={option.hint}
               onClick={() => onChange(option.value)}
               className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 ${
-                size === 'sm' ? 'h-7' : 'h-8'
+                size === 'sm' ? 'h-[26px]' : 'h-8'
               } ${selected
                 ? `frost-control ${accentText}`
                 : 'border-transparent text-fg-muted hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--frost-focus)]'}`}

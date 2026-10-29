@@ -110,7 +110,7 @@ function LiveStage({
   return (
     <section className="panel flex min-h-0 flex-col gap-3 p-4" aria-labelledby="live-face-title">
       {faceBar}
-      <div className="relative flex min-h-48 flex-1 items-center justify-center overflow-hidden rounded-md bg-sunken">
+      <div className="relative flex min-h-48 flex-1 items-center justify-center overflow-hidden rounded-md bg-black">
         {videoPreview || (
           <div className="flex flex-col items-center gap-2 text-fg-faint">
             <VideoOff className="h-8 w-8" strokeWidth={1.5} aria-hidden="true" />

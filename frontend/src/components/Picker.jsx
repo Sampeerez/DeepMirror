@@ -9,7 +9,7 @@ import { Check, ChevronDown } from 'lucide-react';
  * Enter chooses, Escape or a click outside closes and returns focus.
  */
 export default function Picker({ label, icon: Icon, value, options, onChange, disabled = false, accent = null,
-  placeholder = 'Choose…', className = '', render = null }) {
+  placeholder = 'Choose…', className = '', render = null, hideLabel = false }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const rootRef = useRef(null);
@@ -25,8 +25,12 @@ export default function Picker({ label, icon: Icon, value, options, onChange, di
     return () => document.removeEventListener('pointerdown', close);
   }, [open]);
 
+  // A list wider than the button (long device names are shown whole) opens towards the side with room.
+  const [alignRight, setAlignRight] = useState(false);
   const openList = () => {
     setActive(Math.max(0, options.findIndex((option) => option.value === value)));
+    const box = rootRef.current?.getBoundingClientRect();
+    setAlignRight(Boolean(box && box.left > window.innerWidth / 2));
     setOpen(true);
   };
   const choose = (option) => {
@@ -63,7 +67,9 @@ export default function Picker({ label, icon: Icon, value, options, onChange, di
       >
         {Icon ? <Icon className={`h-4 w-4 shrink-0 ${accentText}`} aria-hidden="true" /> : null}
         <span className="min-w-0 flex-1">
-          <span className="block text-[10px] font-semibold uppercase leading-3 tracking-[0.12em] text-fg-faint">{label}</span>
+          {hideLabel ? null : (
+            <span className="block text-[10px] font-semibold uppercase leading-3 tracking-[0.12em] text-fg-faint">{label}</span>
+          )}
           <span className="block truncate font-medium text-fg-secondary">{current?.label || placeholder}</span>
         </span>
         <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-fg-faint transition-transform ${open ? 'rotate-180' : ''}`}
@@ -72,7 +78,8 @@ export default function Picker({ label, icon: Icon, value, options, onChange, di
       {open ? (
         <ul id={listId} role="listbox" aria-label={label}
           aria-activedescendant={`${listId}-${active}`}
-          className="absolute left-0 right-0 top-[calc(100%+4px)] z-30 max-h-72 overflow-y-auto rounded-lg border border-line-strong bg-overlay p-1 shadow-[0_12px_32px_var(--overlay-shadow)]">
+          className={`absolute top-[calc(100%+4px)] z-30 max-h-80 w-max min-w-full max-w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-line-strong bg-overlay p-1 shadow-[0_12px_32px_var(--overlay-shadow)] ${
+            alignRight ? 'right-0' : 'left-0'}`}>
           {options.map((option, index) => {
             const selected = option.value === value;
             return (
@@ -88,7 +95,7 @@ export default function Picker({ label, icon: Icon, value, options, onChange, di
                   index === active ? 'bg-control-hover text-fg' : 'text-fg-secondary'
                 } ${option.disabled ? 'cursor-not-allowed opacity-45' : ''}`}
               >
-                {render ? render(option) : <span className="min-w-0 flex-1 truncate">{option.label}</span>}
+                {render ? render(option) : <span className="min-w-0 flex-1 break-words">{option.label}</span>}
                 {option.note ? <span className="shrink-0 text-[10px] text-fg-faint">{option.note}</span> : null}
                 <Check className={`h-3.5 w-3.5 shrink-0 ${selected ? accentText : 'invisible'}`} aria-hidden="true" />
               </li>

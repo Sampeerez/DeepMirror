@@ -320,7 +320,7 @@ export function startVideoConversion(file, { face = true, model = null, useModel
   autoPitch = false, formantShift = 0, f0Method, effects = {}, indexRate, protect, expressiveness } = {}) {
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('face', face ? 'on' : 'off');
+  formData.append('face', typeof face === 'string' ? face : face ? 'on' : 'off');   // a face id, the live one, or none
   formData.append('use_model', String(useModel));
   if (model) formData.append('model', model);
   formData.append('pitch_shift', String(pitchShift));

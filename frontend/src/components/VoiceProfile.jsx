@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ChevronLeft, ChevronRight, CircleStop, Mic, RotateCcw, Trash2, Upload,
+  ChevronLeft, ChevronRight, CircleStop, Languages, Mic, RotateCcw, Trash2, Upload,
 } from 'lucide-react';
 import {
   deleteVoiceProfile, deleteVoiceReference, fetchVoiceProfile, saveVoiceProfile, saveVoiceReference,
@@ -150,15 +150,13 @@ function VoiceProfile({ active, activeModel, inputDevices = [] }) {
         <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
           <p className="text-xs text-fg-subtle">About 90 s, once: every voice is then tuned to yours.</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Segmented label="Language" accent="voice" value={language} disabled={recorder.recording}
-              onChange={(value) => { setLanguage(value); setLine(0); }}
-              options={PROFILE_LANGUAGES.map(({ id, label }) => ({ value: id, label }))} />
-            <div>
-              <Picker label="Microphone" icon={Mic} accent="voice" value={deviceId} disabled={recorder.recording}
-                onChange={setDeviceId}
-                options={[{ value: '', label: 'System default' },
-                  ...inputDevices.map((device) => ({ value: device.deviceId, label: device.label || 'Microphone' }))]} />
-            </div>
+            <Segmented label="Language" hideLabel size="sm" accent="voice" value={language}
+              disabled={recorder.recording} onChange={(value) => { setLanguage(value); setLine(0); }}
+              options={PROFILE_LANGUAGES.map(({ id, label }) => ({ value: id, label, icon: Languages }))} />
+            <Picker label="Microphone" icon={Mic} accent="voice" value={deviceId} disabled={recorder.recording}
+              onChange={setDeviceId}
+              options={[{ value: '', label: 'System default' },
+                ...inputDevices.map((device) => ({ value: device.deviceId, label: device.label || 'Microphone' }))]} />
           </div>
 
           <div className="rounded-lg border border-line-strong bg-raised px-4 py-4" aria-live="polite">

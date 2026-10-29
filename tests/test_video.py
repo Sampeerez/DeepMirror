@@ -218,6 +218,15 @@ class TestVideoFiles:
         face = client.post("/api/convert/video", files={"file": ("clip.mp4", (tmp_path / "clip.mp4").read_bytes())},
                            data={"face": "on"})
         assert face.status_code == 409
+        chosen = client.post("/api/convert/video", files={"file": ("clip.mp4", (tmp_path / "clip.mp4").read_bytes())},
+                             data={"face": "0123456789ab"})
+        assert chosen.status_code == 409
+
+    def test_a_video_with_nothing_to_change_is_refused(self, client, tmp_path):
+        _small_video(tmp_path / "clip.mp4")
+        nothing = client.post("/api/convert/video", files={"file": ("clip.mp4", (tmp_path / "clip.mp4").read_bytes())},
+                              data={"face": "off", "use_model": "false", "effects": '{"reverb": {"enabled": false}}'})
+        assert nothing.status_code == 400
 
     def test_a_video_keeps_its_length_and_its_sound(self, client, tmp_path):
         import av
@@ -226,7 +235,7 @@ class TestVideoFiles:
 
         _small_video(tmp_path / "clip.mp4", 1.0)
         job = client.post("/api/convert/video", files={"file": ("clip.mp4", (tmp_path / "clip.mp4").read_bytes())},
-                          data={"face": "off", "use_model": "false"}).json()
+                          data={"face": "off", "use_model": "false", "formant_shift": "2"}).json()
         for _ in range(100):
             state = client.get(f"/api/convert/video/{job['id']}").json()
             if state["state"] in ("done", "error"):

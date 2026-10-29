@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/deepmirror-logo.svg" width="96" height="96" alt="DeepMirror logo" />
+  <img src="docs/images/deepmirror-mirror.svg" width="96" height="96" alt="DeepMirror logo" />
 </p>
 
 <h1 align="center">DeepMirror</h1>
@@ -50,7 +50,7 @@ Every page is in the sidebar:
 | **Voices** | The RVC voices you have, to add, activate or export |
 | **Faces** | The faces you can wear, from 1–12 photos |
 | **Train** | A new voice from your recordings, or **My voice**: read 90 s once so every voice fits yours |
-| **Library** | The takes recorded in Live, and converting a whole audio or video file |
+| **Library** | The takes recorded in Live, and converting a whole file: an audio file into another voice, or a video with any face from Faces and/or any voice |
 | **Settings** | One page: the voice, the face, and the rest (theme, calls, engine, log) |
 
 ### Voice
@@ -77,7 +77,7 @@ Every page is in the sidebar:
 - **Virtual camera** for Discord, Meet, Teams or OBS: OBS Virtual Camera, without installing OBS on
   Windows (only its two camera modules, about 450 KB, are fetched from OBS's official release and checked
   by SHA-256); OBS Studio on macOS, v4l2loopback on Linux.
-- **Video files**: the face on every frame and the chosen voice on the sound, as one MP4.
+- **Video files** in Library: choose the face (any in Faces, or keep the original) and the voice (any in Voices, or keep the original sound), as one MP4.
 - **Fits the computer**: the face swapper is chosen by measuring this GPU next to the live voice.
   On a GTX 1660 SUPER: 30 fps and about 14 face swaps a second without the voice; about 26 fps and 5–6
   swaps a second with the voice streaming, with your real mouth kept so every syllable shows.
@@ -179,11 +179,11 @@ make lint test        # ruff, pyright, eslint, pytest, vitest
 
 ## Screenshots
 
-![Live](docs/images/live.png)
-![Settings](docs/images/settings.png)
-![Library](docs/images/library.png)
-![Train](docs/images/train.png)
-![Voices](docs/images/voices.png)
+![Live](docs/screens/live.png)
+![Settings](docs/screens/settings.png)
+![Library](docs/screens/library.png)
+![Train](docs/screens/train.png)
+![Voices](docs/screens/voices.png)
 
 ## Credits
 
