@@ -176,3 +176,58 @@ def test_the_detector_finds_a_drawn_face_and_its_five_points():
     image = cv2.imread(str(sample))
     faces = FaceDetector(FACE_DIR / "scrfd_2.5g.onnx").detect(image)
     assert len(faces) == 1 and faces[0].points.shape == (5, 2)
+
+
+def _small_video(path, seconds=1.0):
+    import av
+
+    with av.open(str(path), "w") as out:
+        video = out.add_stream("libx264", rate=10)
+        video.width, video.height, video.pix_fmt = 64, 48, "yuv420p"
+        audio = out.add_stream("aac", rate=48000)
+        audio.layout = "mono"
+        for k in range(int(seconds * 10)):
+            frame = av.VideoFrame.from_ndarray(np.full((48, 64, 3), k * 20 % 255, np.uint8), format="bgr24")
+            for packet in video.encode(frame):
+                out.mux(packet)
+        for packet in video.encode():
+            out.mux(packet)
+        tone = (0.2 * np.sin(np.arange(int(48000 * seconds)) / 48000 * 2 * np.pi * 220)).astype(np.float32)
+        for start in range(0, len(tone), 1024):
+            frame = av.AudioFrame.from_ndarray(tone[start:start + 1024].reshape(1, -1), format="flt", layout="mono")
+            frame.sample_rate, frame.pts = 48000, start
+            for packet in audio.encode(frame):
+                out.mux(packet)
+        for packet in audio.encode(None):
+            out.mux(packet)
+
+
+class TestVideoFiles:
+    def test_only_videos_are_accepted_and_a_face_needs_the_models(self, client, tmp_path):
+        bad = client.post("/api/convert/video", files={"file": ("a.wav", b"x", "audio/wav")})
+        assert bad.status_code == 400
+        _small_video(tmp_path / "clip.mp4")
+        face = client.post("/api/convert/video", files={"file": ("clip.mp4", (tmp_path / "clip.mp4").read_bytes())},
+                           data={"face": "on"})
+        assert face.status_code == 409
+
+    def test_a_video_keeps_its_length_and_its_sound(self, client, tmp_path):
+        import av
+
+        from backend.video.files import read_audio
+
+        _small_video(tmp_path / "clip.mp4", 1.0)
+        job = client.post("/api/convert/video", files={"file": ("clip.mp4", (tmp_path / "clip.mp4").read_bytes())},
+                          data={"face": "off", "use_model": "false"}).json()
+        for _ in range(100):
+            state = client.get(f"/api/convert/video/{job['id']}").json()
+            if state["state"] in ("done", "error"):
+                break
+            time.sleep(0.1)
+        assert state["state"] == "done", state
+        response = client.get(f"/api/convert/video/{job['id']}/file")
+        (tmp_path / "out.mp4").write_bytes(response.content)
+        with av.open(str(tmp_path / "out.mp4")) as result:
+            assert result.streams.video and result.streams.audio
+        audio = read_audio(tmp_path / "out.mp4")
+        assert audio is not None and abs(len(audio) / 48000 - 1.0) < 0.1

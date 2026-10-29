@@ -26,6 +26,7 @@ from backend.model_manager import ModelManager
 from backend.presets import PresetStore
 from backend.security import cors_origins
 from backend.training.jobs import TrainingJobs
+from backend.video.files import VideoJobs
 from backend.video.service import FaceService
 from backend.virtual_mic import VirtualMic
 
@@ -83,6 +84,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
     app.state.lifecycle = lifecycle or Lifecycle(enabled=False)
     app.state.virtual_mic = VirtualMic(settings.DATA_DIR / "downloads")
     manager_ = app.state.model_manager
+    app.state.video_jobs = VideoJobs(settings.DATA_DIR)
     app.state.faces = FaceService(assets, manager_.arbiter, settings.DATA_DIR,
                                   lambda: manager_.compute.is_accelerator)
 

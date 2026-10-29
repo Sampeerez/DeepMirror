@@ -2052,7 +2052,7 @@ name = "pyvirtualcam"
 version = "0.15.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "sys_platform != 'darwin' or (extra == 'extra-8-voxclone-cpu' and extra == 'extra-8-voxclone-cuda') or (extra != 'extra-8-voxclone-cpu' and extra != 'extra-8-voxclone-cuda')" },
+    { name = "numpy" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/54/0be9d0387b1365e42af2d7bb7d24f269a4cda1e1821525ef47509077493a/pyvirtualcam-0.15.0-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:249f65b70092a6966c1af36b1d5d5489bfb5728e47d88f353408946d0d0462fd", size = 626067, upload-time = "2026-01-24T18:27:24.764Z" },
@@ -2869,7 +2869,7 @@ dependencies = [
     { name = "praat-parselmouth" },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
-    { name = "pyvirtualcam", marker = "sys_platform != 'darwin' or (extra == 'extra-8-voxclone-cpu' and extra == 'extra-8-voxclone-cuda')" },
+    { name = "pyvirtualcam" },
     { name = "pyworld", marker = "(python_full_version < '3.14' and sys_platform == 'win32') or (python_full_version >= '3.14' and extra == 'extra-8-voxclone-cpu' and extra == 'extra-8-voxclone-cuda') or (sys_platform != 'win32' and extra == 'extra-8-voxclone-cpu' and extra == 'extra-8-voxclone-cuda')" },
     { name = "scipy" },
     { name = "soundfile" },
@@ -2929,7 +2929,7 @@ requires-dist = [
     { name = "praat-parselmouth", specifier = ">=0.4.7" },
     { name = "pydantic-settings", specifier = ">=2.16" },
     { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "pyvirtualcam", marker = "sys_platform != 'darwin'", specifier = ">=0.13" },
+    { name = "pyvirtualcam", specifier = ">=0.13" },
     { name = "pyworld", marker = "python_full_version < '3.14' and sys_platform == 'win32'", specifier = ">=0.3.5" },
     { name = "pyworld", marker = "extra == 'classic-f0'", specifier = ">=0.3.5" },
     { name = "scipy", specifier = ">=1.18" },

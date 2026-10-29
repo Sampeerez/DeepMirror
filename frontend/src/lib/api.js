@@ -311,3 +311,25 @@ export const activateFace = (faceId) => request(`/video/faces/${encodeURICompone
 });
 export const deleteFace = (faceId) => request(`/video/faces/${encodeURIComponent(faceId)}`, { method: 'DELETE' });
 export const faceThumbnailUrl = (faceId) => `${API_BASE}/video/faces/${encodeURIComponent(faceId)}/thumbnail`;
+
+/** Start converting a video (face on every frame, voice on its sound); returns the job. */
+export function startVideoConversion(file, { face = true, model = null, useModel = true, pitchShift = 0,
+  autoPitch = false, formantShift = 0, f0Method, effects = {}, indexRate, protect, expressiveness } = {}) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('face', face ? 'on' : 'off');
+  formData.append('use_model', String(useModel));
+  if (model) formData.append('model', model);
+  formData.append('pitch_shift', String(pitchShift));
+  formData.append('pitch_mode', autoPitch ? 'auto' : 'manual');
+  formData.append('formant_shift', String(formantShift));
+  if (f0Method) formData.append('f0_method', f0Method);
+  formData.append('effects', JSON.stringify(effects));
+  for (const [field, value] of [['index_rate', indexRate], ['protect', protect],
+    ['pitch_expressiveness', expressiveness]]) {
+    if (value !== undefined && value !== null) formData.append(field, String(value));
+  }
+  return request('/convert/video', { method: 'POST', body: formData });
+}
+export const fetchVideoConversion = (jobId) => request(`/convert/video/${encodeURIComponent(jobId)}`);
+export const videoConversionUrl = (jobId) => `${API_BASE}/convert/video/${encodeURIComponent(jobId)}/file`;

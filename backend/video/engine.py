@@ -311,7 +311,8 @@ class FaceEngine:
     def swapper_for(self) -> FaceSwapper:
         return self.models.swapper(self._swapper_id or self.plan())
 
-    def keyframe(self, frame: np.ndarray, tracked: Tracked, t: float, keys_per_second: float) -> Key | None:
+    def keyframe(self, frame: np.ndarray, tracked: Tracked, t: float, keys_per_second: float,
+                 wait: float = 0.5) -> Key | None:
         """Swap the face of this frame; None when the GPU had no room in time (the voice comes first)."""
         if self.identity is None or tracked.face is None or tracked.points is None:
             return None
@@ -319,7 +320,7 @@ class FaceEngine:
         if self._conditioning is None:
             self._conditioning = swapper.identity(self.identity)
         expected = max(self.models.swap_ms.get(swapper.spec.id, 60.0), self._swap_ms)
-        with self.arbiter.video(expected) as granted:
+        with self.arbiter.video(expected, timeout=wait) as granted:
             if not granted:
                 return None
             started = time.perf_counter()

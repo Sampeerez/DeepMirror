@@ -492,7 +492,7 @@ export default function App() {
         {visited.has('converter') ? (
           <Suspense fallback={null}>
             <FileConverter voice={voice} effects={effects} activeModel={activeModel} f0Methods={runtimeConfig.f0Methods}
-              active={tab === 'converter'} />
+              active={tab === 'converter'} face={face} />
           </Suspense>
         ) : null}
       </div>

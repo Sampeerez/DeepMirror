@@ -1,19 +1,35 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
-import { AudioLines, Download, FileAudio, LoaderCircle, X } from 'lucide-react';
-import { convertFile, fetchModels, isAbortError } from '../lib/api';
+import { AudioLines, Download, FileAudio, FileVideo, LoaderCircle, X } from 'lucide-react';
+import {
+  convertFile, fetchModels, fetchVideoConversion, isAbortError, startVideoConversion, videoConversionUrl,
+} from '../lib/api';
 import { countActiveEffects } from '../lib/effects';
 import { FALLBACK_F0_METHODS, findF0Method, groupedMethods } from '../lib/f0Methods';
 import { formatBytes } from '../lib/format';
 import Button from './Button';
 
-const ACCEPTED = '.wav,.mp3,.flac,.ogg,.m4a,.aiff';
+const ACCEPTED = '.wav,.mp3,.flac,.ogg,.m4a,.aiff,.mp4,.mov,.mkv,.webm,.avi,.m4v';
+const VIDEO_FILE = /\.(mp4|mov|mkv|webm|avi|m4v)$/i;
+const VIDEO_STAGES = { queued: 'Starting', face: 'Swapping the face', voice: 'Converting the voice', mux: 'Joining' };
+
+function isVideoFile(file) {
+  return Boolean(file) && (file.type?.startsWith('video/') || VIDEO_FILE.test(file.name || ''));
+}
+
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  const timer = setTimeout(resolve, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); });
+});
 
 const EFFECTS_ONLY = '';
 
-// Offline conversion: renders an uploaded audio file through any voice in
-// Models (the active one by default) + current studio settings, returns a WAV.
-function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_METHODS, active = true }) {
+// Offline conversion: an audio file through any voice in Models (the active one
+// by default) + current studio settings, returned as a WAV; or a video file, with
+// the face worn on every frame as well, returned as an MP4.
+function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_METHODS, active = true, face = null }) {
   const [file, setFile] = useState(null);
+  const [wearFace, setWearFace] = useState(true);
+  const [progress, setProgress] = useState(null);   // {stage, fraction} while a video converts
   const [voices, setVoices] = useState([]);
   // null: follow the active voice; EFFECTS_ONLY or a model name once the user picks.
   const [chosenVoice, setChosenVoice] = useState(null);
@@ -56,7 +72,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
   // is reachable once the panel is gone.
   useEffect(() => () => {
     abortRef.current?.abort();
-    if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+    if (resultUrlRef.current?.startsWith('blob:')) URL.revokeObjectURL(resultUrlRef.current);
   }, []);
 
   const pickFile = (candidate) => {
@@ -65,9 +81,28 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
     setError(null);
     setNotice(null);
     setResult((prev) => {
-      if (prev?.url) URL.revokeObjectURL(prev.url);
+      if (prev?.url?.startsWith('blob:')) URL.revokeObjectURL(prev.url);
       return null;
     });
+  };
+
+  const video = isVideoFile(file);
+  const faceReady = Boolean(face?.ready && face?.activeFace);
+  const useFace = video && wearFace && faceReady;
+
+  const convertVideo = async (signal) => {
+    let job = await startVideoConversion(file, {
+      face: useFace, useModel: processWith !== EFFECTS_ONLY, model: processWith || null,
+      pitchShift: voice.pitch, autoPitch: voice.autoPitch, formantShift: voice.formant, f0Method: selectedF0.id,
+      effects, indexRate: voice.indexRate, protect: voice.protect, expressiveness: voice.expressiveness,
+    });
+    while (job.state !== 'done' && job.state !== 'error') {
+      setProgress({ stage: VIDEO_STAGES[job.state] || 'Converting', fraction: job.progress });
+      await sleep(1000, signal);
+      job = await fetchVideoConversion(job.id);
+    }
+    if (job.state === 'error') throw new Error(job.error || 'Conversion failed');
+    setResult({ url: videoConversionUrl(job.id), name: `${job.name}_converted.mp4`, size: null, video: true });
   };
 
   const handleConvert = async () => {
@@ -78,6 +113,10 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
     setError(null);
     setNotice(null);
     try {
+      if (video) {
+        await convertVideo(controller.signal);
+        return;
+      }
       const blob = await convertFile(file, {
         pitchShift: voice.pitch,
         autoPitch: voice.autoPitch,
@@ -99,7 +138,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
       });
       const name = `${file.name.replace(/\.[^.]+$/, '')}_converted.wav`;
       setResult((prev) => {
-        if (prev?.url) URL.revokeObjectURL(prev.url);
+        if (prev?.url?.startsWith('blob:')) URL.revokeObjectURL(prev.url);
         return { url: URL.createObjectURL(blob), name, size: blob.size, downloaded: false };
       });
     } catch (err) {
@@ -111,6 +150,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setConverting(false);
+      setProgress(null);
     }
   };
 
@@ -124,7 +164,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
             <p className="panel-kicker">Converter</p>
-            <h2 id="converter-title" className="panel-title">Convert a recording</h2>
+            <h2 id="converter-title" className="panel-title">Convert a recording or a video</h2>
           </div>
           <p className="text-xs text-fg-subtle">
             Studio settings: pitch {voice.pitch > 0 ? '+' : ''}{voice.pitch} st · formant {voice.formant > 0 ? '+' : ''}
@@ -137,7 +177,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
           <div
             role="button"
             tabIndex={converting ? -1 : 0}
-            aria-label="Choose an audio file to convert"
+            aria-label="Choose an audio or video file to convert"
             aria-disabled={converting}
             onDrop={(event) => { event.preventDefault(); setDragActive(false); pickFile(event.dataTransfer.files?.[0]); }}
             onDragOver={(event) => { event.preventDefault(); setDragActive(true); }}
@@ -154,7 +194,9 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
           >
             <input ref={fileInputRef} type="file" accept={ACCEPTED} className="hidden"
               onChange={(event) => { pickFile(event.target.files?.[0]); if (fileInputRef.current) fileInputRef.current.value = ''; }} />
-            <FileAudio className="mb-2 h-8 w-8 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />
+            {video
+              ? <FileVideo className="mb-2 h-8 w-8 text-video-fg" strokeWidth={1.5} aria-hidden="true" />
+              : <FileAudio className="mb-2 h-8 w-8 text-fg-subtle" strokeWidth={1.5} aria-hidden="true" />}
             {file ? (
               <>
                 <p className="max-w-full truncate text-sm font-medium text-fg" title={file.name}>{file.name}</p>
@@ -165,7 +207,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
                 <p className="text-sm font-medium text-fg-secondary">
                   {dragActive ? 'Drop here' : 'Drop or choose a file'}
                 </p>
-                <p className="mt-1 text-xs text-fg-faint">wav · mp3 · flac · ogg · m4a</p>
+                <p className="mt-1 text-xs text-fg-faint">Audio: wav, mp3, flac, ogg, m4a · Video: mp4, mov, mkv, webm</p>
               </>
             )}
           </div>
@@ -206,6 +248,21 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             </p>
           </div>
 
+          {video ? (
+            <div>
+              <label htmlFor="converter-face" className="block text-xs font-medium text-fg-muted">Face</label>
+              <select id="converter-face" value={useFace ? 'on' : 'off'} disabled={converting || !faceReady}
+                onChange={(event) => setWearFace(event.target.value === 'on')} className="native-select-safe field mt-2">
+                {faceReady ? <option value="on">Wear {face.activeFace.name} on every frame</option> : null}
+                <option value="off">Keep the faces as they are</option>
+              </select>
+              <p className="mt-1.5 text-[11px] leading-4 text-fg-subtle">
+                {faceReady ? 'Every frame gets its own swap: the best quality, slower than live.'
+                  : 'Choose a face in Video › Faces to swap it in the video.'}
+              </p>
+            </div>
+          ) : null}
+
           <div className="mt-auto flex items-center gap-3">
             {converting ? (
               <Button variant="danger" size="lg" icon={X} onClick={handleCancel} className="w-40">Cancel</Button>
@@ -218,7 +275,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
               {converting ? (
                 <span className="flex items-center gap-2">
                   <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
-                  Converting…
+                  {progress ? `${progress.stage}… ${Math.round(progress.fraction * 100)}%` : 'Converting…'}
                 </span>
               ) : notice || null}
             </p>
@@ -240,12 +297,17 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             <>
               <p className="text-xs font-medium text-fg-muted">Result</p>
               <p className="mt-1 truncate text-sm font-semibold text-fg" title={result.name}>{result.name}</p>
-              <p className="text-xs text-fg-subtle">{formatBytes(result.size)}</p>
-              <audio controls src={result.url} className="mt-4 h-10 w-full" aria-label={`Play ${result.name}`} />
+              {result.size ? <p className="text-xs text-fg-subtle">{formatBytes(result.size)}</p> : null}
+              {result.video ? (
+                <video controls src={result.url} className="mt-4 aspect-video w-full rounded-md bg-black"
+                  aria-label={`Play ${result.name}`} />
+              ) : (
+                <audio controls src={result.url} className="mt-4 h-10 w-full" aria-label={`Play ${result.name}`} />
+              )}
               <div className="mt-4">
                 <Button href={result.url} download={result.name} icon={Download} size="md"
                   onClick={() => setResult((current) => current?.url === result.url ? { ...current, downloaded: true } : current)}>
-                  Download WAV
+                  {result.video ? 'Download MP4' : 'Download WAV'}
                 </Button>
               </div>
             </>

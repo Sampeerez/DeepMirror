@@ -11,8 +11,9 @@
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" />
 </p>
 
-Realtime voice changer that runs on your own computer. It converts your voice with RVC
-models, live or from a file, and trains new voices from your recordings.
+Realtime voice and face cloning that runs on your own computer. It converts your voice with
+RVC models and swaps your face on the camera, live (both at once, in sync) or in files, and
+trains new voices from your recordings.
 
 ## Quick start
 
@@ -41,6 +42,11 @@ OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 
 ## What it does
 
+The app has two sides, each with its own colour: **Voice** (teal) and **Video** (violet).
+**Live** uses both at once; **Convert** takes audio or video files.
+
+### Voice
+
 - **Live conversion** of RVC v1/v2 voices, with 1 s of past and 150 ms of future context per chunk
 - **Only your voice is converted**: room noise, keyboard and breaths are removed before the model hears them, and nothing of your microphone is ever played unconverted
 - **Calls**: a virtual microphone for Discord, Teams or Meet (VB-CABLE on Windows and macOS, PipeWire on Linux)
@@ -51,6 +57,21 @@ OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 - **Steady under load**: when the computer is too busy to keep up (a browser, a game, a live wallpaper on the same GPU), the stream moves to a longer buffer by itself instead of cutting the voice; the log says which stage took the time
 - **Converter** for whole files with any voice in Models (not only the active one), and **Train** to make a voice from 5+ minutes of one speaker, even with music or noise behind it
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
+
+### Video
+- **Face clone, live**: wear a face from 1–12 photos on your camera. Your expressions, gaze and head
+  stay yours; hands, hair and glasses in front of the face stay in front.
+- **In sync with the voice**: every camera frame carries its capture time and is shown when the
+  converted voice is heard, so lips and voice line up, in the preview and on the virtual camera.
+- **The voice comes first**: the face runs in its own process and uses the GPU only in the gaps the
+  voice leaves, so turning video on never cuts the voice. Frames between two face swaps are blended
+  and placed with that frame's own face position, so head movement stays exact at camera rate.
+- **Virtual camera** for Discord, Meet, Teams or OBS (OBS Studio's driver on Windows and macOS,
+  v4l2loopback on Linux).
+- **Video files**: the face on every frame and the chosen voice on the sound, as one MP4.
+- **Fits the computer**: the face swapper is chosen by measuring this GPU next to the live voice.
+  On a GTX 1660 SUPER: 30 fps and about 14 face swaps a second without the voice; about 26 fps and 5–6
+  swaps a second with the voice streaming, with your real mouth kept so every syllable shows.
 
 ## Models used
 
@@ -64,6 +85,23 @@ Chosen by measuring them on this project's own tests, not by date.
 | Speech detection | Silero VAD v6.2.3 | Latest release |
 | Voice separation (training) | Mel-Band RoFormer, vocals model by Kimberley Jensen | Among the best open vocal separators (about 12.6 dB SDR); here music under speech came out 59 dB lower with the voice within 0.5 dB |
 | Training base | TITAN Medium | Against the official RVC v2 base, same data and epochs: 7% closer timbre when converting another speaker and fewer notes off in singing (3.2% vs 4.2%) and laughter (8.5% vs 12.1%) |
+
+### Face clone
+
+The models download the first time you open **Video › Faces** (about 1.8 GB), from FaceFusion's
+releases, and run with ONNX Runtime (CUDA, DirectML or CPU).
+
+| Part | Model | Why |
+|---|---|---|
+| Detection | SCRFD 2.5G | 5 ms per frame on the CPU around the tracked face, leaving the GPU to the voice and the swap |
+| Identity | ArcFace w600k R50 | What every swapper is conditioned on; averaged over several photos for a steadier face |
+| Swap | HyperSwap 1b (256 px), inswapper (128 px), GHOST (256 px) | Compared on generated faces: inswapper keeps identity best (ArcFace 0.80–0.90), HyperSwap is the sharpest and masks hands and hair itself, GHOST is the fastest (29 ms). SimSwap kept identity worst (0.58–0.66) and was left out. HyperSwap is stored in fp32 here: its fp16 weights gave NaN on CUDA without tensor cores, and fp32 runs in 43 ms instead of 117 |
+| Occlusion | XSeg | Hands and objects in front of the face, for swappers without their own mask |
+| Detail | GPEN-BFR 256 | Only on close faces when the GPU has room: it costs a little identity |
+
+Also reviewed: Deep-Live-Cam and LiveFaceCam (inswapper/HyperSwap with a mouth mask; the real-mouth
+option here comes from them), DeepFaceLive (needs a model trained per face), LivePortrait (animates
+a photo rather than swapping a face).
 
 ## Train a voice
 
@@ -132,7 +170,8 @@ make lint test        # ruff, pyright, eslint, pytest, vitest
 
 ## Screenshots
 
-![Studio](docs/images/main-ui.png)
+![Live](docs/images/main-ui.png)
+![Video settings](docs/images/video-settings.png)
 ![Train](docs/images/training.png)
 ![Models](docs/images/models.png)
 ![Converter](docs/images/converter.png)
@@ -154,8 +193,15 @@ Sioaeko (MIT), since rewritten.
 | [TITAN](https://huggingface.co/blaise-tk/TITAN) | Training base | Apache-2.0 |
 | [Applio](https://github.com/IAHispano/Applio) | Ideas (pitch correction) | MIT |
 | [VB-CABLE](https://vb-audio.com/Cable/) | Virtual microphone, installed by you | Donationware |
+| [FaceFusion](https://github.com/facefusion/facefusion) model releases | Face models (HyperSwap, XSeg, GPEN, converters), downloaded on first use | Models: non-commercial |
+| [InsightFace](https://github.com/deepinsight/insightface) | inswapper, ArcFace, SCRFD, downloaded on first use | Code MIT, models non-commercial research only |
+| [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam), [LiveFaceCam](https://github.com/huzaifa525/LiveFaceCam) | Ideas (mouth mask) | AGPL-3.0 |
+| [OBS Studio](https://obsproject.com/) virtual camera, via [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) | Virtual camera, installed by you | GPL-2.0 / GPL-2.0 |
 
 ## License
 
 MIT, see [LICENSE](LICENSE). DeepFilterNet's notice is in
 [backend/audio/deepfilter/LICENSE-DeepFilterNet](backend/audio/deepfilter/LICENSE-DeepFilterNet).
+
+The face models are not part of this repository and carry their own licences: InsightFace's and
+FaceFusion's are for non-commercial use. Use only faces and voices you have permission to use.

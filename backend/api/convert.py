@@ -150,3 +150,92 @@ async def convert_file(
     # ``attachment`` invites download managers to hijack the response.
     disposition = f"inline; filename=\"converted.wav\"; filename*=UTF-8''{quote(out_name, safe='')}"
     return Response(content=wav, media_type="audio/wav", headers={"Content-Disposition": disposition})
+
+
+# --- Video files ----------------------------------------------------------------
+
+VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+
+
+@router.post("/video")
+async def convert_video(
+    request: Request,
+    file: UploadFile,
+    pitch_shift: float = Form(0.0),
+    pitch_mode: str = Form("manual"),
+    formant_shift: float = Form(0.0),
+    f0_method: str | None = Form(None),
+    effects: str = Form("{}"),
+    use_model: str | None = Form(None),
+    model: str | None = Form(None),
+    # "on": wear the active face in every frame; "off": keep the picture as it is.
+    face: str = Form("on"),
+    index_rate: float | None = Form(None),
+    protect: float | None = Form(None),
+    pitch_expressiveness: float | None = Form(None),
+) -> dict:
+    """Start converting a video: the active face on every frame, the chosen voice on its sound."""
+    settings: Settings = request.app.state.settings
+    manager: ModelManager = request.app.state.model_manager
+    faces = request.app.state.faces
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in VIDEO_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Use an mp4, mov, mkv, webm or avi video.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="File is empty")
+    if len(data) > settings.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large (max {settings.MAX_UPLOAD_BYTES // 2**20} MB)")
+    try:
+        effects_payload = json.loads(effects) if effects else {}
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid effects JSON") from exc
+    if not isinstance(effects_payload, dict):
+        effects_payload = {}
+
+    wear_face = face.strip().lower() == "on"
+    if wear_face and (not faces.models_ready or faces.library.active() is None):
+        raise HTTPException(status_code=409, detail="Choose a face in Video › Faces first, or keep your own face.")
+    apply_model = use_model is None or use_model.strip().lower() not in {"false", "0", "off", "no"}
+    converter = None
+    if apply_model:
+        try:
+            converter = await asyncio.to_thread(manager.file_converter, (model or "").strip() or None)
+        except ModelNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    conversion = manager.default_conversion().with_payload({
+        "pitch_shift": pitch_shift, "f0_method": f0_method, "index_rate": index_rate, "protect": protect,
+        "pitch_expressiveness": pitch_expressiveness,
+    })
+    formant = float(np.clip(formant_shift, -24.0, 24.0))
+    auto_pitch = pitch_mode.strip().lower() == "auto"
+
+    def voice(audio: np.ndarray) -> np.ndarray:
+        rate = 48000
+        if len(audio) > settings.MAX_CONVERT_SECONDS * rate:
+            raise ValueError(f"Audio too long (max {settings.MAX_CONVERT_SECONDS // 60} minutes)")
+        return render(audio, rate, converter, conversion, formant, effects_payload, auto_pitch)
+
+    swap = (lambda source, target, report: faces.worker().convert_video(source, target, report)) if wear_face else None
+    job = request.app.state.video_jobs.start(Path(file.filename or "video").stem, data, suffix, swap,
+                                             voice if (converter is not None or effects_payload or formant) else None)
+    return job.describe()
+
+
+@router.get("/video/{job_id}")
+async def video_job(request: Request, job_id: str) -> dict:
+    job = request.app.state.video_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown conversion")
+    return job.describe()
+
+
+@router.get("/video/{job_id}/file")
+async def video_file(request: Request, job_id: str):
+    from fastapi.responses import FileResponse
+
+    job = request.app.state.video_jobs.get(job_id)
+    if job is None or job.state != "done":
+        raise HTTPException(status_code=404, detail="Not ready")
+    return FileResponse(job.output, media_type="video/mp4", filename=f"{job.name}_converted.mp4",
+                        content_disposition_type="inline")

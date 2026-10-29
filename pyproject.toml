@@ -1,6 +1,6 @@
 [project]
 name = "voxclone"
-description = "Realtime and offline RVC voice conversion studio"
+description = "Realtime and offline voice (RVC) and face cloning studio"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
@@ -25,7 +25,7 @@ dependencies = [
     "opencv-python-headless>=4.12",
     "av>=15",
     # The face clone as a camera in Discord, Meet, OBS... (OBS Virtual Camera / v4l2loopback).
-    "pyvirtualcam>=0.13; sys_platform != 'darwin'",
+    "pyvirtualcam>=0.13",
     # Harvest/DIO pitch trackers. pyworld only publishes wheels for Windows;
     # elsewhere install the `classic-f0` extra (needs a C compiler).
     "pyworld>=0.3.5; sys_platform == 'win32' and python_version < '3.14'",

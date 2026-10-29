@@ -16,6 +16,7 @@ import struct
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from pathlib import Path
@@ -121,6 +122,21 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     def log(level: int, text: str) -> None:
         send("log", level, text)
 
+    def _convert(job: str, source: str, target: str) -> None:
+        """A whole video file, with its own engine (its own tracking) next to the live one."""
+        from backend.video.offline import swap_video
+
+        # Same swapper as the live engine (they share the loaded models); every frame swapped, so no real mouth.
+        swapper = engine._swapper_id or engine.settings.swapper
+        offline = FaceEngine(models, arbiter, replace(engine.settings, mouth="off", swapper=swapper))
+        offline.set_identity(engine.identity)
+        try:
+            frames = swap_video(offline, Path(source), Path(target), lambda done: send("convert_progress", job, done))
+            send("convert_done", job, None, frames)
+        except Exception as exc:
+            logger.exception("Video conversion failed")
+            send("convert_done", job, f"{type(exc).__name__}: {exc}", 0)
+
     try:
         models.measure(Path(cache_path), arbiter)
         send("ready", {"swap_ms": models.swap_ms, "available": models.available()})
@@ -175,6 +191,10 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                             send("camera_error", str(exc))
                     if camera is not None:
                         camera.delay = max(0.0, float(config.get("delay_ms", 0)) / 1000)
+                elif kind == "convert":
+                    _, job, source, target = message
+                    threading.Thread(target=_convert, args=(job, source, target), name="face-convert",
+                                     daemon=True).start()
                 elif kind == "reset":
                     if live is not None:
                         live.close()
@@ -271,6 +291,35 @@ class FaceWorker:
             self._pending.pop(request, None)
             raise TimeoutError("The face process did not answer")
         return done[1][0], done[1][1]
+
+    def convert_video(self, source: Path, target: Path, on_progress: Callable[[float], None],
+                      timeout: float = 6 * 3600) -> int:
+        """Swap the face in every frame of ``source`` into ``target`` (video only); returns the frame count."""
+        self.start()
+        if not self.wait_ready(300):
+            raise RuntimeError("The face process did not start")
+        self._next_request += 1
+        job = f"convert-{self._next_request}"
+        done = threading.Event()
+        result: list = []
+
+        def listen(message: tuple) -> None:
+            if message[0] == "convert_progress" and message[1] == job:
+                on_progress(message[2])
+            elif message[0] == "convert_done" and message[1] == job:
+                result.extend(message[2:])
+                done.set()
+
+        unsubscribe = self.subscribe(listen)
+        try:
+            self.send("convert", job, str(source), str(target))
+            if not done.wait(timeout):
+                raise TimeoutError("The face process did not finish the video")
+        finally:
+            unsubscribe()
+        if result[0]:
+            raise RuntimeError(result[0])
+        return int(result[1])
 
     def _read(self) -> None:
         conn = self._conn
