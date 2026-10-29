@@ -18,9 +18,14 @@ dependencies = [
     "praat-parselmouth>=0.4.7",
     # Node.js for building the web UI from a source checkout (no system Node needed).
     "nodejs-wheel-binaries>=24.19",
-    # Faster CPU vocoder (backend.inference.onnx_decoder).
-    "onnxruntime>=1.23",
+    # ONNX Runtime itself comes with the torch extra (CPU build or CUDA build): it runs
+    # the faster CPU vocoder (backend.inference.onnx_decoder) and the face models.
     "onnxscript>=0.5",
+    # Video: frames, face alignment and blending; reading and writing video files.
+    "opencv-python-headless>=4.12",
+    "av>=15",
+    # The face clone as a camera in Discord, Meet, OBS... (OBS Virtual Camera / v4l2loopback).
+    "pyvirtualcam>=0.13; sys_platform != 'darwin'",
     # Harvest/DIO pitch trackers. pyworld only publishes wheels for Windows;
     # elsewhere install the `classic-f0` extra (needs a C compiler).
     "pyworld>=0.3.5; sys_platform == 'win32' and python_version < '3.14'",
@@ -29,8 +34,13 @@ dependencies = [
 [project.optional-dependencies]
 # Torch build. The start scripts pick one automatically (CUDA when an NVIDIA
 # GPU is present); pass `--extra cpu` or `--extra cuda` to choose explicitly.
-cpu = ["torch>=2.14", "torchaudio>=2.11"]
-cuda = ["torch>=2.14", "torchaudio>=2.11"]
+cpu = ["torch>=2.14", "torchaudio>=2.11", "onnxruntime>=1.23"]
+cuda = [
+    "torch>=2.14", "torchaudio>=2.11",
+    # Uses the CUDA and cuDNN libraries that come with the CUDA torch build.
+    "onnxruntime-gpu>=1.23,<1.24; sys_platform != 'darwin'",
+    "onnxruntime>=1.23; sys_platform == 'darwin'",
+]
 # Extra neural pitch trackers (Crepe, FCPE). RMVPE and PM are built in.
 neural-f0 = ["torchcrepe>=0.0.24", "torchfcpe>=0.0.4"]
 classic-f0 = ["pyworld>=0.3.5"]

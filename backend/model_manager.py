@@ -26,6 +26,7 @@ import torch
 from fastapi import UploadFile
 
 from backend.assets import AssetStore
+from backend.compute_arbiter import GpuArbiter
 from backend.config import Settings
 from backend.inference.auto_pitch import F0Stats
 from backend.inference.device import ComputeDevice, select_device
@@ -74,6 +75,8 @@ class ModelManager:
         self._file_lock = threading.Lock()
         # Every converter renders under this lock: live chunks and file renders take turns on the device.
         self._render_lock = threading.Lock()
+        # The live voice and the face clone share the GPU: the voice first, the face in the gaps.
+        self.arbiter = GpuArbiter()
         self._details: dict[str, dict] = {}
         # Last automatic pitch shift per voice, so a new stream starts in the right register.
         self._pitch_memory: dict[str, float] = {}
@@ -480,6 +483,7 @@ class ModelManager:
             self._release_locked()
         if self._pitch is not None:
             self._pitch.close()
+        self.arbiter.close()
 
     @property
     def converter(self) -> VoiceConverter | None:

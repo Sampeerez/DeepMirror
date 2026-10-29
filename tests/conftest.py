@@ -83,7 +83,7 @@ def manager(settings: Settings, cpu: ComputeDevice) -> ModelManager:
 @pytest.fixture
 def client(settings: Settings, manager: ModelManager, monkeypatch: pytest.MonkeyPatch):
     # Never download model assets from tests.
-    monkeypatch.setattr("backend.assets.AssetStore.download_missing_in_background", lambda self: None)
+    monkeypatch.setattr("backend.assets.AssetStore.download_missing_in_background", lambda self, group="voice": None)
     app = create_app(settings, manager=manager)
     with TestClient(app) as test_client:
         yield test_client

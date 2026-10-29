@@ -468,6 +468,8 @@ class StreamSession:
         else:
             mode = "rvc"
             self.eligible_frames += 1
+            arbiter = self.manager.arbiter
+            arbiter.chunk_arrived()
             stream = self._realtime_stream(converter)
             listen_started = time.perf_counter()
             speech = stream.listen(processed)
@@ -480,7 +482,8 @@ class StreamSession:
                 model_started = time.perf_counter()
                 try:
                     # Last render before sleeping: the voice fades out instead of stepping to zero.
-                    rendered = stream.convert(fade_out=asleep)
+                    with arbiter.voice():
+                        rendered = stream.convert(fade_out=asleep)
                 except Exception as exc:
                     return self._failure(exc, audio, model_started)
                 if asleep and self._auto_pitch is not None:

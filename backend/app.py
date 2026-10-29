@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import lifecycle as presence
-from backend.api import convert, logs, models, presets, profile, stream, system, training
+from backend.api import convert, logs, models, presets, profile, stream, system, training, video
 from backend.assets import AssetStore
 from backend.config import APP_NAME, ROOT, Settings
 from backend.config import settings as default_settings
@@ -26,6 +26,7 @@ from backend.model_manager import ModelManager
 from backend.presets import PresetStore
 from backend.security import cors_origins
 from backend.training.jobs import TrainingJobs
+from backend.video.service import FaceService
 from backend.virtual_mic import VirtualMic
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
             # Closed by closing the page: a training run carries on and exits by itself.
             app.state.training.close(stop_workers=not app.state.lifecycle.closed_by_idle)
             app.state.virtual_mic.close()
+            app.state.faces.close()
             app.state.model_manager.close()
 
     app = FastAPI(title=APP_NAME, version=app_version(), lifespan=lifespan)
@@ -80,6 +82,9 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         logging.getLogger().addHandler(logbook)
     app.state.lifecycle = lifecycle or Lifecycle(enabled=False)
     app.state.virtual_mic = VirtualMic(settings.DATA_DIR / "downloads")
+    manager_ = app.state.model_manager
+    app.state.faces = FaceService(assets, manager_.arbiter, settings.DATA_DIR,
+                                  lambda: manager_.compute.is_accelerator)
 
     app.add_middleware(
         CORSMiddleware,
@@ -88,7 +93,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for module in (system, models, presets, profile, convert, stream, training, logs, presence):
+    for module in (system, models, presets, profile, convert, stream, training, video, logs, presence):
         app.include_router(module.router)
 
     if (settings.FRONTEND_DIST / "index.html").is_file():
