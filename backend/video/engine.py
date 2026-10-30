@@ -32,6 +32,7 @@ import cv2
 import numpy as np
 
 from backend.compute_arbiter import GpuArbiter
+from backend.video import hair as hairs
 from backend.video import head as heads
 from backend.video import parser as parsing
 from backend.video.blend import Occluder, box_mask, mouth_mask, paste
@@ -106,14 +107,16 @@ class HeadLayer:
 
 @dataclass(slots=True)
 class VideoSettings:
-    mode: str = "head"          # head: the whole head (hair, beard, outline); face: the inside of the face
+    # hair: the face swap plus the photo's hair on every frame (live and files); face: the face only;
+    # head: the whole head animated from the photo (files: every frame gets its own render).
+    mode: str = "hair"
     swapper: str = "auto"       # "auto" or a SWAPPERS id
     enhance: str = "auto"       # auto | on | off
     mouth: str = "auto"         # auto | on | off: keep the speaker's own mouth
     occlusion: bool = True      # hands, hair, glasses in front of the face stay in front
 
     def apply(self, payload: dict) -> None:
-        if payload.get("mode") in ("head", "face"):
+        if payload.get("mode") in ("hair", "face", "head"):
             self.mode = payload["mode"]
         if payload.get("swapper") == "auto" or payload.get("swapper") in SWAPPERS:
             self.swapper = payload["swapper"]
@@ -333,6 +336,11 @@ class FaceEngine:
     _parse_ms: float = 45.0   # one face parse on the GPU (measured as it runs)
     # In the face process the head renders in a process of its own (head_process.RemoteHead).
     remote: Any = None
+    _hair: hairs.HairLayer | None = None
+    _hair_for: int | None = None             # id() of the portrait the hair layer was cut from
+    _own: hairs.OwnHead | None = None        # the speaker's own hair, as last parsed
+    _toned: tuple | None = None              # (key, hair layer, its image toned to that key's face)
+    hair_photos: list = field(default_factory=list)   # every photo of the face (the hair takes the most frontal)
 
     def set_identity(self, embedding: np.ndarray | None) -> None:
         self.identity = embedding
@@ -418,9 +426,14 @@ class FaceEngine:
         self._swap_ms = took if self._swap_ms == 0 else 0.8 * self._swap_ms + 0.2 * took
         size = swapper.spec.size
         head = self.wants_head
-        mask = self._face_mask(tracked, alignment(tracked.points, swapper.spec.template, size), size, head)
+        mask = self._face_mask(tracked, alignment(tracked.points, swapper.spec.template, size), size, head,
+                               erode=0.012 if self.settings.mode == "hair" else 0.025)
         if model_mask is not None:   # HyperSwap's own face mask: hands and hair in front stay
-            mask = np.minimum(mask, cv2.GaussianBlur(model_mask, (0, 0), size / 128))
+            own = cv2.GaussianBlur(model_mask, (0, 0), size / 128)
+            if self.settings.mode == "hair":
+                # It also cuts beards out: below the nose the swap's own beard is kept instead.
+                own[int(size * 0.62):] = 1.0
+            mask = np.minimum(mask, own)
         elif self.settings.occlusion:
             with self.arbiter.video(30.0, timeout=0.0) as granted:   # only when the GPU has room
                 if granted:
@@ -443,9 +456,51 @@ class FaceEngine:
                 if granted:
                     # Mostly the enhanced face, a little of the swap's own texture (no plastic look).
                     swapped = cv2.addWeighted(self.models.enhancer.enhance(swapped), 0.75, swapped, 0.25, 0)
+        if self.settings.mode == "hair":
+            self._hair_jobs(frame, tracked, t)
         return Key(t, swapper.spec, swapped.astype(np.float32), mask, alone, alone_mask)
 
-    def _face_mask(self, tracked: Tracked, matrix: np.ndarray, size: int, head: bool) -> np.ndarray:
+    def _hair_jobs(self, frame: np.ndarray, tracked: Tracked, t: float) -> None:
+        """Cut the photo's hair out (once per face) and re-read the speaker's own hair (about twice a
+        second), each in a GPU gap; both are cheap to reuse on every frame."""
+        parser = self.models.parser
+        if parser is None or tracked.points is None:
+            return
+        if self.portrait is not None and self._hair_for != id(self.portrait):
+            photo, found = self._frontal_photo()
+            with self.arbiter.video(self._parse_ms, timeout=0.05) as granted:
+                if granted:
+                    self._hair = (hairs.build_hair(photo, found.points, parser, head_pose(found.points))
+                                  if found is not None else None)
+                    self._hair_for = id(self.portrait)
+            return
+        if self._hair is not None and (self._own is None or t - self._own.t > OWN_HAIR_SECONDS):
+            crop, _ = hairs.head_crop(frame, tracked.points)
+            with self.arbiter.video(self._parse_ms, timeout=0.0) as granted:
+                if granted:
+                    self._own = hairs.parse_own(crop, parser, t)
+
+    def _frontal_photo(self) -> tuple[np.ndarray, Face | None]:
+        """The face's photo the hair is cut from: the most frontal one (the hair of a turned head
+        would not sit on a speaker facing the camera), among those where the face is large."""
+        from backend.video.worker import _read_image
+
+        candidates = []
+        for path in self.hair_photos or []:
+            image = _read_image(path)
+            found = main_face(self.models.detector.detect(image)) if image is not None else None
+            if found is not None:
+                yaw, _ = head_pose(found.points)
+                candidates.append((abs(yaw), found.size, image, found))
+        if candidates:
+            largest = max(c[1] for c in candidates)
+            _, _, image, found = min((c for c in candidates if c[1] >= 0.75 * largest), key=lambda c: c[0])
+            return image, found
+        portrait = self.portrait if self.portrait is not None else np.zeros((8, 8, 3), np.uint8)
+        return portrait, main_face(self.models.detector.detect(portrait))
+
+    def _face_mask(self, tracked: Tracked, matrix: np.ndarray, size: int, head: bool,
+                   erode: float = 0.025) -> np.ndarray:
         """Where the swap goes, in its crop, from the 68 landmarks (CPU, no GPU time): the whole
         face up to the forehead, or with the whole head only brows, eyes, nose and mouth. Pulled
         inside the outline and faded, so no ring shows around it.
@@ -464,11 +519,13 @@ class FaceEngine:
             grow = max(3, int(eyes * 0.25)) | 1
             mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (grow, grow)))
             return feather(mask, erode=0.0, soft=0.07)
-        # The jaw line and the brows raised by about a third of the eye distance (the forehead).
-        brows = points[17:27] - np.array([0.0, eyes * 0.45], np.float32)
+        # The jaw line and the brows raised by about a third of the eye distance (the forehead);
+        # with the photo's hair the forehead comes from the photo, so the swap stops lower.
+        rise = 0.35 if self.settings.mode == "hair" and self._hair is not None else 0.45
+        brows = points[17:27] - np.array([0.0, eyes * rise], np.float32)
         outline = np.vstack([points[0:17], brows[::-1]])
         cv2.fillConvexPoly(mask, cv2.convexHull(outline.astype(np.int32)), 1.0)
-        return feather(mask, erode=0.025, soft=0.06)
+        return feather(mask, erode=erode, soft=0.06)
 
     # --- The whole head (GPU, in stages) -----------------------------------
 
@@ -611,6 +668,10 @@ class FaceEngine:
         # The head was rendered for one head turn; placed on a frame turned further it would show
         # beside the face. It fades out (the face alone shows) until a fresh render arrives.
         weight = head_freshness(head.pose, head_pose(tracked.points)) if head is not None else 0.0
+        hair_alpha = None
+        if self.settings.mode == "hair" and self._hair is not None:
+            nearest_key = min((k for k in (before, after) if k is not None), key=lambda k: abs(k.t - t), default=None)
+            frame, hair_alpha = self._with_hair(frame, tracked.points, nearest_key)
         if head is not None and self.settings.mode == "head" and weight > 0.0:
             matrix = alignment(tracked.points, heads.HEAD_TEMPLATE, heads.OUTPUT)
             frame = paste(frame, head.image, head.alpha * weight, matrix)
@@ -647,6 +708,12 @@ class FaceEngine:
                 lips = mouth_mask(tracked.face.landmarks, matrix, spec.size)[:, :, None]
                 face = face * (1 - lips) + live * lips
         face = np.clip(face, 0, 255).astype(np.uint8)
+        if hair_alpha is not None:
+            # Bangs and locks of the new hair stay in front of the forehead.
+            to_swap = matrix @ np.vstack([cv2.invertAffineTransform(
+                alignment(tracked.points, heads.HEAD_TEMPLATE, heads.OUTPUT)), [0, 0, 1]])
+            mask = mask * (1.0 - cv2.warpAffine(hair_alpha, to_swap, (spec.size, spec.size),
+                                                flags=cv2.INTER_LINEAR, borderValue=0.0))
         if head is not None:
             # Only inside the worn face, coloured like the worn head's skin around it.
             worn = cv2.warpAffine(head.face, matrix @ np.vstack([cv2.invertAffineTransform(
@@ -656,7 +723,31 @@ class FaceEngine:
             under = cv2.warpAffine(frame, matrix, (spec.size, spec.size), flags=cv2.INTER_LINEAR,
                                    borderMode=cv2.BORDER_REPLICATE)
             face = match_colour(face, under, mask)
-        return paste(frame, face, mask, matrix, inplace=head is not None)
+        return paste(frame, face, mask, matrix, inplace=head is not None or hair_alpha is not None)
+
+    def _with_hair(self, frame: np.ndarray, points: np.ndarray, key: Key | None = None
+                   ) -> tuple[np.ndarray, np.ndarray | None]:
+        """``frame`` with the speaker's own hair painted over and the photo's hair placed on the
+        head (by this frame's points); returns the frame and the hair's alpha (head crop)."""
+        hair = self._hair
+        if hair is None:
+            return frame, None
+        weight = hairs.hair_weight(hair, head_pose(points))
+        if weight <= 0.0:
+            return frame, None
+        crop, matrix = hairs.head_crop(frame, points)
+        if self._own is not None:
+            frame = paste(frame, hairs.cover(crop, self._own), self._own.paint * weight, matrix)
+        else:
+            frame = frame.copy()
+        alpha = hair.alpha * weight
+        image = hair.image
+        if key is not None:
+            # The forehead in the face's skin tone, worked out once per keyframe.
+            if self._toned is None or self._toned[0] is not key or self._toned[1] is not hair:
+                self._toned = (key, hair, hairs.toned(hair, key.face, key.mask))
+            image = self._toned[2]
+        return paste(frame, image, alpha, matrix, inplace=True), alpha
 
 
 def _light_like(image: np.ndarray, reference: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -679,6 +770,9 @@ def head_pose(points: np.ndarray) -> tuple[float, float]:
     offset = (points[2] - eyes) / distance
     return float(offset[0]), float(offset[1])
 
+
+# The speaker's own hair is re-read this often (s), to paint over it where the new hair is not.
+OWN_HAIR_SECONDS = 0.6
 
 # Head turn (in eye distances) a head render still fits, and where it has faded out completely.
 HEAD_FITS = 0.06

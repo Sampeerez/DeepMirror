@@ -171,6 +171,9 @@ async def convert_video(
     model: str | None = Form(None),
     # A face id from the library to wear on every frame, "on" for the active face, "off" to keep the picture.
     face: str = Form("on"),
+    # How much of the person to wear: "hair" (the face and the photo's hair), "face", or "head"
+    # (the whole head animated from the photo, a render per frame: slower).
+    clone: str = Form("hair"),
     index_rate: float | None = Form(None),
     protect: float | None = Form(None),
     pitch_expressiveness: float | None = Form(None),
@@ -228,7 +231,8 @@ async def convert_video(
         return render(audio, rate, converter, conversion, formant, effects_payload, auto_pitch)
 
     swap = None if identity is None else (
-        lambda source, target, report: faces.worker().convert_video(source, target, report, identity, portrait))
+        lambda source, target, report: faces.worker().convert_video(source, target, report, identity, portrait,
+                                                                   clone if clone in ("hair", "face", "head") else "hair"))
     change_voice = converter is not None or any(
         isinstance(value, dict) and value.get("enabled") for value in effects_payload.values()) or formant != 0 or (
         pitch_shift != 0 and not auto_pitch)

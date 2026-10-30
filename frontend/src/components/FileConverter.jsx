@@ -10,6 +10,7 @@ import { FALLBACK_F0_METHODS, findF0Method } from '../lib/f0Methods';
 import { formatBytes } from '../lib/format';
 import Button from './Button';
 import Picker from './Picker';
+import Segmented from './Segmented';
 
 const ACCEPT = '.wav,.mp3,.flac,.ogg,.m4a,.aiff,.mp4,.mov,.mkv,.webm,.avi,.m4v';
 const VIDEO_FILE = /\.(mp4|mov|mkv|webm|avi|m4v)$/i;
@@ -28,6 +29,11 @@ const EFFECTS_ONLY = '';
 // A video's sound left as it is (no voice, no effects).
 const KEEP_VOICE = '__keep__';
 const KEEP_FACE = '';
+const CLONE_MODES = [
+  { value: 'hair', label: 'Face + hair' },
+  { value: 'face', label: 'Face' },
+  { value: 'head', label: 'Whole head', hint: 'The photo animated: every frame rendered, slower' },
+];
 
 // Library › Convert: drop an audio file (back as a WAV in another voice) or a
 // video (back as an MP4): for a video, choose the face to wear on every frame
@@ -37,6 +43,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
   const [file, setFile] = useState(null);
   // null: the face worn in Live; KEEP_FACE or a face id once the user picks.
   const [chosenFace, setChosenFace] = useState(null);
+  const [clone, setClone] = useState('hair');
   const [progress, setProgress] = useState(null);   // {stage, fraction} while a video converts
   const [voices, setVoices] = useState([]);
   // null: follow the active voice; EFFECTS_ONLY or a model name once the user picks.
@@ -108,6 +115,7 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
   const convertVideo = async (signal) => {
     let job = await startVideoConversion(file, {
       face: faceId || false,
+      clone,
       ...(keepVoice ? { useModel: false, effects: {}, pitchShift: 0, autoPitch: false, formantShift: 0 } : {
         useModel: processWith !== EFFECTS_ONLY, model: processWith || null, pitchShift: voice.pitch,
         autoPitch: voice.autoPitch, formantShift: voice.formant, effects,
@@ -252,6 +260,11 @@ function FileConverter({ voice, effects, activeModel, f0Methods = FALLBACK_F0_ME
             ) : (
               <p className="mt-2 text-xs text-fg-subtle">Download the face models in Faces to swap faces.</p>
             )}
+            {face?.ready && faceId ? (
+              <Segmented label="What to wear" hideLabel accent="face" size="sm" value={clone} onChange={setClone}
+                disabled={converting} className="mt-2"
+                options={CLONE_MODES} />
+            ) : null}
           </div>
         ) : null}
 

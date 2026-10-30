@@ -316,11 +316,12 @@ export const deleteFace = (faceId) => request(`/video/faces/${encodeURIComponent
 export const faceThumbnailUrl = (faceId) => `${API_BASE}/video/faces/${encodeURIComponent(faceId)}/thumbnail`;
 
 /** Start converting a video (face on every frame, voice on its sound); returns the job. */
-export function startVideoConversion(file, { face = true, model = null, useModel = true, pitchShift = 0,
+export function startVideoConversion(file, { face = true, clone = 'hair', model = null, useModel = true, pitchShift = 0,
   autoPitch = false, formantShift = 0, f0Method, effects = {}, indexRate, protect, expressiveness } = {}) {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('face', typeof face === 'string' ? face : face ? 'on' : 'off');   // a face id, the live one, or none
+  formData.append('clone', clone);
   formData.append('use_model', String(useModel));
   if (model) formData.append('model', model);
   formData.append('pitch_shift', String(pitchShift));

@@ -71,9 +71,18 @@ class FaceLibrary:
         photos = sorted(folder.glob("photo_*.jpg"), key=lambda path: int(path.stem.split("_")[1]))
         if not photos:
             return None
-        sizes = [note.get("size", 0) if note.get("face") else -1 for note in notes]
-        best = max(range(len(photos)), key=lambda i: sizes[i] if i < len(sizes) else -1)
+        def note(i: int) -> dict:
+            return notes[i] if i < len(notes) and notes[i].get("face") else {}
+
+        # Among the photos where the face is nearly as large as in the best one, the sharpest.
+        largest = max((note(i).get("size", 0) for i in range(len(photos))), default=0)
+        close = [i for i in range(len(photos)) if note(i) and note(i).get("size", 0) >= 0.85 * largest]
+        best = max(close or range(len(photos)), key=lambda i: (note(i).get("sharpness", 0), note(i).get("size", 0)))
         return photos[best]
+
+    def photos(self, face_id: str) -> list[Path]:
+        folder = self._folder(face_id)
+        return sorted(folder.glob("photo_*.jpg"), key=lambda path: int(path.stem.split("_")[1]))
 
     def thumbnail(self, face_id: str) -> Path:
         return self._folder(face_id) / "thumb.jpg"

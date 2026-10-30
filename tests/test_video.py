@@ -160,7 +160,7 @@ class TestApi:
         response = client.patch("/api/video/settings", json={"swapper": "ghost_1_256", "mouth": "on",
                                                              "enhance": "sometimes", "occlusion": False})
         settings = response.json()["settings"]
-        assert settings == {"mode": "head", "swapper": "ghost_1_256", "enhance": "auto", "mouth": "on",
+        assert settings == {"mode": "hair", "swapper": "ghost_1_256", "enhance": "auto", "mouth": "on",
                             "occlusion": False}
         assert client.get("/api/video/").json()["settings"]["swapper"] == "ghost_1_256"
         assert client.patch("/api/video/settings", json={"mode": "face"}).json()["settings"]["mode"] == "face"
@@ -306,7 +306,7 @@ class TestWholeHead:
         from backend.video.engine import VideoSettings
 
         settings = VideoSettings()
-        assert settings.mode == "head"
+        assert settings.mode == "hair"
         settings.apply({"mode": "face"})
         assert settings.mode == "face"
         settings.apply({"mode": "everything"})
@@ -366,3 +366,25 @@ class TestRealtimeFixes:
                               np.zeros((8, 8, 3), np.uint8), wait=1.0)
         thread.join()
         assert layer is not None and layer.t == 1.0 and layer.pose == (0.1, 0.2)
+
+
+class TestHair:
+    def test_the_hair_layer_fades_with_the_head_turn(self):
+        from backend.video.hair import HairLayer, hair_weight
+
+        layer = HairLayer(np.zeros((8, 8, 3), np.uint8), np.ones((8, 8), np.float32), (0.0, 0.55))
+        assert hair_weight(layer, (0.0, 0.55)) == 1.0
+        assert hair_weight(layer, (0.4, 0.55)) == 0.0
+        assert 0.0 < hair_weight(layer, (0.22, 0.55)) < 1.0
+
+    def test_covering_paints_only_where_the_own_hair_was(self):
+        from backend.video.hair import SIZE, OwnHead, cover
+
+        crop = np.full((SIZE, SIZE, 3), 200, np.uint8)
+        known = np.ones((SIZE // 4, SIZE // 4), np.float32)
+        known[:40, :] = 0.0                 # the hair (unknown) at the top
+        paint = np.zeros((SIZE, SIZE), np.float32)
+        paint[:160] = 1.0
+        filled = cover(crop, OwnHead(0.0, known, paint))
+        assert filled.shape == crop.shape
+        assert abs(int(filled[100, 256, 0]) - 200) <= 2   # the background's colour, smoothly

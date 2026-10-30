@@ -19,7 +19,7 @@ from backend.video.worker import FaceWorker, decode_image, encode_jpeg
 logger = logging.getLogger(__name__)
 
 SETTING_KEYS = ("mode", "swapper", "enhance", "mouth", "occlusion")
-DEFAULT_SETTINGS = {"mode": "head", "swapper": "auto", "enhance": "auto", "mouth": "auto", "occlusion": True}
+DEFAULT_SETTINGS = {"mode": "hair", "swapper": "auto", "enhance": "auto", "mouth": "auto", "occlusion": True}
 
 
 class FaceService:
@@ -42,11 +42,14 @@ class FaceService:
             stored = json.loads(self._settings_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             stored = {}
-        return {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k in SETTING_KEYS}}
+        settings = {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k in SETTING_KEYS}}
+        if settings["mode"] not in ("hair", "face"):   # the whole head is for files only now
+            settings["mode"] = "hair"
+        return settings
 
     def update_settings(self, payload: dict) -> dict:
         settings = dict(self.settings)
-        if payload.get("mode") in ("head", "face"):
+        if payload.get("mode") in ("hair", "face"):
             settings["mode"] = payload["mode"]
         if payload.get("swapper") == "auto" or payload.get("swapper") in SWAPPERS:
             settings["swapper"] = payload["swapper"]
@@ -101,7 +104,8 @@ class FaceService:
             self._worker.send("identity", None, None)
             return
         portrait = self.library.portrait(face_id)
-        self._worker.send("identity", self.library.identity(face_id), str(portrait) if portrait else None)
+        self._worker.send("identity", self.library.identity(face_id), str(portrait) if portrait else None,
+                          [str(path) for path in self.library.photos(face_id)])
 
     def close(self) -> None:
         if self._worker is not None:

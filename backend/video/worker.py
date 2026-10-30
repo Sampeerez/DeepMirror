@@ -211,17 +211,20 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     logging.getLogger("backend").setLevel(logging.INFO)
 
     def _convert(job: str, source: str, target: str, identity: np.ndarray | None = None,
-                 portrait: str | None = None) -> None:
+                 portrait: str | None = None, clone: str | None = None) -> None:
         """A whole video file, with its own engine (its own tracking) next to the live one."""
         from backend.video.offline import swap_video
 
         # Same swapper as the live engine (they share the loaded models); every frame swapped, so no real mouth.
         swapper = engine._swapper_id or engine.settings.swapper
-        offline = FaceEngine(models, arbiter, replace(engine.settings, mouth="off", swapper=swapper))
+        mode = clone if clone in ("hair", "face", "head") else engine.settings.mode
+        offline = FaceEngine(models, arbiter, replace(engine.settings, mouth="off", swapper=swapper, mode=mode))
         # The face chosen for this file, else the one worn live.
         offline.set_identity(identity if identity is not None else engine.identity)
         offline.set_portrait(_read_image(portrait) if portrait else engine.portrait)
         offline.remote = engine.remote
+        offline.hair_photos = ([str(path) for path in sorted(Path(portrait).parent.glob("photo_*.jpg"))]
+                               if portrait else engine.hair_photos)
         try:
             frames = swap_video(offline, Path(source), Path(target), lambda done: send("convert_progress", job, done))
             send("convert_done", job, None, frames)
@@ -259,6 +262,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                 elif kind == "identity":
                     engine.set_identity(message[1])
                     engine.set_portrait(_read_image(message[2]) if len(message) > 2 else None)
+                    engine.hair_photos = list(message[3]) if len(message) > 3 and message[3] else []
                 elif kind == "settings":
                     before = engine.settings.swapper
                     engine.settings.apply(message[1])
@@ -290,7 +294,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                         camera.delay = max(0.0, float(config.get("delay_ms", 0)) / 1000)
                 elif kind == "convert":
                     _, job, source, target, *rest = message
-                    threading.Thread(target=_convert, args=(job, source, target, *rest[:2]),
+                    threading.Thread(target=_convert, args=(job, source, target, *rest[:3]),
                                      name="face-convert",
                                      daemon=True).start()
                 elif kind == "reset":
@@ -398,7 +402,7 @@ class FaceWorker:
         return done[1][0], done[1][1]
 
     def convert_video(self, source: Path, target: Path, on_progress: Callable[[float], None],
-                      identity: np.ndarray | None = None, portrait: Path | None = None,
+                      identity: np.ndarray | None = None, portrait: Path | None = None, clone: str | None = None,
                       timeout: float = 6 * 3600) -> int:
         """Swap ``identity`` (default: the face worn live) into every frame of ``source``; returns the frame count."""
         self.start()
@@ -418,7 +422,7 @@ class FaceWorker:
 
         unsubscribe = self.subscribe(listen)
         try:
-            self.send("convert", job, str(source), str(target), identity, str(portrait) if portrait else None)
+            self.send("convert", job, str(source), str(target), identity, str(portrait) if portrait else None, clone)
             if not done.wait(timeout):
                 raise TimeoutError("The face process did not finish the video")
         finally:

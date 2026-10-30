@@ -33,8 +33,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, gpu: bool) -> None:
     models = FaceModels(Path(face_dir), gpu)
     engine = FaceEngine(models, arbiter, VideoSettings(mode="head"))
     try:
-        if models.heads_ready:
-            models.head_models(arbiter)
+        # The networks load on the first render (only whole-head file conversions need them).
         conn.send(("ready",))
         while True:
             message = conn.recv()
