@@ -33,6 +33,7 @@ PREVIEW_FILE = "head3d.jpg"
 ERROR_FILE = "head3d.error"
 SCRIPTS = Path(__file__).resolve().parent / "head3d"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+OWN_HAIR_SECONDS = 1.5   # how often the speaker's own hair is re-read live (a GPU parse, ~45 ms)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +73,8 @@ class LamInstall:
         """The environment LAM's scripts run in: the studio's, without its virtual environment."""
         env = {name: value for name, value in os.environ.items() if name.upper() != "VIRTUAL_ENV"}
         env["DEEPMIRROR_LAM_PLUGINS"] = str(self.plugins)
+        # LAM marks its image encoder for torch.compile, which needs Triton (not on Windows): eager.
+        env["TORCHDYNAMO_DISABLE"] = "1"
         return env
 
     def compiler_environment(self) -> dict[str, str]:
@@ -262,6 +265,7 @@ class Layer:
     x: int
     y: int
     image: np.ndarray        # h x w x 4, BGRA, straight alpha
+    points: np.ndarray | None = None   # the face's five points in the frame (from the head process)
 
 
 class HeadDriver:
@@ -332,8 +336,9 @@ class HeadDriver:
                 elif kind == "layer":
                     _, seq, layer, self.timings = message
                     if layer is not None:
-                        x, y, width, height, data = layer
-                        layer = Layer(x, y, np.frombuffer(data, np.uint8).reshape(height, width, 4))
+                        x, y, width, height, data, five = layer
+                        layer = Layer(x, y, np.frombuffer(data, np.uint8).reshape(height, width, 4),
+                                      np.asarray(five, np.float32))
                     self.on_layer(seq, layer)
                 elif kind == "loaded":
                     self.loaded, self.error = (message[1], None) if message[2] is None else (None, message[2])
@@ -389,19 +394,15 @@ def paste(frame: np.ndarray, layer: Layer) -> np.ndarray:
 class OwnHair:
     """The speaker's own hair where the 3D head does not reach (longer or bigger hair than the worn
     person's), painted over with the background around it, as Face + hair does: the speaker's hair
-    is re-read about twice a second in a GPU gap and placed on every frame by its five points."""
+    is re-read every OWN_HAIR_SECONDS in a GPU gap and placed on every frame by its five points (the
+    head process's, so no face detector runs here)."""
 
     def __init__(self, engine) -> None:
         self.engine = engine
         self.own = None
         self._busy = threading.Lock()
 
-    def points(self, frame: np.ndarray, t: float) -> np.ndarray | None:
-        return self.engine.track(frame, t).points
-
     def refresh(self, frame: np.ndarray, points: np.ndarray, t: float) -> None:
-        from backend.video.engine import OWN_HAIR_SECONDS
-
         if (self.own is not None and t - self.own.t < OWN_HAIR_SECONDS) or not self._busy.acquire(blocking=False):
             return
 
@@ -415,7 +416,9 @@ class OwnHair:
                 crop, _ = hair.head_crop(frame, points)
                 with self.engine.arbiter.video(self.engine._parse_ms, timeout=0.2) as granted:
                     if granted:
-                        self.own = hair.parse_own(crop, parser, t)
+                        own = hair.parse_own(crop, parser, t)
+                        own.empty = float(own.paint.max()) < 0.05   # no hair outside the head: nothing to paint
+                        self.own = own
             except Exception:
                 logger.exception("Reading the speaker's hair failed")
             finally:
@@ -428,7 +431,7 @@ class OwnHair:
         from backend.video.blend import paste as paste_crop
 
         own = self.own
-        if own is None:
+        if own is None or own.empty:
             return frame
         crop, matrix = hair.head_crop(frame, points)
         return paste_crop(frame, hair.cover(crop, own), own.paint, matrix)
@@ -440,7 +443,6 @@ class _Record:
     frame: np.ndarray
     seq: int | None          # None: not sent (the driver was busy); it gets the latest head
     arrived: float
-    points: np.ndarray | None = None   # the five points (own hair), when tracked
 
 
 class LiveAvatarSession:
@@ -466,7 +468,7 @@ class LiveAvatarSession:
         self._lock = threading.Lock()
         self.frames_in = self.frames_out = 0
         self._rate_since = (clock(), 0, 0)
-        self.compose_ms = self.track_ms = 0.0
+        self.compose_ms = 0.0
         driver.on_layer = self._on_layer
 
     def _on_layer(self, seq: int, layer: Layer | None) -> None:
@@ -483,17 +485,10 @@ class LiveAvatarSession:
             if self._pending() < self.in_flight:
                 seq = self._next_seq
                 self._next_seq += 1
-            record = _Record(t, frame, seq, self.clock())
-            self._records.append(record)
+            self._records.append(_Record(t, frame, seq, self.clock()))
             self.frames_in += 1
         if seq is not None and not self.driver.submit(seq, t, frame):
             self._on_layer(seq, None)
-        if self.hair is not None:   # after sending: the head renders meanwhile
-            started = time.perf_counter()
-            record.points = self.hair.points(frame, t)
-            if record.points is not None:
-                self.hair.refresh(frame, record.points, t)
-            self.track_ms = 0.9 * self.track_ms + 0.1 * (time.perf_counter() - started) * 1000
 
     def ready(self) -> list[tuple[float, np.ndarray]]:
         out = []
@@ -519,8 +514,9 @@ class LiveAvatarSession:
             started = time.perf_counter()
             frame = record.frame
             if layer is not None:
-                if self.hair is not None and record.points is not None:
-                    frame = self.hair.cover(frame, record.points)
+                if self.hair is not None and layer.points is not None:
+                    self.hair.refresh(frame, layer.points, record.t)
+                    frame = self.hair.cover(frame, layer.points)
                 frame = paste(frame, layer)
             out.append((record.t, frame))
             self.compose_ms = 0.9 * self.compose_ms + 0.1 * (time.perf_counter() - started) * 1000
@@ -536,7 +532,7 @@ class LiveAvatarSession:
         timings = self.driver.timings or {}
         return {"mode": "3d", "fps_in": round(fps_in, 1), "fps_out": round(fps_out, 1),
                 "track_ms": round(float(timings.get("track_ms", 0.0)), 1),
-                "points_ms": round(self.track_ms, 1), "render_size": int(timings.get("render_size", 0)),
+                "render_size": int(timings.get("render_size", 0)),
                 "render_ms": round(float(timings.get("render_ms", 0.0)), 1),
                 "compose_ms": round(self.compose_ms, 1), "face": self._latest is not None}
 

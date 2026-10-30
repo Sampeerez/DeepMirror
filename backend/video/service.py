@@ -99,6 +99,7 @@ class FaceService:
                                           self.data_dir / "cache" / "face_swap_ms.json", self.gpu())
                 self._worker.subscribe(self._on_message)
             if not self._worker.running:
+                self._worker.start_mode = self.settings["mode"]
                 self._worker.start()
                 self._worker.send("settings", self.settings)
                 self._send_identity()
@@ -124,6 +125,13 @@ class FaceService:
         that faces added meanwhile do not have yet."""
         self.installer.start_if_needed()
         self._build_missing_heads()
+        # The face process (and the 3D head's) start now, not when the camera is turned on: starting
+        # them loads models and creates GPU contexts, which must not happen under a live voice.
+        if self.models_ready:
+            try:
+                self.worker()
+            except RuntimeError:
+                logger.exception("The face process did not start")
 
     def _build_missing_heads(self) -> None:
         if not self.heads.available:

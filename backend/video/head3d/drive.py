@@ -9,7 +9,8 @@ landmarks (PnP against the head's own FLAME landmarks, through a One-Euro filter
 no lag when moving); the Gaussians move with FLAME's ARKit blendshapes and that pose; a camera
 turned to look at the head renders it at the size it has on screen, and the render is warped back
 into the frame's own camera. The head's light is then matched to the speaker's skin in the frame.
-What goes back is the head layer (BGRA, straight alpha) and where it sits in the frame.
+What goes back is the head layer (BGRA, straight alpha), where it sits in the frame, and the face's
+five points (the studio paints the speaker's own hair over by them).
 
 Detection and rendering run on two threads, so one frame renders while the next one is tracked.
 The GPU is shared through the voice's arbiter: a render starts only in a gap the voice leaves, and
@@ -54,8 +55,10 @@ FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365
              176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
 NOT_SKIN = [[70, 63, 105, 66, 107, 133, 144, 145, 153, 33], [336, 296, 334, 293, 300, 263, 373, 374, 380, 362],
             [61, 39, 37, 0, 267, 269, 291, 405, 314, 17, 84, 181]]
+# The five points the studio places faces by (eyes, nose tip, mouth corners), from MediaPipe's mesh.
+FIVE = [(33, 133), (362, 263), (4,), (61,), (291,)]
 FLAME = "./model_zoo/human_parametric_models/flame_assets/flame"
-RENDER_MIN, RENDER_MAX = 256, 640   # render side, pixels: the head's size on screen, within these
+RENDER_MIN, RENDER_MAX = 256, 512   # render side, pixels: the head's size on screen, within these
 HEAD_SPAN = 2.6        # the rendered square, in face widths (hair included)
 FOCAL = 0.96           # assumed webcam focal length, in frame widths (~55 degrees across)
 DETECT_WIDTH = 640     # MediaPipe reads a copy this wide (its landmarks are relative: no loss)
@@ -214,8 +217,12 @@ class Light:
             self.gain += LIGHT_FOLLOW * (gain - self.gain)
             self.shift += LIGHT_FOLLOW * (shift - self.shift)
         lab = cv2.cvtColor(layer[..., :3], cv2.COLOR_BGR2LAB).astype(np.float32)
+        # The colour cast is the skin's: dark hair and brows keep their own (a shift that suits skin
+        # turns dark hair green or blue), fading in from dark to mid tones.
+        tone = np.clip((lab[..., :1] - 60.0) / 70.0, 0.0, 1.0)
         lab[..., 0] *= self.gain
-        lab += self.shift
+        lab[..., 0] += self.shift[0]
+        lab[..., 1:] += self.shift[1:] * tone
         out = layer.copy()
         out[..., :3] = cv2.cvtColor(np.clip(lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
         return out
@@ -355,7 +362,8 @@ def main() -> None:
         shift = np.array([[1, 0, -x0], [0, 1, -y0], [0, 0, 1]], np.float64)
         warped = cv2.warpPerspective(image, shift @ warp, (int(x1 - x0), int(y1 - y0)), flags=cv2.INTER_LINEAR)
         warped = light.apply(warped, frame[y0:y1, x0:x1], mesh - [x0, y0])
-        return int(x0), int(y0), int(x1 - x0), int(y1 - y0), warped.tobytes()
+        five = [[float(v) for v in mesh[list(group)].mean(0)] for group in FIVE]
+        return int(x0), int(y0), int(x1 - x0), int(y1 - y0), warped.tobytes(), five
 
     renderer = threading.Thread(target=render_loop, name="head3d-render", daemon=True)
     renderer.start()

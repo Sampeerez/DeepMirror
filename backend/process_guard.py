@@ -72,6 +72,19 @@ def contain_children() -> bool:
     return True
 
 
+def lower_priority() -> None:
+    """This process below normal CPU priority: the live voice (in the server) comes first."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)
+        else:
+            os.nice(5)
+    except OSError:
+        logger.debug("Could not lower this process's priority")
+
+
 def exit_with_parent() -> None:
     """In a child process: exit at once when the parent process is gone."""
     parent = mp.parent_process()

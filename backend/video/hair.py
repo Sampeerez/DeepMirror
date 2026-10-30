@@ -47,6 +47,7 @@ class OwnHead:
     # Per fill scale (coarse to fine): the background mask at that scale, its blurred weight and
     # how far to trust it. Worked out once per parse, so a frame only blurs colours.
     scales: list = field(default_factory=list)
+    empty: bool = False          # no hair to paint over (the 3D head skips the fill then)
 
 
 def head_crop(frame: np.ndarray, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

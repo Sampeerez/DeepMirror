@@ -106,15 +106,16 @@ class _VirtualCamera:
 
 
 def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu: bool,
-        head_conn: Connection | None = None) -> None:
+        head_conn: Connection | None = None, start_mode: str = "hair") -> None:
     """Process entry: serve frames and commands until told to stop or the server goes away."""
     import cv2
     import torch
 
-    from backend.process_guard import exit_with_parent
+    from backend.process_guard import exit_with_parent, lower_priority
     from backend.video.runtime import cpu_threads
 
     exit_with_parent()
+    lower_priority()
 
     # A share of the cores (a quarter, 2 to 4) for one face at camera rate; the rest stay with the voice.
     cv2.setNumThreads(max(2, cpu_threads()))
@@ -136,7 +137,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     install = LamInstall.default()
     live: LiveFaceSession | LiveAvatarSession | None = None
     # The 3D head (Clone: 3D head): wanted, built for this face, and its driver process.
-    want_3d = False
+    want_3d = start_mode == "3d"
     head_3d: Path | None = None
     driver: HeadDriver | None = None
     driver_started = [-1e9]
@@ -192,7 +193,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                 if camera is not None and offset is not None:
                     camera.push(t + offset, frame)
             now = time.monotonic()
-            if now - last_plan > 10.0 and not planning.is_set():
+            if now - last_plan > 10.0 and not planning.is_set() and not isinstance(session, LiveAvatarSession):
                 # The voice started or stopped: maybe another swapper fits better. On its own
                 # thread: loading and warming a swapper waits for GPU gaps, and the frames must
                 # keep going out meanwhile.
@@ -217,8 +218,8 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         if not want_3d or head_3d is None or not install.available():
             return False
         if driver is None or not driver.running:
-            if time.monotonic() - driver_started[0] < 30.0:   # it just ended: not again at once
-                return False
+            if driver is not None and time.monotonic() - driver_started[0] < 30.0:
+                return False   # it just ended: not again at once
             driver_started[0] = time.monotonic()
             driver = HeadDriver(install, arbiter_name, lambda seq, layer: None,
                                 log_path=Path(cache_path).parent.parent / "logs" / "head3d-drive.log")
@@ -226,9 +227,11 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         return driver.ready and driver.use(head_3d)
 
     def session_for_frame():
-        """The live session for the next frame: the 3D head once it is ready, else the face swap."""
+        """The live session for the next frame: with a built 3D head, the 3D head (the camera as it is
+        for the few seconds its process takes to start: no face swap loaded meanwhile); else the swap."""
         nonlocal live
-        use_avatar = avatar_ready()
+        use_avatar = want_3d and head_3d is not None and install.available()
+        avatar_ready()   # starts the head process and loads the head as needed
         if live is not None and isinstance(live, LiveAvatarSession) != use_avatar:
             live.close()
             live = None
@@ -273,7 +276,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     try:
         models.measure(Path(cache_path), arbiter)
         # Loaded now, not on the first frame: a swapper takes a second or two to load and warm up.
-        if models.available():
+        if models.available() and not (want_3d and install.available()):   # the 3D head needs no swapper
             engine.plan()
             last_plan = time.monotonic()
         send("ready", {"swap_ms": models.swap_ms, "available": models.available()})
@@ -302,12 +305,14 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                     engine.hair_photos = list(message[3]) if len(message) > 3 and message[3] else []
                     head = Path(message[2]).parent / HEAD_FILE if len(message) > 2 and message[2] else None
                     head_3d = head if head is not None and head.is_file() else None
+                    avatar_ready()   # with the 3D head chosen: its process starts and loads it now
                 elif kind == "settings":
                     before = engine.settings.swapper
                     want_3d = message[1].get("mode") == "3d"
+                    avatar_ready()
                     # Until the 3D head is ready (or for a face without one): the face and the photo's hair.
                     engine.settings.apply({**message[1], "mode": "hair"} if want_3d else message[1])
-                    if engine.settings.swapper != before:
+                    if engine.settings.swapper != before and not want_3d:
                         engine.plan()
                 elif kind == "enroll":
                     _, request, images = message
@@ -363,6 +368,7 @@ class FaceWorker:
 
     def __init__(self, arbiter_name: str, face_dir: Path, cache_path: Path, gpu: bool) -> None:
         self._args = (arbiter_name, str(face_dir), str(cache_path), gpu)
+        self.start_mode = "hair"   # the clone mode at start (the 3D head loads no face swapper)
         self._head_process: BaseProcess | None = None
         self._process: BaseProcess | None = None
         self._conn: Any = None   # the pipe's server end
@@ -393,7 +399,8 @@ class FaceWorker:
         head.start()
         self._head_process = head
         head_side.close()
-        process = context.Process(target=run, args=(child, *self._args, head_face), name="deepmirror-face",
+        process = context.Process(target=run, args=(child, *self._args, head_face, self.start_mode),
+                                  name="deepmirror-face",
                                   daemon=True)
         process.start()
         self._process = process
