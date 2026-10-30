@@ -60,6 +60,7 @@ def create_app(settings: Settings | None = None, *, manager: ModelManager | None
         if settings.RESTORE_LAST_VOICE:
             threading.Thread(target=app.state.model_manager.restore_last_voice, name="restore-voice",
                              daemon=True).start()
+        threading.Thread(target=app.state.faces.start_background, name="head3d-start", daemon=True).start()
         if on_ready is not None:
             on_ready()
         watcher = asyncio.create_task(app.state.lifecycle.watch()) if app.state.lifecycle.enabled else None

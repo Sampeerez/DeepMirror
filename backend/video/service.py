@@ -13,6 +13,7 @@ import numpy as np
 from backend.assets import AssetStore
 from backend.compute_arbiter import GpuArbiter
 from backend.video.avatar import HeadBuilder
+from backend.video.head3d_install import Head3DInstaller
 from backend.video.library import FaceLibrary
 from backend.video.swap import SWAPPERS
 from backend.video.worker import FaceWorker, decode_image, encode_jpeg
@@ -41,6 +42,7 @@ class FaceService:
         self.heads = HeadBuilder(self.library.root, lambda: self.assets.folder("video") / "bisenet_resnet_34.onnx",
                                  lambda: self.arbiter.gap() is not None, log_dir=self.data_dir / "logs",
                                  on_built=lambda _face: self._send_identity())
+        self.installer = Head3DInstaller(self.data_dir, on_ready=self._build_missing_heads)
 
     # --- Settings ---------------------------------------------------------
 
@@ -117,7 +119,22 @@ class FaceService:
         self._worker.send("identity", self.library.identity(face_id), str(portrait) if portrait else None,
                           [str(path) for path in self.library.photos(face_id)])
 
+    def start_background(self) -> None:
+        """At server start: install the 3D head if this computer suits it, or build the heads
+        that faces added meanwhile do not have yet."""
+        self.installer.start_if_needed()
+        self._build_missing_heads()
+
+    def _build_missing_heads(self) -> None:
+        if not self.heads.available:
+            return
+        for face in self.library.list():
+            if self.heads.status(face["id"])["state"] == "missing":
+                self.heads.request(face["id"])
+        self._send_identity()
+
     def close(self) -> None:
+        self.installer.close()
         self.heads.close()
         if self._worker is not None:
             self._worker.stop()
@@ -165,6 +182,7 @@ class FaceService:
             "assets": self.assets.status("video"),
             "faces": [{**face, "head3d": self.heads.status(face["id"])} for face in self.library.list()],
             "head3d": self.heads.available,
+            "head3d_install": self.installer.status(),
             "active_face": self.library.active(),
             "settings": self.settings,
             "swappers": [{"id": spec.id, "label": spec.label} for spec in SWAPPERS.values()],

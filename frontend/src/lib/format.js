@@ -36,6 +36,15 @@ export function formatFileTimestamp(date = new Date()) {
     + `_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
 }
 
+/** The 3D head's own install (it installs itself on a suitable computer), in a few words. */
+export function installLabel(install) {
+  switch (install?.state) {
+    case 'installing': return `Installing 3D head… ${Math.round((install.progress || 0) * 100)}%`;
+    case 'failed': return `3D head install failed${install.error ? `: ${install.error}` : ''}`;
+    default: return null;
+  }
+}
+
 /** A face's 3D head, in a few words. */
 export function headLabel(head) {
   switch (head?.state) {

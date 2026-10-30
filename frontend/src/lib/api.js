@@ -319,6 +319,8 @@ export const deleteFace = (faceId) => request(`/video/faces/${encodeURIComponent
 export const buildFaceHead = (faceId) => request(`/video/faces/${encodeURIComponent(faceId)}/head3d`, {
   method: 'POST',
 });
+export const faceHeadPreviewUrl = (faceId, version = 0) =>
+  `${API_BASE}/video/faces/${encodeURIComponent(faceId)}/head3d.jpg?v=${version}`;
 export const faceThumbnailUrl = (faceId) => `${API_BASE}/video/faces/${encodeURIComponent(faceId)}/thumbnail`;
 
 /** Start converting a video (face on every frame, voice on its sound); returns the job. */

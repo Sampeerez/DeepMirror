@@ -93,6 +93,18 @@ async def activate(request: Request, face_id: str) -> dict:
     return service.status()
 
 
+@router.get("/api/video/faces/{face_id}/head3d.jpg")
+async def head_preview(request: Request, face_id: str) -> FileResponse:
+    """The face's 3D head as built, seen from its photo."""
+    try:
+        path = _service(request).library.thumbnail(face_id).with_name("head3d.jpg")
+    except FaceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Face not found") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No 3D head yet")
+    return FileResponse(path, media_type="image/jpeg")
+
+
 @router.post("/api/video/faces/{face_id}/head3d")
 async def build_head(request: Request, face_id: str) -> dict:
     """Build (or rebuild) the face's 3D head in the background."""

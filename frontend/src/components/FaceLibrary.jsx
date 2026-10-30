@@ -1,8 +1,8 @@
 import React, { memo, useRef, useState } from 'react';
 import { Box, Check, Download, ImagePlus, ScanFace, Trash2, UserRound } from 'lucide-react';
 import Button from './Button';
-import { faceThumbnailUrl } from '../lib/api';
-import { formatBytes, headLabel } from '../lib/format';
+import { faceHeadPreviewUrl, faceThumbnailUrl } from '../lib/api';
+import { formatBytes, headLabel, installLabel } from '../lib/format';
 
 const ACCEPTED = 'image/jpeg,image/png,image/webp';
 const MAX_PHOTOS = 12;
@@ -120,7 +120,14 @@ function FaceTile({ item, wearing, onWear, onDelete, onBuild, busy }) {
   return (
     <li className={`flex flex-col overflow-hidden rounded-lg border ${wearing ? 'border-video-line bg-video-bg' : 'border-line-strong bg-raised'}`}>
       {item ? (
-        <img src={faceThumbnailUrl(item.id)} alt="" className="aspect-square w-full object-cover" />
+        <div className="relative">
+          <img src={faceThumbnailUrl(item.id)} alt="" className="aspect-square w-full object-cover" />
+          {head?.state === 'ready' ? (
+            <img src={faceHeadPreviewUrl(item.id, head.updated)} alt={`3D head of ${item.name}`}
+              title="The 3D head, as built"
+              className="absolute bottom-1.5 right-1.5 h-1/3 w-1/3 rounded-md border border-line-strong bg-white object-cover" />
+          ) : null}
+        </div>
       ) : (
         <div className="flex aspect-square w-full items-center justify-center bg-sunken">
           <UserRound className="h-10 w-10 text-fg-faint" strokeWidth={1.5} aria-hidden="true" />
@@ -164,7 +171,13 @@ function FaceLibrary({ face }) {
   return (
     <div className="page-grid">
       <section className="panel flex min-h-0 flex-col p-4 lg:col-span-2" aria-labelledby="faces-title">
-        <h2 id="faces-title" className="panel-title">Faces</h2>
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="faces-title" className="panel-title">Faces</h2>
+          {installLabel(face.status?.head3d_install) ? (
+            <p className={`truncate text-xs ${face.status.head3d_install.state === 'failed' ? 'text-danger-fg' : 'text-fg-faint'}`}
+              title={face.status.head3d_install.error || undefined}>{installLabel(face.status.head3d_install)}</p>
+          ) : null}
+        </div>
         <ul className="mt-4 grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 xl:grid-cols-5">
           <FaceTile item={null} wearing={!active} onWear={() => face.activate(null)} busy={face.busy} />
           {faces.map((item) => (

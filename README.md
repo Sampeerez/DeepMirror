@@ -68,13 +68,15 @@ Every page is in the sidebar:
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
 ### Face
-- **3D head** (optional install, Windows + NVIDIA): when a face is added, a 3D head with its hair,
-  beard and earrings is built once from its most frontal photo (LAM, about a minute), with the photo's
-  clothes and neck left out. Live, MediaPipe reads your pose and 52 expressions from each camera frame
-  and the head is rendered for exactly that frame, so hair and outline are right at every angle. On a
-  GTX 1660 SUPER: 4–5 ms of GPU a frame, 30 fps next to the live voice. Install it with
-  `uv run python scripts/setup_head3d.py`, then choose Settings › Face › Clone › 3D head. Until a
-  face's head is built (or without the install) Face + hair is used.
+- **3D head** (Windows + NVIDIA GPU with 6 GB or more): when a face is added, a 3D head with its
+  hair, beard and earrings is built once from its best photo (facing the camera, sharp, eyes open,
+  mouth shut; a small face is restored first), about a minute, with the photo's clothes, neck and
+  background left out. Live, MediaPipe reads your pose and 52 expressions (gaze and blinks too) from
+  each camera frame and the head is rendered for exactly that frame, at the size it has on screen,
+  with its light matched to yours; your own hair where the new head does not reach is painted over
+  with the background. On a GTX 1660 SUPER: 4–6 ms of GPU a frame, 30 fps next to the live voice.
+  **It installs itself**: the first start on such a computer downloads it in the background
+  (about 7 GB, nothing to compile, progress in Faces and Settings) while Face + hair is used.
 - **Whole head**: the person's head, hair, beard and ears, not only the inside of the
   face. The sharpest front-facing photo is animated with your pose and expressions (LivePortrait), so
   hair and skin are the photo's own; the face swap on top keeps your eyes, brows and mouth live. Your
@@ -122,7 +124,7 @@ releases and LivePortrait's, and run with ONNX Runtime (CUDA, DirectML or CPU) a
 | Occlusion | XSeg | Hands and objects in front of the face, for swappers without their own mask |
 | Detail | GPEN-BFR 256 | Only on close faces when the GPU has room: it costs a little identity |
 | Whole head | LivePortrait (human), run here in PyTorch fp32 in 33 stages of at most ~33 ms | No swap model changes hair or the head's outline (FaceFusion, Deep-Live-Cam, HyperSwap, inswapper, GHOST all replace the inside of the face); animating the photo itself does. fp16 is slower on this GPU and gave NaN |
-| 3D head | LAM-20K (Large Avatar Model, SIGGRAPH 2025), driven by MediaPipe Face Landmarker | One photo to an animatable 3D Gaussian head with its hair in ~10 s on this GPU; renders a frame in 4–5 ms, so every frame gets its own head. Runs in its own Python 3.10 environment (`models/lam`, ~10 GB) |
+| 3D head | LAM-20K (Large Avatar Model, SIGGRAPH 2025), driven by MediaPipe Face Landmarker | One photo to an animatable 3D Gaussian head with its hair in ~1 minute on this GPU (1.8 GB of GPU memory at most, so it fits next to the studio); renders a frame in 4–6 ms, so every frame gets its own head. Runs in its own Python 3.10 environment (`models/lam`, ~7 GB), with its CUDA libraries prebuilt for GTX 10 to RTX 40 (RTX 50 through PTX) |
 | Parsing | BiSeNet (ResNet-34) | Hair, ears and neck of the worn head, and the speaker's own hair to fill in |
 
 Also reviewed: Deep-Live-Cam and LiveFaceCam (inswapper/HyperSwap with a mouth mask; the real-mouth
@@ -176,6 +178,7 @@ Settings can be overridden with environment variables or a `.env` file:
 | `OVC_SILENCE_THRESHOLD_DB` | `-60` | Silence Saver threshold |
 | `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See Security |
 | `OVC_CORS_ORIGINS` | local | Extra origins allowed to use the API |
+| `OVC_HEAD3D` | on | `off`: never install the 3D head by itself (`uv run python scripts/setup_head3d.py` installs it by hand) |
 
 The full list is in [backend/config.py](backend/config.py).
 
@@ -193,6 +196,11 @@ make dev-backend      # API with auto-reload on :8000
 make dev-frontend     # Vite on :5173
 make lint test        # ruff, pyright, eslint, pytest, vitest
 ```
+
+The 3D head's CUDA libraries (pytorch3d, diff-gaussian-rasterization, nvdiffrast's plugin) are
+compiled once by maintainers with `scripts/build_head3d_wheels.py` (Visual Studio 2019 Build Tools
+and CUDA 11.8) and published as the `head3d-deps-1` release; `scripts/setup_head3d.py` pins their
+SHA-256.
 
 
 ## Screenshots
@@ -223,7 +231,7 @@ Sioaeko (MIT), since rewritten.
 | [InsightFace](https://github.com/deepinsight/insightface) | inswapper, ArcFace, SCRFD, downloaded on first use | Code MIT, models non-commercial research only |
 | [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam), [LiveFaceCam](https://github.com/huzaifa525/LiveFaceCam) | Ideas (mouth mask) | AGPL-3.0 |
 | [LivePortrait](https://github.com/KlingTeam/LivePortrait) | Whole head: its networks (vendored in `backend/video/liveportrait`) and weights, downloaded on first use | MIT |
-| [LAM](https://github.com/aigc3d/LAM) | 3D head: built and rendered in its own environment, installed on request | Code Apache-2.0, weights CC BY-NC 4.0 |
+| [LAM](https://github.com/aigc3d/LAM) | 3D head: built and rendered in its own environment, installed by itself on a suitable computer | Code Apache-2.0, weights CC BY-NC 4.0 |
 | [FLAME](https://flame.is.tue.mpg.de/) | The head model LAM animates (in LAM's assets) | MPI FLAME licence, non-commercial |
 | [MediaPipe](https://github.com/google-ai-edge/mediapipe) | 3D head: face landmarks and blendshapes from the camera | Apache-2.0 |
 | [BiSeNet face parser](https://huggingface.co/facefusion/models-3.0.0) | Face and hair regions, from FaceFusion's release | MIT |

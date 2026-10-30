@@ -56,31 +56,48 @@ class LamInstall:
         return self.root / "mp" / "face_landmarker.task"
 
     def available(self) -> bool:
-        return (self.python.is_file() and self.landmarker.is_file()
+        return (self.python.is_file() and self.landmarker.is_file() and any(self.plugins.glob("nvdiffrast_plugin.*"))
                 and (self.source / "model_zoo/lam_models/releases/lam/lam-20k/step_045500/model.safetensors").is_file())
 
-    def build_environment(self) -> dict[str, str]:
-        """The environment the build runs in: LAM's face tracker compiles a CUDA plugin on first use
-        (nvdiffrast), so on Windows it needs the same compiler set-up as the install."""
-        env = dict(os.environ)
-        env.pop("VIRTUAL_ENV", None)
-        scripts = str(self.python.parent)
+    @property
+    def plugins(self) -> Path:
+        """Prebuilt CUDA plugins loaded without a compiler (nvdiffrast's, for LAM's face tracker)."""
+        return self.root / "plugins"
+
+    def run_environment(self) -> dict[str, str]:
+        """The environment LAM's scripts run in: the studio's, without its virtual environment."""
+        env = {name: value for name, value in os.environ.items() if name.upper() != "VIRTUAL_ENV"}
+        env["DEEPMIRROR_LAM_PLUGINS"] = str(self.plugins)
+        return env
+
+    def compiler_environment(self) -> dict[str, str]:
+        """For compiling LAM's CUDA libraries (maintainers, see scripts/build_head3d_wheels.py):
+        Visual Studio 2019's x64 tools and CUDA 11.8 on the path, and LAM's environment's scripts (ninja)."""
+        env = self.run_environment()
+        extra = [str(self.python.parent)]
         if sys.platform == "win32":
             vcvars = _vcvars()
             if vcvars is not None:
                 with contextlib.suppress(OSError, subprocess.SubprocessError):
                     out = subprocess.run(f'cmd /s /c ""{vcvars}" >nul 2>nul && set"', capture_output=True,
                                          text=True, timeout=60, creationflags=NO_WINDOW).stdout
-                    for line in out.splitlines():
-                        name, equals, value = line.partition("=")
-                        if equals:
-                            env[name] = value
+                    merge_environment(env, (line.partition("=")[::2] for line in out.splitlines() if "=" in line))
             cuda = _cuda_home()
             if cuda is not None:
-                env.update(CUDA_HOME=str(cuda), CUDA_PATH=str(cuda), DISTUTILS_USE_SDK="1")
-                scripts = f"{cuda / 'bin'}{os.pathsep}{scripts}"
-        env["PATH"] = f"{scripts}{os.pathsep}{env.get('PATH', '')}"
+                merge_environment(env, [("CUDA_HOME", str(cuda)), ("CUDA_PATH", str(cuda)), ("DISTUTILS_USE_SDK", "1")])
+                extra.insert(0, str(cuda / "bin"))
+        path = next((value for name, value in env.items() if name.upper() == "PATH"), "")
+        merge_environment(env, [("PATH", os.pathsep.join([*extra, path]))])
         return env
+
+
+def merge_environment(env: dict[str, str], updates) -> None:
+    """Set ``updates`` (name, value pairs) in ``env``, names compared without case as Windows does:
+    ``Path`` from cmd and ``PATH`` from elsewhere are one variable, never two."""
+    for name, value in updates:
+        for existing in [key for key in env if key.upper() == name.upper()]:
+            del env[existing]
+        env[name] = value
 
 
 def _vcvars() -> Path | None:
@@ -138,7 +155,7 @@ class HeadBuilder:
             if face_id in self._waiting:
                 return {"state": "queued"}
         if (folder / HEAD_FILE).is_file():
-            return {"state": "ready"}
+            return {"state": "ready", "updated": int((folder / HEAD_FILE).stat().st_mtime)}
         if not self.available:
             return {"state": "unavailable"}
         if (folder / ERROR_FILE).is_file():
@@ -204,11 +221,12 @@ class HeadBuilder:
         if self._log_dir is not None:
             self._log_dir.mkdir(parents=True, exist_ok=True)
             log = open(self._log_dir / "head3d-build.log", "w", encoding="utf-8")  # noqa: SIM115
+        parser = self._parser().resolve()
         try:
             self._process = subprocess.Popen(
-                [str(self.install.python), "-u", str(SCRIPTS / "build.py"), str(folder.resolve()), str(self._parser().resolve()),
-                 str(self.install.landmarker.resolve())],
-                cwd=self.install.source, env=self.install.build_environment(), stdout=subprocess.PIPE,
+                [str(self.install.python), "-u", str(SCRIPTS / "build.py"), str(folder.resolve()), str(parser),
+                 str(self.install.landmarker.resolve()), str(parser.parent / "gpen_bfr_256.onnx")],
+                cwd=self.install.source, env=self.install.run_environment(), stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
             assert self._process.stdout is not None
             for line in self._process.stdout:
@@ -259,8 +277,7 @@ class HeadDriver:
         key = os.urandom(16)
         self._listener = Listener(("127.0.0.1", 0), authkey=key)
         host, port = self._listener.address
-        env = dict(os.environ)
-        env.pop("VIRTUAL_ENV", None)
+        env = install.run_environment()
         env["DEEPMIRROR_HEAD3D"] = f"{host}:{port}:{key.hex()}"
         from backend import compute_arbiter
 
@@ -292,6 +309,7 @@ class HeadDriver:
 
     def use(self, path: Path) -> bool:
         """Whether the head at ``path`` is loaded; asks for it (once) if not."""
+        path = Path(path).resolve()
         if self.loaded == str(path):
             return True
         if self.requested != str(path):
@@ -335,11 +353,11 @@ class HeadDriver:
                 return False
 
     def load(self, path: Path | None) -> None:
-        self.send("head", str(path) if path else None)
+        self.send("head", str(Path(path).resolve()) if path else None)
 
-    def submit(self, seq: int, frame: np.ndarray) -> bool:
+    def submit(self, seq: int, t: float, frame: np.ndarray) -> bool:
         height, width = frame.shape[:2]
-        return self.send("frame", seq, width, height, np.ascontiguousarray(frame).tobytes())
+        return self.send("frame", seq, float(t), width, height, np.ascontiguousarray(frame).tobytes())
 
     def close(self) -> None:
         self.send("stop")
@@ -364,12 +382,61 @@ def paste(frame: np.ndarray, layer: Layer) -> np.ndarray:
     return out
 
 
+class OwnHair:
+    """The speaker's own hair where the 3D head does not reach (longer or bigger hair than the worn
+    person's), painted over with the background around it, as Face + hair does: the speaker's hair
+    is re-read about twice a second in a GPU gap and placed on every frame by its five points."""
+
+    def __init__(self, engine) -> None:
+        self.engine = engine
+        self.own = None
+        self._busy = threading.Lock()
+
+    def points(self, frame: np.ndarray, t: float) -> np.ndarray | None:
+        return self.engine.track(frame, t).points
+
+    def refresh(self, frame: np.ndarray, points: np.ndarray, t: float) -> None:
+        from backend.video.engine import OWN_HAIR_SECONDS
+
+        if (self.own is not None and t - self.own.t < OWN_HAIR_SECONDS) or not self._busy.acquire(blocking=False):
+            return
+
+        def parse() -> None:
+            from backend.video import hair
+
+            try:
+                parser = self.engine.models.parser
+                if parser is None:
+                    return
+                crop, _ = hair.head_crop(frame, points)
+                with self.engine.arbiter.video(self.engine._parse_ms, timeout=0.2) as granted:
+                    if granted:
+                        self.own = hair.parse_own(crop, parser, t)
+            except Exception:
+                logger.exception("Reading the speaker's hair failed")
+            finally:
+                self._busy.release()
+
+        threading.Thread(target=parse, name="head3d-own-hair", daemon=True).start()
+
+    def cover(self, frame: np.ndarray, points: np.ndarray) -> np.ndarray:
+        from backend.video import hair
+        from backend.video.blend import paste as paste_crop
+
+        own = self.own
+        if own is None:
+            return frame
+        crop, matrix = hair.head_crop(frame, points)
+        return paste_crop(frame, hair.cover(crop, own), own.paint, matrix)
+
+
 @dataclass(slots=True)
 class _Record:
     t: float
     frame: np.ndarray
     seq: int | None          # None: not sent (the driver was busy); it gets the latest head
     arrived: float
+    points: np.ndarray | None = None   # the five points (own hair), when tracked
 
 
 class LiveAvatarSession:
@@ -380,9 +447,10 @@ class LiveAvatarSession:
     ``max_wait``.
     """
 
-    def __init__(self, driver: HeadDriver, max_wait: float = 0.3, in_flight: int = 2,
+    def __init__(self, driver: HeadDriver, engine=None, max_wait: float = 0.3, in_flight: int = 2,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.driver = driver
+        self.hair = OwnHair(engine) if engine is not None else None
         self.max_wait = max_wait
         self.in_flight = in_flight
         self.clock = clock
@@ -394,7 +462,7 @@ class LiveAvatarSession:
         self._lock = threading.Lock()
         self.frames_in = self.frames_out = 0
         self._rate_since = (clock(), 0, 0)
-        self.compose_ms = 0.0
+        self.compose_ms = self.track_ms = 0.0
         driver.on_layer = self._on_layer
 
     def _on_layer(self, seq: int, layer: Layer | None) -> None:
@@ -411,10 +479,17 @@ class LiveAvatarSession:
             if self._pending() < self.in_flight:
                 seq = self._next_seq
                 self._next_seq += 1
-            self._records.append(_Record(t, frame, seq, self.clock()))
+            record = _Record(t, frame, seq, self.clock())
+            self._records.append(record)
             self.frames_in += 1
-        if seq is not None and not self.driver.submit(seq, frame):
+        if seq is not None and not self.driver.submit(seq, t, frame):
             self._on_layer(seq, None)
+        if self.hair is not None:   # after sending: the head renders meanwhile
+            started = time.perf_counter()
+            record.points = self.hair.points(frame, t)
+            if record.points is not None:
+                self.hair.refresh(frame, record.points, t)
+            self.track_ms = 0.9 * self.track_ms + 0.1 * (time.perf_counter() - started) * 1000
 
     def ready(self) -> list[tuple[float, np.ndarray]]:
         out = []
@@ -438,7 +513,12 @@ class LiveAvatarSession:
                 elif self._latest is not None and abs(record.t - self._latest[0]) < 0.2:
                     layer = self._latest[1]
             started = time.perf_counter()
-            out.append((record.t, paste(record.frame, layer) if layer is not None else record.frame))
+            frame = record.frame
+            if layer is not None:
+                if self.hair is not None and record.points is not None:
+                    frame = self.hair.cover(frame, record.points)
+                frame = paste(frame, layer)
+            out.append((record.t, frame))
             self.compose_ms = 0.9 * self.compose_ms + 0.1 * (time.perf_counter() - started) * 1000
             self.frames_out += 1
         return out
@@ -452,6 +532,7 @@ class LiveAvatarSession:
         timings = self.driver.timings or {}
         return {"mode": "3d", "fps_in": round(fps_in, 1), "fps_out": round(fps_out, 1),
                 "track_ms": round(float(timings.get("track_ms", 0.0)), 1),
+                "points_ms": round(self.track_ms, 1), "render_size": int(timings.get("render_size", 0)),
                 "render_ms": round(float(timings.get("render_ms", 0.0)), 1),
                 "compose_ms": round(self.compose_ms, 1), "face": self._latest is not None}
 

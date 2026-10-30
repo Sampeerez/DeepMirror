@@ -13,7 +13,7 @@ import StreamDiagnostics from './StreamDiagnostics';
 import { MiniSlider } from './Sliders';
 import { APP_NAME } from '../lib/brand';
 import { fetchPerformance } from '../lib/api';
-import { headLabel } from '../lib/format';
+import { headLabel, installLabel } from '../lib/format';
 import { groupedMethods, findF0Method } from '../lib/f0Methods';
 import {
   PERFORMANCE_PROFILES, bufferDurationMs, profileForChunkSize, recommendPerformanceProfile,
@@ -246,12 +246,18 @@ function Settings({
 
       <Column id="face" title="Face" Icon={ScanFace} accent="text-video-fg">
         <SettingsSection>
-          <SettingRow label="Clone" icon={UserRound}>
+          <SettingRow label="Clone" icon={UserRound}
+            hint={face.status?.head3d_install?.state === 'failed' ? installLabel(face.status.head3d_install) : null}
+            value={face.status?.head3d_install?.state === 'installing'
+              ? `3D ${Math.round((face.status.head3d_install.progress || 0) * 100)}%` : null}>
             <Segmented label="Clone" hideLabel accent="face" size="sm"
               value={['3d', 'face'].includes(faceSettings.mode) ? faceSettings.mode : 'hair'}
               onChange={(mode) => changeFace({ mode })} className="w-full"
               options={[
-                ...(face.status?.head3d ? [{ value: '3d', label: '3D head', hint: headLabel(face.activeFace?.head3d) }] : []),
+                ...(face.status?.head3d || face.status?.head3d_install?.state === 'installing' ? [{
+                  value: '3d', label: '3D head', disabled: !face.status?.head3d,
+                  hint: face.status?.head3d ? headLabel(face.activeFace?.head3d) : installLabel(face.status.head3d_install),
+                }] : []),
                 { value: 'hair', label: 'Face + hair', hint: "The face and the photo's hair" },
                 { value: 'face', label: 'Face only', hint: 'The inside of the face' }]} />
           </SettingRow>

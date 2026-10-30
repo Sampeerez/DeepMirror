@@ -15,7 +15,7 @@ class FakeDriver:
         self.timings = {"track_ms": 9.0, "render_ms": 3.0}
         self.on_layer = lambda seq, layer: None
 
-    def submit(self, seq: int, frame: np.ndarray) -> bool:
+    def submit(self, seq: int, t: float, frame: np.ndarray) -> bool:
         self.sent.append(seq)
         return True
 
@@ -80,7 +80,7 @@ def test_build_status_without_the_install(tmp_path):
     assert builder.status("0123456789ab") == {"state": "unavailable"}
     (tmp_path / "0123456789ab").mkdir()
     (tmp_path / "0123456789ab" / HEAD_FILE).write_bytes(b"x")
-    assert builder.status("0123456789ab") == {"state": "ready"}   # built earlier: still usable
+    assert builder.status("0123456789ab")["state"] == "ready"   # built earlier: still usable
 
 
 def test_3d_is_a_live_setting_and_status_says_if_it_is_installed(client):
@@ -88,3 +88,23 @@ def test_3d_is_a_live_setting_and_status_says_if_it_is_installed(client):
     assert status["head3d"] is False
     assert client.patch("/api/video/settings", json={"mode": "3d"}).json()["settings"]["mode"] == "3d"
     assert client.post("/api/video/faces/0123456789ab/head3d").status_code == 404
+    assert client.get("/api/video/faces/0123456789ab/head3d.jpg").status_code == 404
+    assert status["head3d_install"]["state"] == "unavailable"   # OVC_HEAD3D=off in tests
+
+
+def test_environment_names_are_merged_as_windows_compares_them():
+    from backend.video.avatar import merge_environment
+
+    env = {"PATH": "ours", "Other": "1"}
+    merge_environment(env, [("Path", "vs;ours")])   # cmd's spelling: one variable, never two
+    assert env == {"Path": "vs;ours", "Other": "1"}
+
+
+def test_the_installer_is_off_when_asked(monkeypatch, tmp_path):
+    from backend.video.head3d_install import Head3DInstaller
+
+    monkeypatch.setenv("OVC_HEAD3D", "off")
+    installer = Head3DInstaller(tmp_path, install=LamInstall(tmp_path / "lam"))
+    installer.start_if_needed()
+    assert installer._process is None
+    assert installer.status() == {"state": "unavailable", "error": "Turned off (OVC_HEAD3D)"}

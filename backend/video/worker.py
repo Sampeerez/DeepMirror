@@ -233,7 +233,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
             live.close()
             live = None
         if live is None:
-            live = LiveAvatarSession(driver) if use_avatar and driver is not None else LiveFaceSession(engine)
+            live = LiveAvatarSession(driver, engine) if use_avatar and driver is not None else LiveFaceSession(engine)
         return live
 
     class _Forward(logging.Handler):

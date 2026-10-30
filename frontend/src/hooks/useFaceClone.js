@@ -8,7 +8,8 @@ const POLL_IDLE_MS = 15000;
 
 function downloading(status) {
   return Boolean(status?.assets?.some((asset) => ['downloading', 'downloaded', 'preparing'].includes(asset.state))
-    || status?.faces?.some((face) => ['building', 'queued'].includes(face.head3d?.state)));
+    || status?.faces?.some((face) => ['building', 'queued'].includes(face.head3d?.state))
+    || status?.head3d_install?.state === 'installing');
 }
 
 /** The face clone's server state (models, faces, settings), shared by the Live screen and the Video pages. */
