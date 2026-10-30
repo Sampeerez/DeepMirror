@@ -55,9 +55,13 @@ class LamInstall:
     def landmarker(self) -> Path:
         return self.root / "mp" / "face_landmarker.task"
 
+    @property
+    def marker(self) -> Path:
+        """Written by scripts/setup_head3d.py once the install has been checked to run on this GPU."""
+        return self.root / "installed.json"
+
     def available(self) -> bool:
-        return (self.python.is_file() and self.landmarker.is_file() and any(self.plugins.glob("nvdiffrast_plugin.*"))
-                and (self.source / "model_zoo/lam_models/releases/lam/lam-20k/step_045500/model.safetensors").is_file())
+        return self.marker.is_file() and self.python.is_file()
 
     @property
     def plugins(self) -> Path:

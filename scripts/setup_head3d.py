@@ -50,7 +50,7 @@ REQUIREMENTS = ["numpy==1.23.0", "opencv-python-headless==4.11.0.86", "omegaconf
                 "pymcubes==0.1.6", "trimesh==4.4.9", "plyfile", "jaxtyping", "typeguard", "tyro", "loguru",
                 "pyyaml", "scikit-image==0.20.0", "scipy", "pandas==2.2.3", "moviepy==1.0.3", "imageio",
                 "iopath", "fvcore", "onnxruntime==1.19.2", "absl-py", "flatbuffers", "attrs",
-                "protobuf>=4.25.3,<5", "matplotlib", "setuptools", "wheel", "Cython"]
+                "protobuf>=4.25.3,<5", "matplotlib", "tensorboard", "setuptools", "wheel", "Cython"]
 # Built without isolation (its setup imports the environment's own pip and numpy).
 SDIST_NO_ISOLATION = ["chumpy==0.70"]
 MEDIAPIPE = "mediapipe==0.10.14"   # without its own NumPy 2 / OpenCV requirements
@@ -215,7 +215,7 @@ def install_all(install: LamInstall, progress: Progress) -> None:
     progress.finish()
 
     progress.start("packages")
-    if not works(install, "import omegaconf, chumpy, mediapipe, onnxruntime, skimage, diffusers"):
+    if not works(install, "import omegaconf, chumpy, mediapipe, onnxruntime, skimage, diffusers, tensorboard"):
         run([*pip, *REQUIREMENTS])
         run([*pip, "--no-build-isolation", *SDIST_NO_ISOLATION])
         run([*pip, "--no-deps", MEDIAPIPE])
@@ -254,11 +254,14 @@ def install_all(install: LamInstall, progress: Progress) -> None:
     progress.finish()
 
     progress.start("check")
+    install.marker.unlink(missing_ok=True)
     result = subprocess.run([str(install.python), "-c", SMOKE_TEST], capture_output=True, text=True,
                             cwd=install.source, env=install.run_environment(), creationflags=NO_WINDOW)
     print(result.stdout[-2000:], result.stderr[-4000:], flush=True)
     if result.returncode != 0:
         raise RuntimeError(f"The 3D head does not run here: {(result.stderr.strip().splitlines() or ['?'])[-1]}")
+    install.marker.write_text(json.dumps({"lam": LAM_COMMIT, "release": RELEASE, "gpu": result.stdout.strip()}),
+                              encoding="utf-8")
     progress.finish()
     shutil.rmtree(downloads, ignore_errors=True)   # the archives are unpacked: ~3 GB back
 
