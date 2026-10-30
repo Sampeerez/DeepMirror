@@ -93,6 +93,19 @@ async def activate(request: Request, face_id: str) -> dict:
     return service.status()
 
 
+@router.post("/api/video/faces/{face_id}/head3d")
+async def build_head(request: Request, face_id: str) -> dict:
+    """Build (or rebuild) the face's 3D head in the background."""
+    service = _service(request)
+    try:
+        service.build_head(face_id)
+    except FaceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Face not found") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return service.status()
+
+
 @router.delete("/api/video/faces/{face_id}")
 async def delete_face(request: Request, face_id: str) -> dict:
     service = _service(request)

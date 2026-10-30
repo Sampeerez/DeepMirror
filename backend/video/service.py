@@ -12,6 +12,7 @@ import numpy as np
 
 from backend.assets import AssetStore
 from backend.compute_arbiter import GpuArbiter
+from backend.video.avatar import HeadBuilder
 from backend.video.library import FaceLibrary
 from backend.video.swap import SWAPPERS
 from backend.video.worker import FaceWorker, decode_image, encode_jpeg
@@ -19,6 +20,8 @@ from backend.video.worker import FaceWorker, decode_image, encode_jpeg
 logger = logging.getLogger(__name__)
 
 SETTING_KEYS = ("mode", "swapper", "enhance", "mouth", "occlusion")
+# Live: the 3D head (when built, else Face + hair), Face + hair, or the face only.
+LIVE_MODES = ("3d", "hair", "face")
 DEFAULT_SETTINGS = {"mode": "hair", "swapper": "auto", "enhance": "auto", "mouth": "auto", "occlusion": True}
 
 
@@ -34,6 +37,10 @@ class FaceService:
         self._worker: FaceWorker | None = None
         self._lock = threading.Lock()
         self.last_stats: dict | None = None
+        # Each face's 3D head, built in the background (only with the 3D head installed).
+        self.heads = HeadBuilder(self.library.root, lambda: self.assets.folder("video") / "bisenet_resnet_34.onnx",
+                                 lambda: self.arbiter.gap() is not None, log_dir=self.data_dir / "logs",
+                                 on_built=lambda _face: self._send_identity())
 
     # --- Settings ---------------------------------------------------------
 
@@ -43,13 +50,13 @@ class FaceService:
         except (OSError, ValueError):
             stored = {}
         settings = {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k in SETTING_KEYS}}
-        if settings["mode"] not in ("hair", "face"):   # the whole head is for files only now
+        if settings["mode"] not in LIVE_MODES:   # the whole head is for files only now
             settings["mode"] = "hair"
         return settings
 
     def update_settings(self, payload: dict) -> dict:
         settings = dict(self.settings)
-        if payload.get("mode") in ("hair", "face"):
+        if payload.get("mode") in LIVE_MODES:
             settings["mode"] = payload["mode"]
         if payload.get("swapper") == "auto" or payload.get("swapper") in SWAPPERS:
             settings["swapper"] = payload["swapper"]
@@ -63,6 +70,9 @@ class FaceService:
         self._settings_path.write_text(json.dumps(settings), encoding="utf-8")
         if self._worker is not None:
             self._worker.send("settings", settings)
+        active = self.library.active()
+        if settings["mode"] == "3d" and active and self.heads.status(active)["state"] in ("missing", "failed"):
+            self.heads.request(active)   # chosen for a face without one yet: build it now
         return settings
 
     # --- Models -----------------------------------------------------------
@@ -108,6 +118,7 @@ class FaceService:
                           [str(path) for path in self.library.photos(face_id)])
 
     def close(self) -> None:
+        self.heads.close()
         if self._worker is not None:
             self._worker.stop()
             self._worker = None
@@ -124,7 +135,14 @@ class FaceService:
             raise ValueError(str(notes) if notes else "No face found in the photos")
         assert isinstance(notes, list)
         best = max(range(len(notes)), key=lambda i: notes[i].get("size", 0) if notes[i].get("face") else -1)
-        return self.library.add(name, photos, np.asarray(embedding), notes, _thumbnail(photos[best]))
+        face = self.library.add(name, photos, np.asarray(embedding), notes, _thumbnail(photos[best]))
+        if self.heads.available:
+            self.heads.request(face["id"])
+        return face
+
+    def build_head(self, face_id: str) -> None:
+        self.library.photos(face_id)   # FaceNotFoundError for an unknown face
+        self.heads.request(face_id)
 
     def activate(self, face_id: str | None) -> None:
         self.library.set_active(face_id)
@@ -145,7 +163,8 @@ class FaceService:
         return {
             "models_ready": self.models_ready,
             "assets": self.assets.status("video"),
-            "faces": self.library.list(),
+            "faces": [{**face, "head3d": self.heads.status(face["id"])} for face in self.library.list()],
+            "head3d": self.heads.available,
             "active_face": self.library.active(),
             "settings": self.settings,
             "swappers": [{"id": spec.id, "label": spec.label} for spec in SWAPPERS.values()],

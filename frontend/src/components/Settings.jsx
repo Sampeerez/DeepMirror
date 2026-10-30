@@ -13,6 +13,7 @@ import StreamDiagnostics from './StreamDiagnostics';
 import { MiniSlider } from './Sliders';
 import { APP_NAME } from '../lib/brand';
 import { fetchPerformance } from '../lib/api';
+import { headLabel } from '../lib/format';
 import { groupedMethods, findF0Method } from '../lib/f0Methods';
 import {
   PERFORMANCE_PROFILES, bufferDurationMs, profileForChunkSize, recommendPerformanceProfile,
@@ -246,9 +247,12 @@ function Settings({
       <Column id="face" title="Face" Icon={ScanFace} accent="text-video-fg">
         <SettingsSection>
           <SettingRow label="Clone" icon={UserRound}>
-            <Segmented label="Clone" hideLabel accent="face" size="sm" value={faceSettings.mode === 'face' ? 'face' : 'hair'}
+            <Segmented label="Clone" hideLabel accent="face" size="sm"
+              value={['3d', 'face'].includes(faceSettings.mode) ? faceSettings.mode : 'hair'}
               onChange={(mode) => changeFace({ mode })} className="w-full"
-              options={[{ value: 'hair', label: 'Face + hair', hint: "The face and the photo's hair" },
+              options={[
+                ...(face.status?.head3d ? [{ value: '3d', label: '3D head', hint: headLabel(face.activeFace?.head3d) }] : []),
+                { value: 'hair', label: 'Face + hair', hint: "The face and the photo's hair" },
                 { value: 'face', label: 'Face only', hint: 'The inside of the face' }]} />
           </SettingRow>
           <SettingRow label="Face model" icon={ScanFace}>

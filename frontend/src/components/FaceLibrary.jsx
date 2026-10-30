@@ -1,8 +1,8 @@
 import React, { memo, useRef, useState } from 'react';
-import { Check, Download, ImagePlus, ScanFace, Trash2, UserRound } from 'lucide-react';
+import { Box, Check, Download, ImagePlus, ScanFace, Trash2, UserRound } from 'lucide-react';
 import Button from './Button';
 import { faceThumbnailUrl } from '../lib/api';
-import { formatBytes } from '../lib/format';
+import { formatBytes, headLabel } from '../lib/format';
 
 const ACCEPTED = 'image/jpeg,image/png,image/webp';
 const MAX_PHOTOS = 12;
@@ -114,7 +114,9 @@ function AddFace({ face }) {
   );
 }
 
-function FaceTile({ item, wearing, onWear, onDelete, busy }) {
+function FaceTile({ item, wearing, onWear, onDelete, onBuild, busy }) {
+  const head = item?.head3d;
+  const building = ['building', 'queued'].includes(head?.state);
   return (
     <li className={`flex flex-col overflow-hidden rounded-lg border ${wearing ? 'border-video-line bg-video-bg' : 'border-line-strong bg-raised'}`}>
       {item ? (
@@ -130,12 +132,21 @@ function FaceTile({ item, wearing, onWear, onDelete, busy }) {
           <p className="text-[11px] text-fg-faint">
             {item ? `${item.photos} photo${item.photos === 1 ? '' : 's'}` : 'No swap'}
           </p>
+          {onBuild && head ? (
+            <p className={`truncate text-[11px] ${head.state === 'failed' ? 'text-danger-fg' : 'text-fg-faint'}`}
+              title={head.error || undefined}>{headLabel(head)}</p>
+          ) : null}
         </div>
         <div className="mt-auto flex items-center gap-1.5">
           <Button size="sm" icon={wearing ? Check : ScanFace} onClick={onWear} disabled={busy || wearing}
             selected={wearing} className={`min-w-0 flex-1 ${wearing ? 'text-video-fg' : ''}`}>
             {wearing ? 'Wearing' : 'Wear'}
           </Button>
+          {onBuild && head ? (
+            <Button size="sm" icon={Box} onClick={onBuild} disabled={busy || building} loading={building}
+              aria-label={`Build the 3D head of ${item.name}`}
+              title={head.state === 'ready' ? 'Rebuild the 3D head' : 'Build the 3D head'} />
+          ) : null}
           {item ? (
             <Button size="sm" variant="danger" icon={Trash2} onClick={onDelete} disabled={busy}
               aria-label={`Delete ${item.name}`} title="Delete this face" />
@@ -158,7 +169,8 @@ function FaceLibrary({ face }) {
           <FaceTile item={null} wearing={!active} onWear={() => face.activate(null)} busy={face.busy} />
           {faces.map((item) => (
             <FaceTile key={item.id} item={item} wearing={active === item.id} busy={face.busy}
-              onWear={() => face.activate(item.id)} onDelete={() => face.remove(item.id)} />
+              onWear={() => face.activate(item.id)} onDelete={() => face.remove(item.id)}
+              onBuild={face.status?.head3d ? () => face.buildHead(item.id) : null} />
           ))}
         </ul>
         {face.error ? <p className="mt-3 break-words text-xs text-danger-fg" role="alert">{face.error}</p> : null}

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  activateFace, addFace, deleteFace, fetchVideo, prepareVideo, updateVideoSettings,
+  activateFace, addFace, buildFaceHead, deleteFace, fetchVideo, prepareVideo, updateVideoSettings,
 } from '../lib/api';
 
 const POLL_BUSY_MS = 1500;    // while the models download
 const POLL_IDLE_MS = 15000;
 
 function downloading(status) {
-  return Boolean(status?.assets?.some((asset) => ['downloading', 'downloaded', 'preparing'].includes(asset.state)));
+  return Boolean(status?.assets?.some((asset) => ['downloading', 'downloaded', 'preparing'].includes(asset.state))
+    || status?.faces?.some((face) => ['building', 'queued'].includes(face.head3d?.state)));
 }
 
 /** The face clone's server state (models, faces, settings), shared by the Live screen and the Video pages. */
@@ -55,6 +56,7 @@ export default function useFaceClone() {
   const add = useCallback((files, name) => run(() => addFace(files, name)), [run]);
   const activate = useCallback((faceId) => run(() => activateFace(faceId)), [run]);
   const remove = useCallback((faceId) => run(() => deleteFace(faceId)), [run]);
+  const buildHead = useCallback((faceId) => run(() => buildFaceHead(faceId)), [run]);
   const updateSettings = useCallback((partial) => run(async () => {
     const { settings } = await updateVideoSettings(partial);
     setStatus((current) => (current ? { ...current, settings } : current));
@@ -64,7 +66,8 @@ export default function useFaceClone() {
   const activeFace = status?.faces?.find((face) => face.id === status.active_face) || null;
 
   return useMemo(() => ({
-    status, error, busy, refresh, prepare, add, activate, remove, updateSettings, activeFace,
+    status, error, busy, refresh, prepare, add, activate, remove, buildHead, updateSettings, activeFace,
     ready: Boolean(status?.models_ready), downloading: busyDownloading,
-  }), [status, error, busy, refresh, prepare, add, activate, remove, updateSettings, activeFace, busyDownloading]);
+  }), [status, error, busy, refresh, prepare, add, activate, remove, buildHead, updateSettings, activeFace,
+    busyDownloading]);
 }

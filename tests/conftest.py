@@ -84,6 +84,8 @@ def manager(settings: Settings, cpu: ComputeDevice) -> ModelManager:
 def client(settings: Settings, manager: ModelManager, monkeypatch: pytest.MonkeyPatch):
     # Never download model assets from tests.
     monkeypatch.setattr("backend.assets.AssetStore.download_missing_in_background", lambda self, group="voice": None)
+    # The 3D head as on a machine without it installed, whatever this one has.
+    monkeypatch.setenv("OVC_LAM_DIR", str(settings.DATA_DIR / "no-lam"))
     app = create_app(settings, manager=manager)
     with TestClient(app) as test_client:
         yield test_client

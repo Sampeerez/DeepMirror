@@ -68,7 +68,14 @@ Every page is in the sidebar:
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
 ### Face
-- **Whole head** (the default): the person's head, hair, beard and ears, not only the inside of the
+- **3D head** (optional install, Windows + NVIDIA): when a face is added, a 3D head with its hair,
+  beard and earrings is built once from its most frontal photo (LAM, about a minute), with the photo's
+  clothes and neck left out. Live, MediaPipe reads your pose and 52 expressions from each camera frame
+  and the head is rendered for exactly that frame, so hair and outline are right at every angle. On a
+  GTX 1660 SUPER: 4–5 ms of GPU a frame, 30 fps next to the live voice. Install it with
+  `uv run python scripts/setup_head3d.py`, then choose Settings › Face › Clone › 3D head. Until a
+  face's head is built (or without the install) Face + hair is used.
+- **Whole head**: the person's head, hair, beard and ears, not only the inside of the
   face. The sharpest front-facing photo is animated with your pose and expressions (LivePortrait), so
   hair and skin are the photo's own; the face swap on top keeps your eyes, brows and mouth live. Your
   own hair where the new head does not reach is filled in from the background around it.
@@ -115,6 +122,7 @@ releases and LivePortrait's, and run with ONNX Runtime (CUDA, DirectML or CPU) a
 | Occlusion | XSeg | Hands and objects in front of the face, for swappers without their own mask |
 | Detail | GPEN-BFR 256 | Only on close faces when the GPU has room: it costs a little identity |
 | Whole head | LivePortrait (human), run here in PyTorch fp32 in 33 stages of at most ~33 ms | No swap model changes hair or the head's outline (FaceFusion, Deep-Live-Cam, HyperSwap, inswapper, GHOST all replace the inside of the face); animating the photo itself does. fp16 is slower on this GPU and gave NaN |
+| 3D head | LAM-20K (Large Avatar Model, SIGGRAPH 2025), driven by MediaPipe Face Landmarker | One photo to an animatable 3D Gaussian head with its hair in ~10 s on this GPU; renders a frame in 4–5 ms, so every frame gets its own head. Runs in its own Python 3.10 environment (`models/lam`, ~10 GB) |
 | Parsing | BiSeNet (ResNet-34) | Hair, ears and neck of the worn head, and the speaker's own hair to fill in |
 
 Also reviewed: Deep-Live-Cam and LiveFaceCam (inswapper/HyperSwap with a mouth mask; the real-mouth
@@ -215,6 +223,9 @@ Sioaeko (MIT), since rewritten.
 | [InsightFace](https://github.com/deepinsight/insightface) | inswapper, ArcFace, SCRFD, downloaded on first use | Code MIT, models non-commercial research only |
 | [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam), [LiveFaceCam](https://github.com/huzaifa525/LiveFaceCam) | Ideas (mouth mask) | AGPL-3.0 |
 | [LivePortrait](https://github.com/KlingTeam/LivePortrait) | Whole head: its networks (vendored in `backend/video/liveportrait`) and weights, downloaded on first use | MIT |
+| [LAM](https://github.com/aigc3d/LAM) | 3D head: built and rendered in its own environment, installed on request | Code Apache-2.0, weights CC BY-NC 4.0 |
+| [FLAME](https://flame.is.tue.mpg.de/) | The head model LAM animates (in LAM's assets) | MPI FLAME licence, non-commercial |
+| [MediaPipe](https://github.com/google-ai-edge/mediapipe) | 3D head: face landmarks and blendshapes from the camera | Apache-2.0 |
 | [BiSeNet face parser](https://huggingface.co/facefusion/models-3.0.0) | Face and hair regions, from FaceFusion's release | MIT |
 | [OBS Studio](https://obsproject.com/) virtual camera module, via [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) | Virtual camera, fetched and registered on request | GPL-2.0 / GPL-2.0 |
 
@@ -224,4 +235,4 @@ MIT, see [LICENSE](LICENSE). DeepFilterNet's notice is in
 [backend/audio/deepfilter/LICENSE-DeepFilterNet](backend/audio/deepfilter/LICENSE-DeepFilterNet).
 
 The face models are not part of this repository and carry their own licences: InsightFace's and
-FaceFusion's are for non-commercial use. Use only faces and voices you have permission to use.
+FaceFusion's are for non-commercial use, as are LAM's weights and FLAME (3D head). Use only faces and voices you have permission to use.

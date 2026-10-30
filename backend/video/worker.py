@@ -131,7 +131,15 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         from backend.video.head_process import RemoteHead
 
         engine.remote = RemoteHead(head_conn)
-    live: LiveFaceSession | None = None
+    from backend.video.avatar import HEAD_FILE, HeadDriver, LamInstall, LiveAvatarSession
+
+    install = LamInstall.default()
+    live: LiveFaceSession | LiveAvatarSession | None = None
+    # The 3D head (Clone: 3D head): wanted, built for this face, and its driver process.
+    want_3d = False
+    head_3d: Path | None = None
+    driver: HeadDriver | None = None
+    driver_started = [-1e9]
     camera: _VirtualCamera | None = None
     offset: float | None = None     # server monotonic - client capture time (s), smallest seen
     last_stats = 0.0
@@ -203,6 +211,31 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     def log(level: int, text: str) -> None:
         send("log", level, text)
 
+    def avatar_ready() -> bool:
+        """Whether frames go through the 3D head now (else the face swap carries on)."""
+        nonlocal driver
+        if not want_3d or head_3d is None or not install.available():
+            return False
+        if driver is None or not driver.running:
+            if time.monotonic() - driver_started[0] < 30.0:   # it just ended: not again at once
+                return False
+            driver_started[0] = time.monotonic()
+            driver = HeadDriver(install, arbiter_name, lambda seq, layer: None,
+                                log_path=Path(cache_path).parent.parent / "logs" / "head3d-drive.log")
+            log(logging.INFO, "3D head process started")
+        return driver.ready and driver.use(head_3d)
+
+    def session_for_frame():
+        """The live session for the next frame: the 3D head once it is ready, else the face swap."""
+        nonlocal live
+        use_avatar = avatar_ready()
+        if live is not None and isinstance(live, LiveAvatarSession) != use_avatar:
+            live.close()
+            live = None
+        if live is None:
+            live = LiveAvatarSession(driver) if use_avatar and driver is not None else LiveFaceSession(engine)
+        return live
+
     class _Forward(logging.Handler):
         """This process's own log lines go to the server's log."""
 
@@ -254,8 +287,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                     break
                 if kind == "frame":
                     _, t_ms, data = message
-                    if live is None:
-                        live = LiveFaceSession(engine)
+                    session = session_for_frame()
                     t = t_ms / 1000.0
                     arrival = time.monotonic()
                     offset = arrival - t if offset is None else min(offset, arrival - t)
@@ -263,14 +295,18 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                         with contextlib.suppress(queue.Empty):
                             incoming.get_nowait()
                             dropped[0] += 1
-                    incoming.put_nowait((live, t, data))
+                    incoming.put_nowait((session, t, data))
                 elif kind == "identity":
                     engine.set_identity(message[1])
                     engine.set_portrait(_read_image(message[2]) if len(message) > 2 else None)
                     engine.hair_photos = list(message[3]) if len(message) > 3 and message[3] else []
+                    head = Path(message[2]).parent / HEAD_FILE if len(message) > 2 and message[2] else None
+                    head_3d = head if head is not None and head.is_file() else None
                 elif kind == "settings":
                     before = engine.settings.swapper
-                    engine.settings.apply(message[1])
+                    want_3d = message[1].get("mode") == "3d"
+                    # Until the 3D head is ready (or for a face without one): the face and the photo's hair.
+                    engine.settings.apply({**message[1], "mode": "hair"} if want_3d else message[1])
                     if engine.settings.swapper != before:
                         engine.plan()
                 elif kind == "enroll":
@@ -314,6 +350,8 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
             live.close()
         if camera is not None:
             camera.close()
+        if driver is not None:
+            driver.close()
         arbiter.close()
 
 

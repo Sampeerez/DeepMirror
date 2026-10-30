@@ -43,3 +43,6 @@ docker-compose.override.yml
 # Logs
 *.log
 tmp/
+
+# The 3D head toolchain (LAM): its own Python and compiled packages, set up on demand.
+models/lam/

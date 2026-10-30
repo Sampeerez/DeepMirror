@@ -111,7 +111,7 @@ ignore = ["E501", "RUF001", "RUF002", "RUF003", "SIM108"]
 
 [tool.pyright]
 include = ["backend"]
-exclude = ["backend/video/liveportrait"]
+exclude = ["backend/video/liveportrait", "backend/video/head3d"]   # head3d: runs in LAM's environment
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "basic"

@@ -35,3 +35,14 @@ export function formatFileTimestamp(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
     + `_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
 }
+
+/** A face's 3D head, in a few words. */
+export function headLabel(head) {
+  switch (head?.state) {
+    case 'ready': return '3D head ready';
+    case 'building': return `3D head ${Math.round((head.progress || 0) * 100)}%`;
+    case 'queued': return '3D head queued';
+    case 'failed': return '3D head failed';
+    default: return 'No 3D head';
+  }
+}
