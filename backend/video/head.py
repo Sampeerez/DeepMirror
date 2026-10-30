@@ -77,7 +77,9 @@ class Source:
 class HeadModels:
     """LivePortrait's five networks, loaded once (PyTorch, CUDA when there is one)."""
 
-    def __init__(self, directory: Path, gpu: bool) -> None:
+    def __init__(self, directory: Path, gpu: bool, place: Callable[[Callable[[], None]], None] | None = None) -> None:
+        """``place`` runs each network's copy to the GPU (the face process passes one that waits for a
+        gap in the voice: half a gigabyte uploaded at once would hold the voice up)."""
         import torch
 
         from backend.video.liveportrait.appearance_feature_extractor import AppearanceFeatureExtractor
@@ -96,7 +98,12 @@ class HeadModels:
             if state is None:
                 state = torch.load(directory / FILES[key], map_location="cpu", weights_only=True)
             model.load_state_dict(state)
-            return model.to(self.device).eval()
+            model.eval()
+            moved: list = []
+            (place or (lambda copy: copy()))(lambda: moved.append(model.to(self.device)))
+            if self.device.type == "cuda":
+                torch.cuda.synchronize(self.device)
+            return moved[0]
 
         self.appearance = load(AppearanceFeatureExtractor, "appearance")
         self.motion = load(MotionExtractor, "motion")

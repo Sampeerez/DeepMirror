@@ -45,6 +45,7 @@ class LiveFaceSession:
         self._head: HeadLayer | None = None
         self._head_times: deque[float] = deque(maxlen=10)
         self.frames_in = self.frames_out = self.keys_made = self.keys_skipped = 0
+        self._rate_since = (time.monotonic(), 0, 0)   # for the frames in and out per second in stats
         self.track_ms = self.compose_ms = 0.0
         engine.reset_head()
         self._worker = threading.Thread(target=self._keyframes, name="face-keyframes", daemon=True)
@@ -71,7 +72,13 @@ class LiveFaceSession:
 
     def stats(self) -> dict:
         swapper = self.engine._swapper_id
+        now = time.monotonic()
+        span = max(now - self._rate_since[0], 1e-3)
+        fps_in = (self.frames_in - self._rate_since[1]) / span
+        fps_out = (self.frames_out - self._rate_since[2]) / span
+        self._rate_since = (now, self.frames_in, self.frames_out)
         return {"keys_per_second": round(self.keys_per_second, 1), "swapper": swapper,
+                "fps_in": round(fps_in, 1), "fps_out": round(fps_out, 1),
                 "mode": "head" if self.engine.wants_head else "face",
                 "heads_per_second": round(self.heads_per_second, 2),
                 "swap_ms": self.engine.models.swap_ms.get(swapper or "", None),

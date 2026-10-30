@@ -4,10 +4,10 @@
 // Ordered from highest quality to lowest latency; "Steady" keeps the quality
 // context with a longer chunk, for a computer busy with other work.
 export const PERFORMANCE_PROFILES = [
-  { id: 'quality', label: 'Quality', chunkSize: 8192, lookbackSeconds: 1.0, lookaheadSeconds: 0.15 },
-  { id: 'steady', label: 'Steady', chunkSize: 10240, lookbackSeconds: 1.0, lookaheadSeconds: 0.15 },
-  { id: 'steady-plus', label: 'Steady+', chunkSize: 12288, lookbackSeconds: 1.0, lookaheadSeconds: 0.15 },
-  { id: 'balanced', label: 'Balanced', chunkSize: 4096, lookbackSeconds: 1.0, lookaheadSeconds: 0.1 },
+  { id: 'quality', label: 'Quality', chunkSize: 8192, lookbackSeconds: 0.5, lookaheadSeconds: 0.15 },
+  { id: 'steady', label: 'Steady', chunkSize: 10240, lookbackSeconds: 0.5, lookaheadSeconds: 0.15 },
+  { id: 'steady-plus', label: 'Steady+', chunkSize: 12288, lookbackSeconds: 0.5, lookaheadSeconds: 0.15 },
+  { id: 'balanced', label: 'Balanced', chunkSize: 4096, lookbackSeconds: 0.5, lookaheadSeconds: 0.1 },
   { id: 'responsive', label: 'Responsive', chunkSize: 2048, lookbackSeconds: 0.5, lookaheadSeconds: 0.05 },
   // For CPU-only machines: a long chunk with lighter context still renders in realtime.
   { id: 'light', label: 'Light (CPU)', chunkSize: 16384, lookbackSeconds: 0.5, lookaheadSeconds: 0.1 },
@@ -48,7 +48,7 @@ export function roomierProfile(chunkSize) {
   const size = Number(chunkSize);
   return PERFORMANCE_PROFILES
     .filter((profile) => profile.chunkSize > size && profile.chunkSize <= MAX_AUTO_CHUNK_SIZE
-      && profile.lookbackSeconds >= 1.0)
+      && profile.lookbackSeconds >= 0.5)
     .sort((a, b) => a.chunkSize - b.chunkSize)[0] || null;
 }
 

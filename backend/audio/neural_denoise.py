@@ -14,6 +14,7 @@ from functools import cache
 from pathlib import Path
 
 import numpy as np
+from scipy import signal
 
 from backend.audio.deepfilter.network import initial_state
 from backend.audio.resampling import resample
@@ -50,7 +51,7 @@ def restore_voice(dry: np.ndarray, clean: np.ndarray, rate: int, noise_db: float
     weight = lost[np.minimum((np.arange(len(clean)) / frame).astype(np.int64), count - 1)].astype(np.float32)
     ramp = max(1, round(RESTORE_RAMP_SECONDS * rate))
     window = np.hanning(2 * ramp + 1).astype(np.float32)
-    weight = np.convolve(np.pad(weight, ramp, mode="edge"), window / window.sum(), mode="valid")[: len(clean)]
+    weight = signal.oaconvolve(np.pad(weight, ramp, mode="edge"), window / window.sum(), mode="valid")[: len(clean)]
     n = min(len(dry), len(clean))
     out = clean.copy()
     out[:n] += weight[:n] * (dry[:n] - clean[:n])

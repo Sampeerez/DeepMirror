@@ -26,6 +26,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -86,6 +87,10 @@ class Key:
     spec: SwapperSpec
     face: np.ndarray            # float32 crop, BGR
     mask: np.ndarray            # float32 0..1
+    # With the whole head: the face as "face only" would show it (its own colour match and the
+    # whole-face mask), for the frames where the head is too old for the pose.
+    alone: np.ndarray | None = None
+    alone_mask: np.ndarray | None = None
 
 
 @dataclass(slots=True)
@@ -93,9 +98,10 @@ class HeadLayer:
     """The worn head (with the speaker's uncovered hair filled in), in the head crop of its frame."""
 
     t: float
-    image: np.ndarray           # float32 OUTPUT x OUTPUT x 3, BGR
+    image: np.ndarray           # uint8 OUTPUT x OUTPUT x 3, BGR
     alpha: np.ndarray           # float32 0..1
     face: np.ndarray            # float32 0..1: the worn face's skin, eyes, nose, mouth
+    pose: tuple[float, float] = (0.0, 0.0)   # the head turn it was rendered for (see head_pose)
 
 
 @dataclass(slots=True)
@@ -175,10 +181,17 @@ class FaceModels:
     def heads_ready(self) -> bool:
         return heads.ready(self.directory)
 
-    def head_models(self) -> heads.HeadModels | None:
-        """LivePortrait, loaded the first time the whole head is used."""
+    def head_models(self, arbiter: GpuArbiter | None = None) -> heads.HeadModels | None:
+        """LivePortrait, loaded the first time the whole head is used (each network copied to the
+        GPU in a gap the voice leaves, when ``arbiter`` is given)."""
         if self._heads is None and self.heads_ready:
-            self._heads = heads.HeadModels(self.directory, self.gpu)
+            def place(copy) -> None:
+                if arbiter is None:
+                    copy()
+                    return
+                with arbiter.video(40.0, timeout=10.0):
+                    copy()
+            self._heads = heads.HeadModels(self.directory, self.gpu, place)
         return self._heads
 
     def keep_only(self, swapper_id: str) -> None:
@@ -318,6 +331,8 @@ class FaceEngine:
     _head_for: int | None = None             # id() of the portrait the renderer was prepared with
     _stage_ms: list[float] = field(default_factory=list)   # measured cost of each head render stage
     _parse_ms: float = 45.0   # one face parse on the GPU (measured as it runs)
+    # In the face process the head renders in a process of its own (head_process.RemoteHead).
+    remote: Any = None
 
     def set_identity(self, embedding: np.ndarray | None) -> None:
         self.identity = embedding
@@ -333,6 +348,8 @@ class FaceEngine:
 
     def reset_head(self) -> None:
         """The next frame becomes the rest pose the head moves from (a new session)."""
+        if self.remote is not None:
+            self.remote.reset()
         if self._head is not None:
             self._head.reset()
 
@@ -408,7 +425,16 @@ class FaceEngine:
             with self.arbiter.video(30.0, timeout=0.0) as granted:   # only when the GPU has room
                 if granted:
                     mask = np.minimum(mask, self.models.occluder.mask(original))
-        if not head:   # the whole head brings its own skin: the face is matched to it when composed
+        alone = alone_mask = None
+        if head:
+            # The whole head brings its own skin (the face is matched to it when composed); the
+            # face alone is kept too, for frames where the head would be too old for the pose.
+            alone_mask = self._face_mask(tracked, alignment(tracked.points, swapper.spec.template, size), size,
+                                         False)
+            if model_mask is not None:
+                alone_mask = np.minimum(alone_mask, cv2.GaussianBlur(model_mask, (0, 0), size / 128))
+            alone = match_colour(swapped, original, alone_mask).astype(np.float32)
+        else:
             swapped = match_colour(swapped, original, mask)
         enhance = self.settings.enhance == "on" or (
             self.settings.enhance == "auto" and tracked.face.size >= 220 and keys_per_second >= 14)
@@ -417,7 +443,7 @@ class FaceEngine:
                 if granted:
                     # Mostly the enhanced face, a little of the swap's own texture (no plastic look).
                     swapped = cv2.addWeighted(self.models.enhancer.enhance(swapped), 0.75, swapped, 0.25, 0)
-        return Key(t, swapper.spec, swapped.astype(np.float32), mask)
+        return Key(t, swapper.spec, swapped.astype(np.float32), mask, alone, alone_mask)
 
     def _face_mask(self, tracked: Tracked, matrix: np.ndarray, size: int, head: bool) -> np.ndarray:
         """Where the swap goes, in its crop, from the 68 landmarks (CPU, no GPU time): the whole
@@ -450,7 +476,7 @@ class FaceEngine:
         if self.portrait is None:
             return None
         if self._head is None:
-            models = self.models.head_models()
+            models = self.models.head_models(self.arbiter)
             if models is None:
                 return None
             self._head = heads.HeadRenderer(models)
@@ -470,6 +496,10 @@ class FaceEngine:
         """Render the worn head in this frame's pose, a stage per GPU gap; None if the GPU stayed busy."""
         if tracked.points is None:
             return None
+        if self.remote is not None:
+            if self.portrait is None:
+                return None
+            return self.remote.render(frame, tracked.points.copy(), t, self.portrait, wait)
         renderer = self._prepare_head()
         if renderer is None:
             return None
@@ -495,6 +525,9 @@ class FaceEngine:
                     steps[index]()
                     self._measured_stage(index, (time.perf_counter() - started) * 1000)
                     index += 1
+                    # ``wait`` bounds a wait without progress, never the whole render: with the
+                    # voice streaming a render spans several gaps, and stopping half way wastes it.
+                    deadline = time.monotonic() + wait
                     if index >= len(steps) or self.arbiter.room_ms() < self._expected_stage(index):
                         break
         if renderer.result is None:
@@ -535,7 +568,7 @@ class FaceEngine:
         # The neck fades out towards the bottom of the crop, into the speaker's own.
         fade = np.clip((np.arange(size, dtype=np.float32) / size - 0.80) / 0.15, 0, 1)[:, None]
         worn_neck = region(labels_new, neck) * fade
-        alpha = feather(np.clip(worn - worn_neck, 0, 1), erode=0.004, soft=0.02)
+        alpha = feather(np.clip(worn - worn_neck, 0, 1), erode=0.008, soft=0.035)
         fill = np.zeros((size, size), np.float32)
         if labels_own is not None:
             own = region(labels_own, parsing.HEAD)
@@ -543,17 +576,29 @@ class FaceEngine:
             covered = cv2.dilate(worn, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (grow, grow)))
             uncovered = np.clip(own - covered, 0, 1)
             if uncovered.sum() > size:
-                small = cv2.resize(plate, (size // 2, size // 2), interpolation=cv2.INTER_AREA)
-                hole = cv2.resize(cv2.dilate(uncovered, np.ones((5, 5), np.uint8)), (size // 2, size // 2))
-                filled = cv2.inpaint(small, (hole > 0.5).astype(np.uint8), 6, cv2.INPAINT_TELEA)
-                filled = cv2.resize(filled, (size, size), interpolation=cv2.INTER_LINEAR)
-                fill = feather(cv2.dilate(uncovered, np.ones((7, 7), np.uint8)), erode=0.0, soft=0.02)
-                plate = (plate * (1 - fill[:, :, None]) + filled * fill[:, :, None]).astype(np.uint8)
+                # The speaker's own hair the new head does not cover is painted over with the
+                # background around it: a normalised blur of everything that is not the speaker's
+                # head (smooth, no streaks), fully opaque over the hair and fading out past it.
+                ring = max(9, int(size * 0.05)) | 1
+                hole = cv2.dilate(uncovered, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring, ring)))
+                known = 1.0 - np.clip(cv2.dilate(own, np.ones((5, 5), np.uint8)) + hole, 0, 1)
+                small = (size // 4, size // 4)
+                weight = cv2.resize(known, small, interpolation=cv2.INTER_AREA)
+                colour = cv2.resize(plate.astype(np.float32) * known[:, :, None], small, interpolation=cv2.INTER_AREA)
+                blur = max(3, size // 24) | 1
+                weight = cv2.GaussianBlur(weight, (0, 0), blur)
+                colour = cv2.GaussianBlur(colour, (0, 0), blur)
+                filled = colour / np.maximum(weight, 1e-3)[:, :, None]
+                filled = cv2.resize(np.clip(filled, 0, 255).astype(np.uint8), (size, size),
+                                    interpolation=cv2.INTER_LINEAR)
+                fill = np.maximum(hole, feather(cv2.dilate(hole, np.ones((ring, ring), np.uint8)), erode=0.0,
+                                                soft=0.03))
+                plate = cv2.blendLinear(filled, plate, fill, 1.0 - fill)
         # The photo's own lighting moves half way towards the room's (the head stays the photo's).
         rendered = _light_like(rendered, plate, worn)
-        image = rendered.astype(np.float32) * alpha[:, :, None] + plate.astype(np.float32) * (1 - alpha[:, :, None])
+        image = cv2.blendLinear(rendered, plate, alpha, 1.0 - alpha)
         face = feather(region(labels_new, parsing.FACE), erode=0.01, soft=0.03)
-        return HeadLayer(t, image, np.maximum(alpha, fill), face)
+        return HeadLayer(t, image, np.maximum(alpha, fill), face, head_pose(points))
 
 
     # --- Composition (CPU) -------------------------------------------------
@@ -563,22 +608,34 @@ class FaceEngine:
         """``frame`` wearing the face (and the head, when given), between the keyframes around ``t``."""
         if tracked.points is None:
             return frame
-        if head is not None and self.settings.mode == "head":
+        # The head was rendered for one head turn; placed on a frame turned further it would show
+        # beside the face. It fades out (the face alone shows) until a fresh render arrives.
+        weight = head_freshness(head.pose, head_pose(tracked.points)) if head is not None else 0.0
+        if head is not None and self.settings.mode == "head" and weight > 0.0:
             matrix = alignment(tracked.points, heads.HEAD_TEMPLATE, heads.OUTPUT)
-            frame = paste(frame, np.clip(head.image, 0, 255).astype(np.uint8), head.alpha, matrix)
+            frame = paste(frame, head.image, head.alpha * weight, matrix)
         else:
-            head = None
+            head, weight = None, 0.0
         keys = [k for k in (before, after) if k is not None]
         if not keys:
             return frame
+        # Without a fresh head, a key made for the whole head is shown as the face alone.
+        alone = head is None and all(k.alone is not None for k in keys)
+
+        def parts(key: Key) -> tuple[np.ndarray, np.ndarray]:
+            if alone and key.alone is not None and key.alone_mask is not None:
+                return key.alone, key.alone_mask
+            return key.face, key.mask
+
         if len(keys) == 2 and keys[0].spec.id == keys[1].spec.id and keys[1].t > keys[0].t:
             a = float(np.clip((t - keys[0].t) / (keys[1].t - keys[0].t), 0, 1))
-            face = keys[0].face * (1 - a) + keys[1].face * a
-            mask = keys[0].mask * (1 - a) + keys[1].mask * a
+            (face0, mask0), (face1, mask1) = parts(keys[0]), parts(keys[1])
+            face = face0 * (1 - a) + face1 * a
+            mask = mask0 * (1 - a) + mask1 * a
             spec = keys[0].spec
         else:
             nearest = min(keys, key=lambda k: abs(k.t - t))
-            face, mask, spec = nearest.face, nearest.mask, nearest.spec
+            (face, mask), spec = parts(nearest), nearest.spec
         matrix = alignment(tracked.points, spec.template, spec.size)
         mouth = self.settings.mouth == "on" or (self.settings.mouth == "auto" and keys_per_second < 12)
         if mouth:
@@ -595,11 +652,11 @@ class FaceEngine:
             worn = cv2.warpAffine(head.face, matrix @ np.vstack([cv2.invertAffineTransform(
                 alignment(tracked.points, heads.HEAD_TEMPLATE, heads.OUTPUT)), [0, 0, 1]]),
                 (spec.size, spec.size), flags=cv2.INTER_LINEAR, borderValue=0.0)
-            mask = mask * worn
+            mask = mask * worn * weight
             under = cv2.warpAffine(frame, matrix, (spec.size, spec.size), flags=cv2.INTER_LINEAR,
                                    borderMode=cv2.BORDER_REPLICATE)
             face = match_colour(face, under, mask)
-        return paste(frame, face, mask, matrix)
+        return paste(frame, face, mask, matrix, inplace=head is not None)
 
 
 def _light_like(image: np.ndarray, reference: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -612,3 +669,23 @@ def _light_like(image: np.ndarray, reference: np.ndarray, mask: np.ndarray) -> n
     shift = 0.5 * (ref[..., 0][weight].mean() - lab[..., 0][weight].mean())
     lab[..., 0] = np.clip(lab[..., 0] + shift, 0, 255)
     return cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
+
+
+def head_pose(points: np.ndarray) -> tuple[float, float]:
+    """How far the head is turned (left-right, up-down), from the five points: the nose's offset
+    from the eyes' midpoint in eye distances. Cheap, and steady enough to compare two frames."""
+    eyes = (points[0] + points[1]) / 2
+    distance = float(np.linalg.norm(points[1] - points[0])) or 1.0
+    offset = (points[2] - eyes) / distance
+    return float(offset[0]), float(offset[1])
+
+
+# Head turn (in eye distances) a head render still fits, and where it has faded out completely.
+HEAD_FITS = 0.06
+HEAD_GONE = 0.14
+
+
+def head_freshness(rendered: tuple[float, float], now: tuple[float, float]) -> float:
+    """1 while the head turn matches the render's, fading to 0 as it moves away."""
+    drift = math.hypot(now[0] - rendered[0], now[1] - rendered[1])
+    return float(np.clip((HEAD_GONE - drift) / (HEAD_GONE - HEAD_FITS), 0.0, 1.0))

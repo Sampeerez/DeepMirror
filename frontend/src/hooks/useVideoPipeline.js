@@ -13,6 +13,16 @@ const JPEG_QUALITY = 0.85;
 // more means the server is behind, and capture skips frames.
 const MAX_IN_FLIGHT = 30;
 const MAX_QUEUE = 90;
+const IN_FLIGHT_EXPIRY_MS = 2000;
+
+/** Frames still on their way (forgetting the ones out for too long: the server dropped them). */
+function inFlight(pending) {
+  const now = performance.now();
+  for (const [t, sent] of pending) {
+    if (now - sent > IN_FLIGHT_EXPIRY_MS) pending.delete(t);
+  }
+  return pending.size;
+}
 
 function frameMessage(t, jpeg) {
   const out = new Uint8Array(8 + jpeg.byteLength);
@@ -47,8 +57,11 @@ export default function useVideoPipeline({ getDelayMs }) {
   const virtualCameraRef = useRef(virtualCamera);
   useEffect(() => { virtualCameraRef.current = virtualCamera; }, [virtualCamera]);
   const queueRef = useRef([]);
-  const inFlightRef = useRef(0);
+  // Frames on their way, by capture time. One the server dropped never comes back, so each
+  // expires after IN_FLIGHT_EXPIRY_MS: a few lost at start must not throttle capture for good.
+  const inFlightRef = useRef(new Map());
   const timersRef = useRef({ capture: null, draw: null, fps: null });
+  const workerRef = useRef(null);
   const shownRef = useRef(0);
   const delayRef = useRef(null);
   const latenciesRef = useRef([]);    // ms from capture to the cloned frame's arrival, recent frames
@@ -70,6 +83,8 @@ export default function useVideoPipeline({ getDelayMs }) {
     const timers = timersRef.current;
     clearInterval(timers.capture);
     cancelAnimationFrame(timers.draw);
+    workerRef.current?.postMessage({ stop: true });
+    workerRef.current = null;
     clearInterval(timers.fps);
     wsRef.current?.close();
     wsRef.current = null;
@@ -77,7 +92,7 @@ export default function useVideoPipeline({ getDelayMs }) {
     streamRef.current = null;
     for (const item of queueRef.current) item.bitmap?.close?.();
     queueRef.current = [];
-    inFlightRef.current = 0;
+    inFlightRef.current.clear();
     delayRef.current = null;
     latenciesRef.current = [];
     setRunning(false);
@@ -125,8 +140,8 @@ export default function useVideoPipeline({ getDelayMs }) {
           else if (msg.type === 'error' || msg.type === 'camera_error') setError(msg.message);
           return;
         }
-        inFlightRef.current = Math.max(0, inFlightRef.current - 1);
         const t = new DataView(event.data).getFloat64(0, true);
+        inFlightRef.current.delete(t);
         const latencies = latenciesRef.current;
         latencies.push(performance.now() - t);
         if (latencies.length > 60) latencies.shift();
@@ -142,10 +157,26 @@ export default function useVideoPipeline({ getDelayMs }) {
       };
       ws.onclose = () => { if (wsRef.current === ws) stop(); };
 
-      const context = canvas.getContext('2d');
       const timers = timersRef.current;
-      timers.capture = setInterval(async () => {
-        if (ws.readyState !== WebSocket.OPEN || inFlightRef.current >= MAX_IN_FLIGHT) return;
+      const sendFrame = (t, buffer) => {
+        if (ws.readyState !== WebSocket.OPEN || inFlight(inFlightRef.current) >= MAX_IN_FLIGHT) return;
+        if (ws.bufferedAmount > 2_000_000) return;
+        inFlightRef.current.set(t, performance.now());
+        ws.send(frameMessage(t, buffer));
+      };
+      const [track] = stream.getVideoTracks();
+      if (typeof MediaStreamTrackProcessor === 'function' && typeof OffscreenCanvas === 'function') {
+        // Frames straight from the camera, encoded in a worker: the page's own work never
+        // slows capture down.
+        const worker = new Worker(new URL('../lib/captureWorker.js', import.meta.url), { type: 'module' });
+        const { readable } = new MediaStreamTrackProcessor({ track });
+        worker.onmessage = ({ data }) => sendFrame(data.t - performance.timeOrigin, data.buffer);
+        worker.postMessage({ readable, width: WIDTH, height: HEIGHT, quality: JPEG_QUALITY }, [readable]);
+        workerRef.current = worker;
+      }
+      const context = canvas.getContext('2d');
+      timers.capture = workerRef.current ? null : setInterval(async () => {
+        if (ws.readyState !== WebSocket.OPEN || inFlight(inFlightRef.current) >= MAX_IN_FLIGHT) return;
         if (ws.bufferedAmount > 2_000_000 || video.readyState < 2) return;
         const t = performance.now();
         context.drawImage(video, 0, 0, WIDTH, HEIGHT);
@@ -153,7 +184,7 @@ export default function useVideoPipeline({ getDelayMs }) {
           ? await canvas.convertToBlob({ type: 'image/jpeg', quality: JPEG_QUALITY })
           : await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
         if (!blob || ws.readyState !== WebSocket.OPEN) return;
-        inFlightRef.current += 1;
+        inFlightRef.current.set(t, performance.now());
         ws.send(frameMessage(t, await blob.arrayBuffer()));
       }, 1000 / FPS);
 

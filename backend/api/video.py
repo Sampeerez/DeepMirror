@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import json
 import logging
+import queue
+import threading
 
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -161,6 +163,20 @@ async def video_websocket(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "ready", **message[1]})
 
     sender = asyncio.create_task(pump())
+    # Frames go to the face process from a thread of their own: a pipe write that waits (the
+    # face process busy for a moment) must never hold up the event loop, which also serves the
+    # live voice. Only the newest few wait; older ones are dropped.
+    frames: queue.Queue = queue.Queue(maxsize=3)
+
+    def forward() -> None:
+        while True:
+            item = frames.get()
+            if item is None:
+                return
+            worker.send("frame", *item)
+
+    forwarder = threading.Thread(target=forward, name="video-forward", daemon=True)
+    forwarder.start()
     try:
         while True:
             message = await websocket.receive()
@@ -174,7 +190,10 @@ async def video_websocket(websocket: WebSocket) -> None:
                     t_ms, jpeg = split_frame(data)
                 except ValueError:
                     continue
-                worker.send("frame", t_ms, jpeg)
+                if frames.full():
+                    with contextlib.suppress(queue.Empty):
+                        frames.get_nowait()
+                frames.put_nowait((t_ms, jpeg))
             elif message.get("text"):
                 try:
                     payload = json.loads(message["text"])
@@ -187,6 +206,8 @@ async def video_websocket(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        with contextlib.suppress(queue.Full):
+            frames.put_nowait(None)
         sender.cancel()
         unsubscribe()
         worker.send("camera", {"on": False, "size": [1280, 720]})

@@ -25,7 +25,8 @@ import numpy as np
 
 VOICE_IDLE_SECONDS = 1.0   # no chunk for this long: the voice is not streaming
 SAFETY_SECONDS = 0.006     # margin before the next render is due
-POLL_SECONDS = 0.001
+POLL_SECONDS = 0.001        # the voice waiting for a face job to end (it must start at once)
+VIDEO_POLL_SECONDS = 0.003  # a face job waiting for a gap (every wake-up takes the face process's GIL)
 
 # Slots in the shared array.
 _ARRIVAL, _RENDER_END, _PERIOD, _DELAY, _RENDER_MS, _RENDERING, _VIDEO_BUSY = range(7)
@@ -169,7 +170,7 @@ class GpuArbiter:
                 self._video_lock.release()
             if now >= deadline:
                 break
-            time.sleep(POLL_SECONDS)
+            time.sleep(VIDEO_POLL_SECONDS)
         try:
             yield granted
         finally:

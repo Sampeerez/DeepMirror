@@ -266,6 +266,27 @@ class TestLegacyEquivalence:
         audio = voice.synthesizer.infer(phone, torch.tensor([phone.shape[1]]), pitch, pitchf, torch.tensor([3]))
         assert np.abs(audio.numpy() - golden["audio"]).max() < 1e-5
 
+    def test_a_skipped_end_is_not_vocoded_and_the_rest_matches(self):
+        from backend.inference.voice_model import VoiceModel
+
+        golden = np.load(GOLDEN / "synth_v2_f1.npz")
+        voice = VoiceModel.load(GOLDEN / "synth_v2_f1.pth", torch.device("cpu"), False)
+        phone = torch.from_numpy(golden["phone"])
+        pitch, pitchf = torch.from_numpy(golden["pitch"]), torch.from_numpy(golden["pitchf"])
+        frames = phone.shape[1]
+        hop = voice.synthesizer.hop_length
+
+        def render(skip: int) -> np.ndarray:
+            torch.manual_seed(0)
+            return voice.synthesizer.infer(phone, torch.tensor([frames]), pitch, pitchf, torch.tensor([3]),
+                                           decode_last_frames=frames, skip_last_frames=skip)[0, 0].numpy()
+
+        full, cut = render(0), render(6)
+        assert len(cut) == len(full) - 6 * hop
+        # Away from the cut (the decoder's receptive field), the samples are the same.
+        keep = len(cut) - 4 * hop
+        assert np.abs(cut[:keep] - full[:keep]).max() < 1e-4
+
 
 def test_onnx_decoder_matches_torch_output_shape_and_level(tmp_path):
     from backend.inference.onnx_decoder import onnx_decoder

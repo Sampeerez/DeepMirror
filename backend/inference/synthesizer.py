@@ -449,14 +449,16 @@ class Synthesizer(nn.Module):
     @torch.no_grad()
     def infer(self, phone: torch.Tensor, lengths: torch.Tensor, pitch: torch.Tensor | None,
               pitchf: torch.Tensor | None, speaker: torch.Tensor,
-              decode_last_frames: int | None = None) -> torch.Tensor:
+              decode_last_frames: int | None = None, skip_last_frames: int = 0) -> torch.Tensor:
         """Render waveform ``[batch, 1, samples]`` from features at 100 frames/s.
 
         ``decode_last_frames`` vocodes only the final frames. The content
         encoder and flow still see the whole window (they need the context),
         but the HiFi-GAN decoder is convolutional with a short receptive field,
         so a streaming caller that only emits the end of each window can skip
-        most of the decoding, which dominates the cost.
+        most of the decoding, which dominates the cost. ``skip_last_frames`` also leaves out the
+        very end (a stream's look-ahead and padding, never emitted): the output is shorter by
+        that many frames.
         """
         g = self.emb_g(speaker).unsqueeze(-1)
         mean, log_scale, mask = self.enc_p(phone, pitch if self.use_pitch else None, lengths)
@@ -466,6 +468,10 @@ class Synthesizer(nn.Module):
             z = z[:, :, -decode_last_frames:]
             if pitchf is not None:
                 pitchf = pitchf[:, -decode_last_frames:]
+        if 0 < skip_last_frames < z.shape[2]:
+            z = z[:, :, :-skip_last_frames]
+            if pitchf is not None:
+                pitchf = pitchf[:, :-skip_last_frames]
         decode = self.decoder_override or self.dec
         if self.use_pitch:
             return decode(z, pitchf, g)

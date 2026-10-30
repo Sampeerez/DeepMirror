@@ -311,3 +311,58 @@ class TestWholeHead:
         assert settings.mode == "face"
         settings.apply({"mode": "everything"})
         assert settings.mode == "face"
+
+
+class TestRealtimeFixes:
+    def test_a_head_rendered_for_another_turn_fades_out(self):
+        from backend.video.engine import head_freshness, head_pose
+
+        points = np.array([[40, 50], [80, 50], [60, 70], [45, 90], [75, 90]], np.float32)
+        turned = points.copy()
+        turned[2, 0] += 10          # the nose moves a quarter of the eye distance: a clear turn
+        assert head_freshness(head_pose(points), head_pose(points)) == 1.0
+        assert head_freshness(head_pose(points), head_pose(turned)) == 0.0
+        slightly = points.copy()
+        slightly[2, 0] += 4
+        assert 0.0 < head_freshness(head_pose(points), head_pose(slightly)) < 1.0
+
+    def test_paste_blends_like_the_float_reference(self):
+        import cv2
+
+        rng = np.random.default_rng(0)
+        frame = rng.integers(0, 255, (120, 160, 3), dtype=np.uint8)
+        face = rng.integers(0, 255, (64, 64, 3), dtype=np.uint8)
+        mask = rng.random((64, 64)).astype(np.float32)
+        matrix = np.array([[1, 0, -40], [0, 1, -30]], np.float32)
+        out = paste(frame, face, mask, matrix)
+        inverse = cv2.invertAffineTransform(matrix)
+        warped = cv2.warpAffine(face, inverse, (160, 120)).astype(np.float32)
+        alpha = cv2.warpAffine(mask, inverse, (160, 120))[:, :, None]
+        reference = np.rint(frame + (warped - frame) * alpha)
+        assert np.abs(out[30:94, 40:104].astype(int) - reference[30:94, 40:104]).max() <= 1
+        assert out is not frame and paste(frame, face, mask, matrix, inplace=True) is frame
+
+    def test_the_head_process_answers_renders_in_order(self):
+        import multiprocessing as mp
+
+        from backend.video.head_process import RemoteHead
+
+        ours, theirs = mp.Pipe()
+        remote = RemoteHead(ours)
+        theirs.send(("ready",))
+
+        def answer() -> None:
+            assert theirs.recv()[0] == "portrait"
+            kind, request, *_ = theirs.recv()
+            assert kind == "render"
+            theirs.send(("layer", request - 1, None))     # a late answer to an older request: skipped
+            image = np.zeros((4, 4, 3), np.uint8)
+            theirs.send(("layer", request, (1.0, image, np.ones((4, 4), np.float32),
+                                            np.ones((4, 4), np.float32), (0.1, 0.2))))
+
+        thread = threading.Thread(target=answer)
+        thread.start()
+        layer = remote.render(np.zeros((8, 8, 3), np.uint8), np.zeros((5, 2), np.float32), 1.0,
+                              np.zeros((8, 8, 3), np.uint8), wait=1.0)
+        thread.join()
+        assert layer is not None and layer.t == 1.0 and layer.pose == (0.1, 0.2)

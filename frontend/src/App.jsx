@@ -50,6 +50,8 @@ const ACTIVE_MODEL_POLL_MS = 5000;
 const CAPTURE_SAMPLES_KEY = 'ovc_capture_samples_v1';
 // After a longer chunk is chosen, the server measures it for this long before another step.
 const HEADROOM_SETTLE_MS = 5000;
+// The share of each chunk's time the voice may take while the camera runs.
+const VIDEO_VOICE_SHARE = 0.6;
 
 export default function App() {
   useEffect(() => { document.title = APP_NAME; }, []);
@@ -239,7 +241,12 @@ export default function App() {
   // step waits for the server to measure the new size before judging it).
   const { changeLiveChunkSize } = runtime;
   const { setChunkSize } = pipeline;
-  const overloaded = isRunning && runtimeConfig.autoHeadroom && serverStats.overloaded;
+  // With the camera on, the voice also leaves the GPU room for the face: past 60 % of its time
+  // budget it moves to a longer chunk (the video waits for the voice anyway, so nothing shows).
+  const budgetMs = (runtimeConfig.chunkSize / (pipeline.streamInfo?.sampleRate || runtimeConfig.sampleRate)) * 1000;
+  const voiceShare = serverStats.modelMs > 0 && budgetMs > 0 ? serverStats.modelMs / budgetMs : 0;
+  const overloaded = isRunning && runtimeConfig.autoHeadroom
+    && (serverStats.overloaded || (video.running && voiceShare > VIDEO_VOICE_SHARE));
   const lastHeadroomStepRef = useRef(0);
   useEffect(() => {
     if (!overloaded || Date.now() - lastHeadroomStepRef.current < HEADROOM_SETTLE_MS) return;

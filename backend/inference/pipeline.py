@@ -254,7 +254,7 @@ class VoiceConverter:
 
     def convert(self, audio: np.ndarray, settings: ConversionSettings, *, pad_seconds: float | None = None,
                 split_long_input: bool = True, rms_frame_seconds: float | None = None,
-                tail_seconds: float | None = None,
+                tail_seconds: float | None = None, skip_seconds: float = 0.0,
                 on_f0: Callable[[np.ndarray], None] | None = None) -> np.ndarray:
         """Convert 16 kHz mono ``audio``; returns ``len(audio) * sr / 16000`` samples (± one frame).
 
@@ -264,7 +264,7 @@ class VoiceConverter:
         """
         with self._lock:
             return self._convert(audio, settings, pad_seconds, split_long_input, rms_frame_seconds, tail_seconds,
-                                 on_f0)
+                                 on_f0, skip_seconds)
 
     def estimate_f0(self, audio: np.ndarray, settings: ConversionSettings) -> np.ndarray:
         """Unshifted pitch track (Hz, 100 frames/s) of 16 kHz ``audio``."""
@@ -276,7 +276,8 @@ class VoiceConverter:
 
     def _convert(self, audio: np.ndarray, settings: ConversionSettings, pad_seconds: float | None,
                  split_long_input: bool, rms_frame_seconds: float | None,
-                 tail_seconds: float | None, on_f0: Callable[[np.ndarray], None] | None) -> np.ndarray:
+                 tail_seconds: float | None, on_f0: Callable[[np.ndarray], None] | None,
+                 skip_seconds: float = 0.0) -> np.ndarray:
         voice = self.voice
         pad_seconds = self.compute.offline_pad_seconds if pad_seconds is None else pad_seconds
         t_pad = round(SAMPLE_RATE * pad_seconds / HOP) * HOP
@@ -319,7 +320,9 @@ class VoiceConverter:
                 None if pitch is None else pitch[:, frame_slice],
                 None if pitchf is None else pitchf[:, frame_slice],
                 speaker, settings,
-                None if tail_seconds is None else int(tail_seconds * 100) + t_pad // HOP)
+                None if tail_seconds is None else int(tail_seconds * 100) + t_pad // HOP,
+                # The end that is never used: the padding, and what the caller says it skips.
+                0 if tail_seconds is None or end is not None else int(skip_seconds * 100) + t_pad // HOP)
             segments.append(rendered[t_pad_target:len(rendered) - t_pad_target] if t_pad_target else rendered)
             if cut is not None:
                 start = cut // HOP * HOP
@@ -349,7 +352,7 @@ class VoiceConverter:
 
     def _synthesize(self, audio: np.ndarray, pitch: torch.Tensor | None, pitchf: torch.Tensor | None,
                     speaker: torch.Tensor, settings: ConversionSettings,
-                    tail_frames: int | None = None) -> np.ndarray:
+                    tail_frames: int | None = None, skip_frames: int = 0) -> np.ndarray:
         """Render one padded segment; with ``tail_frames`` only its end is vocoded.
 
         The result always spans the whole segment (the skipped start is
@@ -379,9 +382,14 @@ class VoiceConverter:
             features = (features * mask + raw * (1 - mask)).to(raw.dtype)
 
         lengths = torch.tensor([frames], device=self.compute.device)
-        audio_out = self.voice.synthesizer.infer(features, lengths, pitch, pitchf, speaker, tail_frames)
+        audio_out = self.voice.synthesizer.infer(features, lengths, pitch, pitchf, speaker, tail_frames,
+                                                 skip_frames)
         rendered = audio_out[0, 0].float().cpu().numpy()
-        full_length = features.shape[1] * self.voice.synthesizer.hop_length
-        if len(rendered) < full_length:
-            rendered = np.concatenate([np.zeros(full_length - len(rendered), np.float32), rendered])
+        hop = self.voice.synthesizer.hop_length
+        full_length = features.shape[1] * hop
+        skipped = skip_frames * hop if tail_frames is not None and 0 < skip_frames < tail_frames else 0
+        if len(rendered) + skipped < full_length or skipped:
+            # Silence where nothing was decoded, so the sample alignment stays the same.
+            before = max(0, full_length - len(rendered) - skipped)
+            rendered = np.concatenate([np.zeros(before, np.float32), rendered, np.zeros(skipped, np.float32)])
         return rendered

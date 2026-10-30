@@ -19,7 +19,7 @@ from functools import cache
 from pathlib import Path
 
 import numpy as np
-from scipy import ndimage
+from scipy import ndimage, signal
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +259,7 @@ class SpeechTimeline:
             window = np.sin(np.linspace(0, np.pi, 2 * ramp + 1)) ** 2
             # Pad with the edge values so the span's borders are not faded.
             padded = np.pad(hard, (ramp, ramp), mode="edge")
-            hard = (np.convolve(padded, window / window.sum(), mode="same")[ramp:-ramp]).astype(np.float32)
+            hard = (signal.oaconvolve(padded, window / window.sum(), mode="same")[ramp:-ramp]).astype(np.float32)
         return np.clip(hard, 0.0, 1.0)
 
     def core(self, start: int, length: int, rate: int) -> np.ndarray:

@@ -55,7 +55,7 @@ describe('performance helpers', () => {
   });
 
   it('maps profiles to server stream timing', () => {
-    expect(streamTimingForChunkSize(8192)).toEqual({ lookback_seconds: 1, lookahead_seconds: 0.15 });
+    expect(streamTimingForChunkSize(8192)).toEqual({ lookback_seconds: 0.5, lookahead_seconds: 0.15 });
     expect(streamTimingForChunkSize(1000)).toEqual({});
   });
 

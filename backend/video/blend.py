@@ -57,8 +57,12 @@ class Occluder:
         return cv2.resize(np.clip(out, 0, 1), (size, size))
 
 
-def paste(frame: np.ndarray, face: np.ndarray, mask: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-    """``frame`` with ``face`` (aligned crop) blended in through ``mask``; only the face region is touched."""
+def paste(frame: np.ndarray, face: np.ndarray, mask: np.ndarray, matrix: np.ndarray,
+          inplace: bool = False) -> np.ndarray:
+    """``frame`` with ``face`` (aligned crop, uint8) blended in through ``mask``; only the face's
+    bounding box is touched. The blend runs in OpenCV (uint8, several cores, the GIL released),
+    which matters at camera rate: numpy float blending held the face process for ~6 ms a frame.
+    """
     size = face.shape[0]
     inverse = cv2.invertAffineTransform(matrix)
     corners = cv2.transform(np.array([[[0, 0], [size, 0], [size, size], [0, size]]], np.float32), inverse)[0]
@@ -71,9 +75,12 @@ def paste(frame: np.ndarray, face: np.ndarray, mask: np.ndarray, matrix: np.ndar
     local = inverse.copy()
     local[:, 2] -= (x1, y1)
     region = (x2 - x1, y2 - y1)
+    if face.dtype != np.uint8:
+        face = np.clip(face, 0, 255).astype(np.uint8)
     warped = cv2.warpAffine(face, local, region, flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    alpha = cv2.warpAffine(mask, local, region, flags=cv2.INTER_LINEAR, borderValue=0.0)[:, :, None]
-    out = frame.copy()
-    patch = out[y1:y2, x1:x2].astype(np.float32)
-    out[y1:y2, x1:x2] = (patch + (warped.astype(np.float32) - patch) * alpha).astype(np.uint8)
+    alpha = cv2.warpAffine(mask.astype(np.float32, copy=False), local, region, flags=cv2.INTER_LINEAR,
+                           borderValue=0.0)
+    out = frame if inplace else frame.copy()
+    patch = out[y1:y2, x1:x2]
+    out[y1:y2, x1:x2] = cv2.blendLinear(warped, patch, alpha, 1.0 - alpha)
     return out

@@ -105,7 +105,8 @@ class _VirtualCamera:
         self.camera.close()
 
 
-def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu: bool) -> None:
+def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu: bool,
+        head_conn: Connection | None = None) -> None:
     """Process entry: serve frames and commands until told to stop or the server goes away."""
     import cv2
     import torch
@@ -121,6 +122,10 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     arbiter = GpuArbiter(arbiter_name)
     models = FaceModels(Path(face_dir), gpu)
     engine = FaceEngine(models, arbiter, VideoSettings())
+    if head_conn is not None:
+        from backend.video.head_process import RemoteHead
+
+        engine.remote = RemoteHead(head_conn)
     live: LiveFaceSession | None = None
     camera: _VirtualCamera | None = None
     offset: float | None = None     # server monotonic - client capture time (s), smallest seen
@@ -216,6 +221,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         # The face chosen for this file, else the one worn live.
         offline.set_identity(identity if identity is not None else engine.identity)
         offline.set_portrait(_read_image(portrait) if portrait else engine.portrait)
+        offline.remote = engine.remote
         try:
             frames = swap_video(offline, Path(source), Path(target), lambda done: send("convert_progress", job, done))
             send("convert_done", job, None, frames)
@@ -229,10 +235,6 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         if models.available():
             engine.plan()
             last_plan = time.monotonic()
-        if models.heads_ready:
-            # The whole head's networks too (a few seconds, and a CUDA context of their own):
-            # now, while the camera is starting, not in the middle of a call.
-            models.head_models()
         send("ready", {"swap_ms": models.swap_ms, "available": models.available()})
         while True:
             if not conn.poll(0.05):
@@ -314,6 +316,7 @@ class FaceWorker:
 
     def __init__(self, arbiter_name: str, face_dir: Path, cache_path: Path, gpu: bool) -> None:
         self._args = (arbiter_name, str(face_dir), str(cache_path), gpu)
+        self._head_process: BaseProcess | None = None
         self._process: BaseProcess | None = None
         self._conn: Any = None   # the pipe's server end
         self._send_lock = threading.Lock()
@@ -333,10 +336,22 @@ class FaceWorker:
         context = mp.get_context("spawn")
         parent, child = context.Pipe()
         self._ready.clear()
-        process = context.Process(target=run, args=(child, *self._args), name="deepmirror-face", daemon=True)
+        # The whole head renders in its own process, wired straight to the face process.
+        from backend.video import head_process
+
+        head_face, head_side = context.Pipe()
+        arbiter_name, face_dir, _cache, gpu = self._args
+        head = context.Process(target=head_process.run, args=(head_side, arbiter_name, face_dir, gpu),
+                               name="deepmirror-head", daemon=True)
+        head.start()
+        self._head_process = head
+        head_side.close()
+        process = context.Process(target=run, args=(child, *self._args, head_face), name="deepmirror-face",
+                                  daemon=True)
         process.start()
         self._process = process
         child.close()
+        head_face.close()
         self._conn = parent
         threading.Thread(target=self._read, name="face-worker-reader", daemon=True).start()
         logger.info("Face clone process started")
@@ -352,6 +367,11 @@ class FaceWorker:
         if self._process.is_alive():
             self._process.kill()
         self._process = None
+        head, self._head_process = self._head_process, None
+        if head is not None:   # it ends by itself once the face process's pipe closes
+            head.join(timeout=3)
+            if head.is_alive():
+                head.kill()
         logger.info("Face clone process stopped")
 
     def send(self, *message) -> None:

@@ -326,6 +326,10 @@ class StreamSession:
             timing = self.timing
             emitted = (self.chunk_size / self.sample_rate + timing.lookahead_seconds
                        + timing.crossfade_seconds + timing.search_seconds)
+            # The look-ahead is context only: it is not vocoded, except a margin for the decoder's
+            # receptive field next to the emitted audio (measured: the emitted samples stay within
+            # 4e-5 of a full decode).
+            skip = max(0.0, timing.lookahead_seconds - config.STREAM_DECODE_MARGIN_SECONDS)
 
             # F0 frames of the newest chunk: the window ends ``lookahead`` after them.
             new_frames = max(1, round(self.chunk_size / self.sample_rate * 100))
@@ -347,7 +351,7 @@ class StreamSession:
                                           pad_seconds=config.STREAM_PAD_SECONDS, split_long_input=False,
                                           rms_frame_seconds=config.STREAM_RMS_FRAME_SECONDS,
                                           tail_seconds=emitted + config.STREAM_DECODE_MARGIN_SECONDS,
-                                          on_f0=observe_f0)
+                                          skip_seconds=skip, on_f0=observe_f0)
                 return audio, converter.output_rate
 
             vad = load_vad(self.manager.vad_path(), lambda: self.silence_threshold_db)
@@ -471,6 +475,7 @@ class StreamSession:
             arbiter = self.manager.arbiter
             arbiter.chunk_arrived()
             stream = self._realtime_stream(converter)
+
             listen_started = time.perf_counter()
             speech = stream.listen(processed)
             self.listen_ms = (time.perf_counter() - listen_started) * 1000.0

@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # Samples per live chunk at SAMPLE_RATE (8192 = 171 ms).
     CHUNK_SIZE: int = 8192
     # Past context re-rendered with every chunk: steadier timbre and pitch.
-    STREAM_LOOKBACK_SECONDS: float = 1.0
+    STREAM_LOOKBACK_SECONDS: float = 0.5   # measured: as good as 1.0 s (similarity, DNSMOS)
     # Future context: each emitted sample is rendered with this much real
     # audio after it, so window edges never reach the output. Adds latency.
     STREAM_LOOKAHEAD_SECONDS: float = 0.15
