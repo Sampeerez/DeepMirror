@@ -9,7 +9,7 @@ hair does not reach is painted over with the background around it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -44,6 +44,9 @@ class OwnHead:
     t: float
     known: np.ndarray            # float32 SIZE/4: background pixels the fill takes its colour from
     paint: np.ndarray            # float32 SIZE: where the fill goes (the hair, grown and faded)
+    # Per fill scale (coarse to fine): the background mask at that scale, its blurred weight and
+    # how far to trust it. Worked out once per parse, so a frame only blurs colours.
+    scales: list = field(default_factory=list)
 
 
 def head_crop(frame: np.ndarray, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -92,8 +95,8 @@ def parse_own(crop: np.ndarray, parser: FaceParser, t: float) -> OwnHead:
     grown = cv2.dilate(hair, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring, ring)))
     known = 1.0 - np.clip(cv2.dilate(head, np.ones((5, 5), np.uint8)) + grown, 0, 1)
     paint = np.maximum(grown, feather(cv2.dilate(grown, np.ones((ring, ring), np.uint8)), erode=0.0, soft=0.03))
-    small = cv2.resize(known, (SIZE // 4, SIZE // 4), interpolation=cv2.INTER_AREA)
-    return OwnHead(t, small.astype(np.float32), paint.astype(np.float32))
+    small = cv2.resize(known, (SIZE // 4, SIZE // 4), interpolation=cv2.INTER_AREA).astype(np.float32)
+    return OwnHead(t, small, paint.astype(np.float32), _scales(small))
 
 
 def hair_weight(hair: HairLayer, pose: tuple[float, float]) -> float:
@@ -101,23 +104,39 @@ def hair_weight(hair: HairLayer, pose: tuple[float, float]) -> float:
     return float(np.clip((HAIR_GONE - drift) / (HAIR_GONE - HAIR_FITS), 0.0, 1.0))
 
 
+FILL_SIGMA = 3.0   # blur at every scale of the fill (each scale halves the resolution)
+FILL_SCALES = 3
+
+
+def _scales(known: np.ndarray) -> list:
+    out = []
+    for level in reversed(range(FILL_SCALES)):          # coarse first
+        side = known.shape[0] >> level
+        mask = cv2.resize(known, (side, side), interpolation=cv2.INTER_AREA) if level else known
+        weight = cv2.GaussianBlur(mask, (0, 0), FILL_SIGMA)
+        trust = np.clip(weight / 0.2, 0, 1)[:, :, None].astype(np.float32)
+        out.append((side, mask[:, :, None], np.maximum(weight, 1e-6)[:, :, None], trust))
+    return out
+
+
 def cover(crop: np.ndarray, own: OwnHead) -> np.ndarray:
-    """``crop`` (this frame's head crop) as it would look without the speaker's hair: a
-    normalised blur of the background around it (smooth, no streaks). Paste with ``own.paint``."""
+    """``crop`` (this frame's head crop) as it would look without the speaker's hair: the
+    background around it spread over the hair, coarse to fine (a normalised blur at each scale
+    of a pyramid), so far from the background the colour fades to its average, never to black.
+    Paste with ``own.paint``."""
     small = cv2.resize(crop, (SIZE // 4, SIZE // 4), interpolation=cv2.INTER_AREA).astype(np.float32)
     known = own.known
     total = float(known.sum())
     mean = (small * known[:, :, None]).sum((0, 1)) / total if total > 0 else small.mean((0, 1))
-    filled = np.broadcast_to(mean, small.shape).astype(np.float32)
-    # Coarse to fine: each scale fills where it has enough background nearby, so far from the
-    # background the colour fades to its average instead of to black.
-    for sigma in (SIZE // 24, SIZE // 48, SIZE // 96):
-        weight = cv2.GaussianBlur(known, (0, 0), max(1, sigma))
-        colour = cv2.GaussianBlur(small * known[:, :, None], (0, 0), max(1, sigma))
-        trust = np.clip(weight / 0.2, 0, 1)[:, :, None]
-        filled = filled * (1 - trust) + colour / np.maximum(weight, 1e-6)[:, :, None] * trust
-    filled = np.clip(filled, 0, 255).astype(np.uint8)
-    return cv2.resize(filled, (SIZE, SIZE), interpolation=cv2.INTER_LINEAR)
+    filled = None
+    for side, mask, weight, trust in own.scales or _scales(known):
+        level = small if side == small.shape[0] else cv2.resize(small, (side, side), interpolation=cv2.INTER_AREA)
+        colour = cv2.GaussianBlur(level * mask, (0, 0), FILL_SIGMA) / weight
+        base = (np.broadcast_to(mean, colour.shape) if filled is None
+                else cv2.resize(filled, (side, side), interpolation=cv2.INTER_LINEAR))
+        filled = base * (1 - trust) + colour * trust
+    out = np.clip(filled if filled is not None else small, 0, 255).astype(np.uint8)
+    return cv2.resize(out, (SIZE, SIZE), interpolation=cv2.INTER_LINEAR)
 
 
 def toned(hair: HairLayer, face: np.ndarray, mask: np.ndarray) -> np.ndarray:

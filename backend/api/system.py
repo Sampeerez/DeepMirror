@@ -58,6 +58,31 @@ async def setup_calls(request: Request) -> dict:
     return await calls_status(request)
 
 
+@router.get("/api/performance")
+async def performance(request: Request) -> dict:
+    """What was measured on this computer and what it chose: shown in Settings › This PC."""
+    import os
+    import platform
+
+    from backend.video.runtime import cpu_threads
+
+    manager: ModelManager = request.app.state.model_manager
+    faces = request.app.state.faces
+    details = manager.active_details() or {}
+    face = await asyncio.to_thread(faces.status)
+    stats = face.get("stats") or {}
+    return {
+        "gpu": manager.compute.describe(),
+        "cpu": {"name": platform.processor() or platform.machine(), "threads": os.cpu_count(),
+                "face_threads": max(2, cpu_threads())},
+        "voice": {"model": manager.active_model_name, "render_ms": details.get("realtime_ms"),
+                  "f0_method": manager.default_f0_method()},
+        "face": {"swap_ms": face.get("swap_ms"), "swapper": stats.get("swapper"),
+                 "keys_per_second": stats.get("keys_per_second"), "fps_out": stats.get("fps_out"),
+                 "track_ms": stats.get("track_ms"), "compose_ms": stats.get("compose_ms")},
+    }
+
+
 @router.get("/api/config")
 async def runtime_config(request: Request) -> dict:
     settings: Settings = request.app.state.settings

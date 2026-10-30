@@ -209,3 +209,10 @@ class TestVoiceProfile:
         assert store.reference("voice.pth") is None
         assert client.post("/api/profile/reference/missing.pth",
                            files={"file": ("clip.wav", self.reading(10.0), "audio/wav")}).status_code == 404
+
+
+def test_performance_reports_what_was_measured(client):
+    body = client.get("/api/performance").json()
+    assert {"gpu", "cpu", "voice", "face"} <= body.keys()
+    assert body["cpu"]["face_threads"] >= 2
+    assert "name" in body["gpu"]

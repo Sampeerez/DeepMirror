@@ -736,10 +736,6 @@ class FaceEngine:
         if weight <= 0.0:
             return frame, None
         crop, matrix = hairs.head_crop(frame, points)
-        if self._own is not None:
-            frame = paste(frame, hairs.cover(crop, self._own), self._own.paint * weight, matrix)
-        else:
-            frame = frame.copy()
         alpha = hair.alpha * weight
         image = hair.image
         if key is not None:
@@ -747,7 +743,15 @@ class FaceEngine:
             if self._toned is None or self._toned[0] is not key or self._toned[1] is not hair:
                 self._toned = (key, hair, hairs.toned(hair, key.face, key.mask))
             image = self._toned[2]
-        return paste(frame, image, alpha, matrix, inplace=True), alpha
+        # Composed in the head crop first (own hair painted over, then the new hair), pasted once.
+        if self._own is not None:
+            paint = self._own.paint * weight
+            crop = cv2.blendLinear(hairs.cover(crop, self._own), crop, paint, 1.0 - paint)
+            mask = 1.0 - (1.0 - paint) * (1.0 - alpha)
+        else:
+            mask = alpha
+        crop = cv2.blendLinear(image, crop, alpha, 1.0 - alpha)
+        return paste(frame, crop, mask, matrix), alpha
 
 
 def _light_like(image: np.ndarray, reference: np.ndarray, mask: np.ndarray) -> np.ndarray:

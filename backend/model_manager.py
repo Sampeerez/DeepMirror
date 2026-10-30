@@ -167,6 +167,10 @@ class ModelManager:
         """DeepFilterNet weights once downloaded (the spectral gate stands in before)."""
         return self.assets.path("denoiser") if self.assets.ready("denoiser") else None
 
+    def active_details(self) -> dict | None:
+        """What was measured when the active voice was loaded (render ms per pitch method...)."""
+        return self._details.get(self.active_model_name or "")
+
     def neural_denoise_fits(self, chunk_size: int, sample_rate: int) -> bool:
         """Whether DeepFilterNet fits the realtime budget next to the voice model.
 

@@ -66,7 +66,8 @@ class FaceDetector:
     STRIDES = (8, 16, 32)
 
     def __init__(self, path: Path, size: int = 320, gpu: bool = False) -> None:
-        self.session = session(path, gpu=gpu, threads=2)
+        # A share of the cores (4 on a 16-thread CPU: 10 -> 6 ms a frame), the rest for the voice.
+        self.session = session(path, gpu=gpu, threads=max(2, cpu_threads()))
         self.size = size
         self._anchors: dict[tuple[int, int, int], np.ndarray] = {}
 

@@ -111,8 +111,10 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     import cv2
     import torch
 
-    # A few cores are plenty for one face at camera rate; the rest stay with the voice.
-    cv2.setNumThreads(2)
+    from backend.video.runtime import cpu_threads
+
+    # A share of the cores (a quarter, 2 to 4) for one face at camera rate; the rest stay with the voice.
+    cv2.setNumThreads(max(2, cpu_threads()))
     torch.set_num_threads(1)
 
     from backend.compute_arbiter import GpuArbiter

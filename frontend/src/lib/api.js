@@ -289,6 +289,8 @@ export const installVirtualMic = () => request('/virtual-mic/install', { method:
 /** {microphone, camera}: what calls need, installed or not. */
 export const fetchCalls = () => request('/calls');
 export const setupCalls = () => request('/calls/setup', { method: 'POST' });
+/** What was measured on this computer and chosen for it (Settings › This PC). */
+export const fetchPerformance = () => request('/performance');
 export const fetchLogs = (after = 0, level = null) =>
   request(`/logs?after=${after}${level ? `&level=${encodeURIComponent(level)}` : ''}&limit=2000`);
 export const fetchTrainingLog = (jobId, lines = 800) => request(`/training/jobs/${jobId}/log?lines=${lines}`);

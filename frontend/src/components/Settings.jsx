@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, memo, useMemo, useState } from 'react';
+import React, { Suspense, lazy, memo, useEffect, useMemo, useState } from 'react';
 import {
   Activity, AudioLines, AudioWaveform, Camera, ChevronRight, FlaskConical, Hand, Mic, Moon, Palette, PhoneCall,
   ScanFace, ScrollText, Settings2, Smile, Sparkles, Sun, Timer, UserRound,
@@ -12,6 +12,7 @@ import SettingRow, { SettingsSection } from './SettingRow';
 import StreamDiagnostics from './StreamDiagnostics';
 import { MiniSlider } from './Sliders';
 import { APP_NAME } from '../lib/brand';
+import { fetchPerformance } from '../lib/api';
 import { groupedMethods, findF0Method } from '../lib/f0Methods';
 import {
   PERFORMANCE_PROFILES, bufferDurationMs, profileForChunkSize, recommendPerformanceProfile,
@@ -67,6 +68,40 @@ function More({ title, children }) {
         {title}
       </summary>
       <div className="divide-y divide-line border-t border-line">{children}</div>
+    </details>
+  );
+}
+
+/** What was measured on this computer and what it chose (read every few seconds while open). */
+function ThisPc() {
+  const [info, setInfo] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    const read = () => fetchPerformance().then((data) => { if (!cancelled) setInfo(data); }).catch(() => {});
+    read();
+    const timer = setInterval(read, 3000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [open]);
+  const ms = (value) => (value == null ? '—' : `${Math.round(value)} ms`);
+  const gpu = info?.gpu;
+  const voiceMs = info?.voice?.render_ms?.[info?.voice?.f0_method];
+  const swaps = Object.entries(info?.face?.swap_ms || {}).filter(([id]) => SWAPPER_NAMES[id]);
+  return (
+    <details className="group shrink-0 rounded-lg border border-line bg-raised" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="flex h-10 cursor-pointer list-none items-center gap-2 px-3 text-xs font-medium text-fg-muted [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" aria-hidden="true" />
+        This PC
+      </summary>
+      <dl className="divide-y divide-line border-t border-line">
+        <Stat label="GPU" value={gpu ? `${gpu.name}${gpu.memory_gb ? ` · ${gpu.memory_gb} GB` : ''}` : '—'} />
+        <Stat label="Precision" value={gpu ? (gpu.half_precision ? 'fp16' : 'fp32') : '—'} />
+        <Stat label="CPU threads (face)" value={info ? `${info.cpu.threads} (${info.cpu.face_threads})` : '—'} />
+        <Stat label="Voice per chunk" value={ms(voiceMs)} />
+        {swaps.map(([id, value]) => <Stat key={id} label={`Face swap ${SWAPPER_NAMES[id]}`} value={ms(value)} />)}
+        <Stat label="Live video" value={info?.face?.fps_out ? `${info.face.fps_out} fps · ${info.face.keys_per_second} swaps/s` : '—'} />
+      </dl>
     </details>
   );
 }
@@ -287,6 +322,7 @@ function Settings({
           </SettingRow>
         </SettingsSection>
 
+        <ThisPc />
         <More title="Engine">
           <div className="px-3 py-3">
             <RuntimeReadiness config={config} checking={runtime.checking} error={runtime.error}
