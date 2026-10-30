@@ -2,11 +2,10 @@
 # DeepMirror launcher for Linux and macOS: ./start.sh [--port 8080] [--device cpu]
 # Installs uv (per user, no root) if needed and prepares Python and every
 # dependency in .venv (visible here; the first time takes a few minutes). The
-# studio then runs in the background and opens in the browser: this terminal
-# can be closed, the log is in the studio's Logs tab, and closing the studio
-# page stops it. On Linux it asks once whether to add an app-menu entry
-# (answer kept in data/shortcuts.txt, or set DEEPMIRROR_SHORTCUTS=yes|no).
-# Use --foreground to keep it attached to the terminal.
+# studio then runs in this terminal and opens in the browser: closing the page
+# leaves it running; press Ctrl+C here to stop it (everything it started stops
+# with it). On Linux it asks once whether to add an app-menu entry (answer kept
+# in data/shortcuts.txt, or set DEEPMIRROR_SHORTCUTS=yes|no).
 set -eu
 cd "$(dirname "$0")"
 HERE="$(pwd)"
@@ -30,8 +29,7 @@ fi
 echo "Preparing $APP_NAME ($OVC_TORCH)..."
 uv sync --extra "$OVC_TORCH" --extra neural-f0
 
-FOREGROUND=0
-for arg in "$@"; do [ "$arg" = "--foreground" ] && FOREGROUND=1; done
+# --foreground is accepted for older shortcuts (the studio always runs in the terminal now).
 ARGS=""
 for arg in "$@"; do [ "$arg" != "--foreground" ] && ARGS="$ARGS $arg"; done
 
@@ -55,19 +53,10 @@ Comment=Realtime voice and face cloning
 Exec=sh -c 'cd "$HERE" && exec "$UV_BIN" run --no-sync deepmirror'
 Path=$HERE
 Icon=audio-input-microphone
-Terminal=false
+Terminal=true
 Categories=AudioVideo;Audio;
 EOF
 fi
 
-if [ "$FOREGROUND" = "1" ]; then
-  # shellcheck disable=SC2086
-  exec uv run --no-sync deepmirror $ARGS
-fi
 # shellcheck disable=SC2086
-if command -v setsid >/dev/null 2>&1; then
-  setsid uv run --no-sync deepmirror $ARGS >/dev/null 2>&1 < /dev/null &
-else
-  nohup uv run --no-sync deepmirror $ARGS >/dev/null 2>&1 < /dev/null &
-fi
-echo "$APP_NAME is starting in your browser. You can close this terminal."
+exec uv run --no-sync deepmirror $ARGS

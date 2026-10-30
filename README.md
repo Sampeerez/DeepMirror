@@ -26,8 +26,9 @@ cd DeepMirror
 ./start.sh          # Windows: double-click start.bat
 ```
 
-The studio opens at <http://127.0.0.1:8000>. It runs in the background (log in **Settings › Log**
-tab) and stops when you close the page. The first time it asks whether to add a Desktop
+The studio opens at <http://127.0.0.1:8000> and runs in the terminal (or console window) it was
+started from: closing the page leaves it running, **Ctrl+C** there stops it, and every process it
+started (the face and head processes) stops with it, even if the window is just closed. The first time it asks whether to add a Desktop
 shortcut (set `DEEPMIRROR_SHORTCUTS=yes` or `no` to skip the question). The first
 start downloads the shared models (about 400 MB) and checks each one by SHA-256.
 
@@ -36,7 +37,7 @@ Then add a voice in **Voices** (an RVC `.pth`, with its `.index` if it has one),
 
 ```bash
 ./start.sh --port 8080 --no-browser    # flags are passed through
-./start.sh --keep-alive                # keep running after the page is closed
+./start.sh --close-with-page           # stop when the studio page is closed
 OVC_TORCH=cpu ./start.sh               # CPU build of PyTorch
 ```
 

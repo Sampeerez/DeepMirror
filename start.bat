@@ -2,8 +2,9 @@
 rem DeepMirror launcher for Windows. Double-click it.
 rem It installs uv (per user, no admin) if needed and prepares Python and every
 rem dependency in .venv (visible here, the first time it takes a few minutes).
-rem The studio then starts WITHOUT a console window and opens in the browser;
-rem its log is in the Logs tab. Closing the studio page stops it.
+rem The studio then runs IN THIS WINDOW and opens in the browser: closing the page
+rem leaves it running; press Ctrl+C here (or close this window) to stop it, and
+rem everything it started stops with it.
 rem The first time it asks whether to add a Desktop and Start-menu shortcut
 rem (the answer is kept in data\shortcuts.txt; delete it to be asked again,
 rem or set DEEPMIRROR_SHORTCUTS=yes or no beforehand).
@@ -40,27 +41,24 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem Shortcuts that start the studio with no console window (uvw = uv without a console),
-rem only if the user wants them.
+rem Shortcuts that open the studio in its own console window, only if the user wants them.
 set "SHORTCUTS=%DEEPMIRROR_SHORTCUTS%"
 if not defined SHORTCUTS set "SHORTCUTS=%VOXCLONE_SHORTCUTS%"
 if not defined SHORTCUTS if exist "data\shortcuts.txt" set /p SHORTCUTS=<"data\shortcuts.txt"
 if not defined SHORTCUTS call :ask_shortcuts
-for /f "delims=" %%U in ('where uvw 2^>nul') do set "UVW=%%U"
-if defined UVW (
+for /f "delims=" %%U in ('where uv 2^>nul') do if not defined UVEXE set "UVEXE=%%U"
+if defined UVEXE (
   if /i "%SHORTCUTS%"=="yes" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$s = New-Object -ComObject WScript.Shell;" ^
     "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {" ^
     "  Remove-Item -LiteralPath (Join-Path $dir 'VoxClone.lnk') -ErrorAction SilentlyContinue;" ^
     "  $l = $s.CreateShortcut((Join-Path $dir '%APP_NAME%.lnk'));" ^
-    "  $l.TargetPath = '%UVW%'; $l.Arguments = 'run --no-sync deepmirror';" ^
+    "  $l.TargetPath = '%UVEXE%'; $l.Arguments = 'run --no-sync deepmirror';" ^
     "  $l.WorkingDirectory = '%~dp0'; $l.Description = '%APP_NAME%';" ^
     "  $l.IconLocation = 'shell32.dll,168'; $l.Save() }" >nul 2>nul
-  start "" "%UVW%" run --no-sync deepmirror %*
-) else (
-  rem Older uv without uvw: run here (closing this window stops the studio).
-  uv run --no-sync deepmirror %*
 )
+title %APP_NAME%
+uv run --no-sync deepmirror %*
 exit /b 0
 
 :ask_shortcuts

@@ -25,6 +25,9 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, gpu: bool) -> None:
     """Process entry: render heads on request until the pipe closes."""
     import torch
 
+    from backend.process_guard import exit_with_parent
+
+    exit_with_parent()
     torch.set_num_threads(2)
     from backend.compute_arbiter import GpuArbiter
     from backend.video.engine import FaceEngine, FaceModels, Tracked, VideoSettings
