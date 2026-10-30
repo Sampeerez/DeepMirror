@@ -68,15 +68,17 @@ Every page is in the sidebar:
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
 ### Face
-- **3D head** (Windows + NVIDIA GPU with 6 GB or more): when a face is added, a 3D head with its
-  hair, beard and earrings is built once from its best photo (facing the camera, sharp, eyes open,
-  mouth shut; a small face is restored first), about a minute, with the photo's clothes, neck and
-  background left out. Live, MediaPipe reads your pose and 52 expressions (gaze and blinks too) from
-  each camera frame and the head is rendered for exactly that frame, at the size it has on screen,
-  with its light matched to yours; your own hair where the new head does not reach is painted over
-  with the background. On a GTX 1660 SUPER: 4–6 ms of GPU a frame, 30 fps next to the live voice.
-  **It installs itself**: the first start on such a computer downloads it in the background
-  (about 7 GB, nothing to compile, progress in Faces and Settings) while Face + hair is used.
+- **3D head** (Windows + NVIDIA GPU with 6 GB or more): the face swap and a 3D head together.
+  The swap gives the face itself, so your own expressions, mouth, teeth and blinks are real, every
+  frame, with the worn identity. The 3D head, rendered for exactly that frame's pose, gives
+  everything a swap cannot: hair, brows, forehead, ears and the head's outline from any angle, with
+  a hole where the face is and its light matched to yours. Your own hair and ears outside it are
+  painted over with the background, and a fringe over your forehead is taken out of the swap's
+  sight (it would draw its shadow). The 3D head is built once per face from its best photo (LAM)
+  and then trained on all the face's photos (each one's camera and pose fitted, the hair's colours
+  refined, kept only if it also fits a photo it never saw). Faces › the cube button trains it
+  longer. On a GTX 1660 SUPER: 30 fps next to the live voice. **It installs itself**: the first
+  start on such a computer downloads it in the background (about 7 GB, nothing to compile).
 - **Whole head**: the person's head, hair, beard and ears, not only the inside of the
   face. The sharpest front-facing photo is animated with your pose and expressions (LivePortrait), so
   hair and skin are the photo's own; the face swap on top keeps your eyes, brows and mouth live. Your
@@ -124,7 +126,7 @@ releases and LivePortrait's, and run with ONNX Runtime (CUDA, DirectML or CPU) a
 | Occlusion | XSeg | Hands and objects in front of the face, for swappers without their own mask |
 | Detail | GPEN-BFR 256 | Only on close faces when the GPU has room: it costs a little identity |
 | Whole head | LivePortrait (human), run here in PyTorch fp32 in 33 stages of at most ~33 ms | No swap model changes hair or the head's outline (FaceFusion, Deep-Live-Cam, HyperSwap, inswapper, GHOST all replace the inside of the face); animating the photo itself does. fp16 is slower on this GPU and gave NaN |
-| 3D head | LAM-20K (Large Avatar Model, SIGGRAPH 2025), driven by MediaPipe Face Landmarker | One photo to an animatable 3D Gaussian head with its hair in ~1 minute on this GPU (1.8 GB of GPU memory at most, so it fits next to the studio); renders a frame in 4–6 ms, so every frame gets its own head. Runs in its own Python 3.10 environment (`models/lam`, ~7 GB), with its CUDA libraries prebuilt for GTX 10 to RTX 40 (RTX 50 through PTX) |
+| 3D head | LAM-20K (Large Avatar Model, SIGGRAPH 2025), driven by MediaPipe Face Landmarker, under the face swap | One photo to an animatable 3D Gaussian head with its hair (1.8 GB of GPU memory at most, so it fits next to the studio), then trained on every photo of the face, about 3 minutes; renders a frame in ~6 ms, so every frame gets its own head. A one-photo avatar cannot carry live expressions or a mouth: the swap does that part. Runs in its own Python 3.10 environment (`models/lam`, ~7 GB), with its CUDA libraries prebuilt for GTX 10 to RTX 40 (RTX 50 through PTX) |
 | Parsing | BiSeNet (ResNet-34) | Hair, ears and neck of the worn head, and the speaker's own hair to fill in |
 
 Also reviewed: Deep-Live-Cam and LiveFaceCam (inswapper/HyperSwap with a mouth mask; the real-mouth

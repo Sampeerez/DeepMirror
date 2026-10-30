@@ -14,6 +14,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 MAX_KEYS_PER_SECOND = 30.0
 KEEP_KEYS_SECONDS = 2.0
+HEAD3D_IN_FLIGHT = 2        # frames with the 3D head's process at once (a frame between gets the newest)
+HEAD3D_WAIT = 0.15          # how long a frame waits for its own 3D head render
+HEAD3D_REUSE = 0.2          # a render this much older still dresses a frame whose own did not come
 
 
 @dataclass(slots=True)
@@ -31,11 +35,24 @@ class _Record:
     frame: np.ndarray
     tracked: Tracked
     arrived: float           # server monotonic time
+    seq: int | None = None   # its 3D head render, when one was asked for
 
 
 class LiveFaceSession:
-    def __init__(self, engine: FaceEngine, max_wait: float = 0.3) -> None:
+    """``head3d`` (an avatar.HeadDriver): the 3D head renders every frame too, and its hair, ears
+    and outline dress the swapped face (the swap gives the face itself: the speaker's own
+    expressions and mouth, with the worn identity)."""
+
+    def __init__(self, engine: FaceEngine, max_wait: float = 0.3, head3d=None) -> None:
         self.engine = engine
+        self.head3d = head3d
+        self._layers3d: dict[int, Any] = {}   # avatar.Layer (or None: no face there)
+        self._latest3d: tuple[float, Any] | None = None
+        self._next_seq = 0
+        self._done_seq = -1
+        engine.hair_from_3d = head3d is not None
+        if head3d is not None:
+            head3d.on_layer = self._on_layer3d
         self.max_wait = max_wait
         self._records: deque[_Record] = deque()
         self._keys: deque[Key] = deque()
@@ -77,9 +94,12 @@ class LiveFaceSession:
         fps_in = (self.frames_in - self._rate_since[1]) / span
         fps_out = (self.frames_out - self._rate_since[2]) / span
         self._rate_since = (now, self.frames_in, self.frames_out)
+        timings3d = (self.head3d.timings or {}) if self.head3d is not None else {}
         return {"keys_per_second": round(self.keys_per_second, 1), "swapper": swapper,
                 "fps_in": round(fps_in, 1), "fps_out": round(fps_out, 1),
-                "mode": "head" if self.engine.wants_head else "face",
+                "mode": "3d" if self.head3d is not None else "head" if self.engine.wants_head else "face",
+                "render_ms": round(float(timings3d.get("render_ms", 0.0)), 1) if timings3d else None,
+                "render_size": int(timings3d.get("render_size", 0)) if timings3d else None,
                 "heads_per_second": round(self.heads_per_second, 2),
                 "swap_ms": self.engine.models.swap_ms.get(swapper or "", None),
                 "track_ms": round(self.track_ms, 1), "compose_ms": round(self.compose_ms, 1),
@@ -88,14 +108,42 @@ class LiveFaceSession:
 
     # --- Input ------------------------------------------------------------
 
+    def _on_layer3d(self, seq: int, layer) -> None:
+        with self._condition:
+            if seq > self._done_seq:
+                self._layers3d[seq] = layer
+                self._condition.notify_all()
+
     def submit(self, t: float, frame: np.ndarray) -> None:
+        seq = None
+        if self.head3d is not None:   # first: it renders while this frame is tracked here
+            with self._condition:
+                waiting = sum(1 for r in self._records if r.seq is not None and r.seq not in self._layers3d)
+                if waiting < HEAD3D_IN_FLIGHT:
+                    seq, self._next_seq = self._next_seq, self._next_seq + 1
+            if seq is not None and not self.head3d.submit(seq, t, frame):
+                seq = None
         started = time.perf_counter()
         tracked = self.engine.track(frame, t)
         self.track_ms = 0.9 * self.track_ms + 0.1 * (time.perf_counter() - started) * 1000
         with self._condition:
-            self._records.append(_Record(t, frame, tracked, time.monotonic()))
+            self._records.append(_Record(t, frame, tracked, time.monotonic(), seq))
             self.frames_in += 1
             self._condition.notify_all()
+
+    def _layer3d(self, record: _Record):
+        """The 3D head's layer for this frame (or the newest one, if close in time)."""
+        layer = None
+        if record.seq is not None:
+            layer = self._layers3d.pop(record.seq, None)
+            self._done_seq = max(self._done_seq, record.seq)
+            for late in [seq for seq in self._layers3d if seq < record.seq]:
+                del self._layers3d[late]
+        if layer is not None:
+            self._latest3d = (record.t, layer)
+        elif self._latest3d is not None and abs(record.t - self._latest3d[0]) < HEAD3D_REUSE:
+            layer = self._latest3d[1]
+        return layer
 
     # --- Keyframes (worker thread) ----------------------------------------
 
@@ -179,14 +227,17 @@ class LiveFaceSession:
                 if (self.engine.identity is not None and record.tracked.face is not None
                         and record.t > latest and waiting < self.max_wait):
                     break
+                if record.seq is not None and record.seq not in self._layers3d and waiting < HEAD3D_WAIT:
+                    break
                 self._records.popleft()
                 before, after = self._around(record.t)
+                layer3d = self._layer3d(record) if self.head3d is not None else None
             started = time.perf_counter()
             if self.engine.identity is None:
                 frame = record.frame
             else:
                 frame = self.engine.compose(record.frame, record.tracked, record.t, before, after,
-                                            self.keys_per_second, head=self._head)
+                                            self.keys_per_second, head=self._head, layer3d=layer3d)
             self.compose_ms = 0.9 * self.compose_ms + 0.1 * (time.perf_counter() - started) * 1000
             self.frames_out += 1
             out.append((record.t, frame))

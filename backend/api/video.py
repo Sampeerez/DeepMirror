@@ -106,11 +106,11 @@ async def head_preview(request: Request, face_id: str) -> FileResponse:
 
 
 @router.post("/api/video/faces/{face_id}/head3d")
-async def build_head(request: Request, face_id: str) -> dict:
-    """Build (or rebuild) the face's 3D head in the background."""
+async def build_head(request: Request, face_id: str, quality: str = "standard") -> dict:
+    """Build (or rebuild) the face's 3D head in the background (``quality=best``: trained longer)."""
     service = _service(request)
     try:
-        service.build_head(face_id)
+        service.build_head(face_id, "best" if quality == "best" else "standard")
     except FaceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Face not found") from exc
     except RuntimeError as exc:

@@ -33,7 +33,6 @@ PREVIEW_FILE = "head3d.jpg"
 ERROR_FILE = "head3d.error"
 SCRIPTS = Path(__file__).resolve().parent / "head3d"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-OWN_HAIR_SECONDS = 1.5   # how often the speaker's own hair is re-read live (a GPU parse, ~45 ms)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,13 +132,15 @@ class HeadBuilder:
 
     def __init__(self, faces_root: Path, parser: Callable[[], Path], voice_live: Callable[[], bool],
                  install: LamInstall | None = None, log_dir: Path | None = None,
-                 on_built: Callable[[str], None] | None = None) -> None:
+                 on_built: Callable[[str], None] | None = None, arbiter_name: str | None = None) -> None:
         self.faces_root = Path(faces_root)
         self.install = install or LamInstall.default()
         self._parser = parser
         self._voice_live = voice_live
         self._log_dir = log_dir
         self._on_built = on_built
+        self._arbiter_name = arbiter_name
+        self._steps: dict[str, int] = {}
         self._queue: queue.Queue[str] = queue.Queue()
         self._waiting: set[str] = set()
         self._progress: dict[str, tuple[float, str]] = {}
@@ -169,7 +170,13 @@ class HeadBuilder:
             return {"state": "failed", "error": (folder / ERROR_FILE).read_text(encoding="utf-8", errors="replace")[-300:]}
         return {"state": "missing"}
 
-    def request(self, face_id: str) -> None:
+    def request(self, face_id: str, steps: int | None = None) -> None:
+        """Build (or rebuild) a face's 3D head; ``steps``: training steps on its photos (more: finer)."""
+        if steps is not None:
+            self._steps[face_id] = steps
+        self._request(face_id)
+
+    def _request(self, face_id: str) -> None:
         if not self.available:
             raise RuntimeError("The 3D head is not installed (scripts/setup_head3d.py)")
         with self._lock:
@@ -229,11 +236,19 @@ class HeadBuilder:
             self._log_dir.mkdir(parents=True, exist_ok=True)
             log = open(self._log_dir / "head3d-build.log", "w", encoding="utf-8")  # noqa: SIM115
         parser = self._parser().resolve()
+        env = self.install.run_environment()
+        if face_id in self._steps:
+            env["DEEPMIRROR_TRAIN_STEPS"] = str(self._steps.pop(face_id))
+        if self._arbiter_name:
+            from backend import compute_arbiter
+
+            env["DEEPMIRROR_ARBITER_FILE"] = str(Path(compute_arbiter.__file__))
+            env["DEEPMIRROR_ARBITER_NAME"] = self._arbiter_name
         try:
             self._process = subprocess.Popen(
                 [str(self.install.python), "-u", str(SCRIPTS / "build.py"), str(folder.resolve()), str(parser),
                  str(self.install.landmarker.resolve()), str(parser.parent / "gpen_bfr_256.onnx")],
-                cwd=self.install.source, env=self.install.run_environment(), stdout=subprocess.PIPE,
+                cwd=self.install.source, env=env, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
             assert self._process.stdout is not None
             for line in self._process.stdout:
@@ -376,167 +391,3 @@ class HeadDriver:
             self._process.kill()
         with contextlib.suppress(OSError):
             self._listener.close()
-
-
-def paste(frame: np.ndarray, layer: Layer) -> np.ndarray:
-    """``frame`` with the head layer over it (a copy)."""
-    import cv2
-
-    out = frame.copy()
-    height, width = layer.image.shape[:2]
-    roi = out[layer.y:layer.y + height, layer.x:layer.x + width]
-    image = layer.image[:roi.shape[0], :roi.shape[1]]
-    alpha = image[..., 3].astype(np.float32) * (1 / 255)
-    roi[:] = cv2.blendLinear(np.ascontiguousarray(image[..., :3]), roi, alpha, 1 - alpha)
-    return out
-
-
-class OwnHair:
-    """The speaker's own hair where the 3D head does not reach (longer or bigger hair than the worn
-    person's), painted over with the background around it, as Face + hair does: the speaker's hair
-    is re-read every OWN_HAIR_SECONDS in a GPU gap and placed on every frame by its five points (the
-    head process's, so no face detector runs here)."""
-
-    def __init__(self, engine) -> None:
-        self.engine = engine
-        self.own = None
-        self._busy = threading.Lock()
-
-    def refresh(self, frame: np.ndarray, points: np.ndarray, t: float) -> None:
-        if (self.own is not None and t - self.own.t < OWN_HAIR_SECONDS) or not self._busy.acquire(blocking=False):
-            return
-
-        def parse() -> None:
-            from backend.video import hair
-
-            try:
-                parser = self.engine.models.parser
-                if parser is None:
-                    return
-                crop, _ = hair.head_crop(frame, points)
-                with self.engine.arbiter.video(self.engine._parse_ms, timeout=0.2) as granted:
-                    if granted:
-                        own = hair.parse_own(crop, parser, t)
-                        own.empty = float(own.paint.max()) < 0.05   # no hair outside the head: nothing to paint
-                        self.own = own
-            except Exception:
-                logger.exception("Reading the speaker's hair failed")
-            finally:
-                self._busy.release()
-
-        threading.Thread(target=parse, name="head3d-own-hair", daemon=True).start()
-
-    def cover(self, frame: np.ndarray, points: np.ndarray) -> np.ndarray:
-        from backend.video import hair
-        from backend.video.blend import paste as paste_crop
-
-        own = self.own
-        if own is None or own.empty:
-            return frame
-        crop, matrix = hair.head_crop(frame, points)
-        return paste_crop(frame, hair.cover(crop, own), own.paint, matrix)
-
-
-@dataclass(slots=True)
-class _Record:
-    t: float
-    frame: np.ndarray
-    seq: int | None          # None: not sent (the driver was busy); it gets the latest head
-    arrived: float
-
-
-class LiveAvatarSession:
-    """Live frames through the 3D head: the same interface as ``LiveFaceSession``.
-
-    At most ``in_flight`` frames are with the driver at once; a frame that arrives meanwhile gets the
-    newest head layer (a frame old). Frames leave in order, each once its layer is back or after
-    ``max_wait``.
-    """
-
-    def __init__(self, driver: HeadDriver, engine=None, max_wait: float = 0.3, in_flight: int = 2,
-                 clock: Callable[[], float] = time.monotonic) -> None:
-        self.driver = driver
-        self.hair = OwnHair(engine) if engine is not None else None
-        self.max_wait = max_wait
-        self.in_flight = in_flight
-        self.clock = clock
-        self._records: deque[_Record] = deque()
-        self._layers: dict[int, Layer | None] = {}
-        self._latest: tuple[float, Layer] | None = None
-        self._next_seq = 0
-        self._expired = -1          # the newest sequence number that has left
-        self._lock = threading.Lock()
-        self.frames_in = self.frames_out = 0
-        self._rate_since = (clock(), 0, 0)
-        self.compose_ms = 0.0
-        driver.on_layer = self._on_layer
-
-    def _on_layer(self, seq: int, layer: Layer | None) -> None:
-        with self._lock:
-            if seq > self._expired:   # not a frame that already left without it
-                self._layers[seq] = layer
-
-    def _pending(self) -> int:
-        return sum(1 for r in self._records if r.seq is not None and r.seq not in self._layers)
-
-    def submit(self, t: float, frame: np.ndarray) -> None:
-        with self._lock:
-            seq = None
-            if self._pending() < self.in_flight:
-                seq = self._next_seq
-                self._next_seq += 1
-            self._records.append(_Record(t, frame, seq, self.clock()))
-            self.frames_in += 1
-        if seq is not None and not self.driver.submit(seq, t, frame):
-            self._on_layer(seq, None)
-
-    def ready(self) -> list[tuple[float, np.ndarray]]:
-        out = []
-        while True:
-            with self._lock:
-                if not self._records:
-                    break
-                record = self._records[0]
-                if (record.seq is not None and record.seq not in self._layers
-                        and self.clock() - record.arrived < self.max_wait):
-                    break
-                self._records.popleft()
-                layer = None
-                if record.seq is not None:
-                    layer = self._layers.pop(record.seq, None)
-                    self._expired = record.seq
-                    for late in [seq for seq in self._layers if seq < record.seq]:
-                        del self._layers[late]
-                if layer is not None:
-                    self._latest = (record.t, layer)
-                elif self._latest is not None and abs(record.t - self._latest[0]) < 0.2:
-                    layer = self._latest[1]
-            started = time.perf_counter()
-            frame = record.frame
-            if layer is not None:
-                if self.hair is not None and layer.points is not None:
-                    self.hair.refresh(frame, layer.points, record.t)
-                    frame = self.hair.cover(frame, layer.points)
-                frame = paste(frame, layer)
-            out.append((record.t, frame))
-            self.compose_ms = 0.9 * self.compose_ms + 0.1 * (time.perf_counter() - started) * 1000
-            self.frames_out += 1
-        return out
-
-    def stats(self) -> dict:
-        now = self.clock()
-        span = max(now - self._rate_since[0], 1e-3)
-        fps_in = (self.frames_in - self._rate_since[1]) / span
-        fps_out = (self.frames_out - self._rate_since[2]) / span
-        self._rate_since = (now, self.frames_in, self.frames_out)
-        timings = self.driver.timings or {}
-        return {"mode": "3d", "fps_in": round(fps_in, 1), "fps_out": round(fps_out, 1),
-                "track_ms": round(float(timings.get("track_ms", 0.0)), 1),
-                "render_size": int(timings.get("render_size", 0)),
-                "render_ms": round(float(timings.get("render_ms", 0.0)), 1),
-                "compose_ms": round(self.compose_ms, 1), "face": self._latest is not None}
-
-    def close(self) -> None:
-        with self._lock:
-            self._records.clear()
-            self._layers.clear()

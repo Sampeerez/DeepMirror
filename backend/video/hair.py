@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 
 from backend.video import parser as parsing
-from backend.video.faces import alignment
+from backend.video.faces import TEMPLATES, alignment
 from backend.video.head import HEAD_TEMPLATE, OUTPUT
 from backend.video.parser import FaceParser, feather, region
 
@@ -48,6 +48,10 @@ class OwnHead:
     # how far to trust it. Worked out once per parse, so a frame only blurs colours.
     scales: list = field(default_factory=list)
     empty: bool = False          # no hair to paint over (the 3D head skips the fill then)
+    # The speaker's hair over their own face (a fringe, locks at the temples) and their skin's
+    # colour: the face swap is given skin there instead (it would draw the hair's shadow).
+    fringe: np.ndarray | None = None
+    skin: np.ndarray | None = None
 
 
 def head_crop(frame: np.ndarray, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -83,21 +87,82 @@ def build_hair(portrait: np.ndarray, points: np.ndarray, parser: FaceParser, pos
     return HairLayer(crop, alpha.astype(np.float32), pose, skin.astype(np.float32))
 
 
-def parse_own(crop: np.ndarray, parser: FaceParser, t: float) -> OwnHead:
+def _face_zone() -> np.ndarray:
+    """Where a face is in the head crop (from its template: eyes, nose, mouth), from a typical
+    hairline down to the chin: hair there covers the face (a fringe, locks at the temples)."""
+    points = TEMPLATES[HEAD_TEMPLATE] * SIZE
+    eyes = float(np.linalg.norm(points[1] - points[0]))
+    centre_x = float(points[:2, 0].mean())
+    top, bottom = float(points[:2, 1].mean()) - 1.3 * eyes, float(points[3:, 1].mean()) + 1.0 * eyes
+    zone = np.zeros((SIZE, SIZE), np.float32)
+    cv2.ellipse(zone, (int(centre_x), int((top + bottom) / 2)), (int(1.15 * eyes), int((bottom - top) / 2)),
+                0, 0, 360, 1.0, -1)
+    return zone
+
+
+def parse_own(crop: np.ndarray, parser: FaceParser, t: float, ears: bool = False) -> OwnHead:
+    """The speaker's own hair to paint over (``ears``: and ears, when the worn head brings its own)."""
     labels = parser.labels(crop)
-    hair = region(labels, (parsing.HAIR, parsing.HAT))
+    hair = region(labels, (parsing.HAIR, parsing.HAT, *((parsing.EAR_L, parsing.EAR_R, parsing.EARRING) if ears else ())))
     head = region(labels, (*parsing.HEAD, parsing.NECK))
     ring = max(9, int(SIZE * 0.04)) | 1
     # Hair right next to the face (sideburns, the temples) stays: painted over with the
     # background it would show as bright bands beside the cheeks; it reads as part of the hair.
     near = max(9, int(SIZE * 0.07)) | 1
     face = cv2.dilate(region(labels, parsing.FACE), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (near, near)))
+    fringe = None
+    skin = None
+    if ears:   # with the 3D head (it brings brows, forehead and hair): the hair over the face too
+        on_face = hair * _face_zone()
+        if on_face.sum() > 50:
+            fringe = feather(cv2.dilate(on_face, np.ones((5, 5), np.uint8)), erode=0.0, soft=0.02)
+        skin_pixels = crop[region(labels, (parsing.SKIN,)) > 0.5]
+        if len(skin_pixels) > 100:
+            skin = np.median(skin_pixels, axis=0).astype(np.float32)
     hair = hair * (1.0 - face)
     grown = cv2.dilate(hair, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring, ring)))
     known = 1.0 - np.clip(cv2.dilate(head, np.ones((5, 5), np.uint8)) + grown, 0, 1)
     paint = np.maximum(grown, feather(cv2.dilate(grown, np.ones((ring, ring), np.uint8)), erode=0.0, soft=0.03))
     small = cv2.resize(known, (SIZE // 4, SIZE // 4), interpolation=cv2.INTER_AREA).astype(np.float32)
-    return OwnHead(t, small, paint.astype(np.float32), _scales(small))
+    return OwnHead(t, small, paint.astype(np.float32), _scales(small), fringe=fringe, skin=skin)
+
+
+def without_fringe(frame: np.ndarray, points: np.ndarray, own: OwnHead) -> np.ndarray:
+    """``frame`` with the speaker's hair over their face replaced by their skin's colour (shaded
+    like the skin around it), for the face swap to see a bare face. A copy; ``frame`` is kept."""
+    from backend.video.blend import paste
+
+    if own.fringe is None or own.skin is None:
+        return frame
+    crop, matrix = head_crop(frame, points)
+    # The skin's own shading under the fringe: a heavy blur of the crop with the hair taken out.
+    keep = (1.0 - (own.fringe > 0.05)).astype(np.float32)
+    shade = cv2.GaussianBlur(crop.astype(np.float32) * keep[..., None], (0, 0), SIZE / 24)
+    weight = cv2.GaussianBlur(keep, (0, 0), SIZE / 24)[..., None]
+    trust = np.clip(weight / 0.3, 0, 1)
+    fill = shade / np.maximum(weight, 1e-4) * trust + own.skin * (1 - trust)
+    return paste(frame, np.clip(fill, 0, 255).astype(np.uint8), own.fringe, matrix)
+
+
+def paint_own(frame: np.ndarray, points: np.ndarray, own: OwnHead) -> np.ndarray:
+    """``frame`` with the speaker's own hair painted over with the background around it (a copy)."""
+    from backend.video.blend import paste
+
+    if own.empty:
+        return frame
+    crop, matrix = head_crop(frame, points)
+    return paste(frame, cover(crop, own), own.paint, matrix)
+
+
+def over(frame: np.ndarray, image: np.ndarray, x: int, y: int, inplace: bool = False) -> np.ndarray:
+    """``frame`` with ``image`` (BGRA, straight alpha) over it at ``x``, ``y``."""
+    out = frame if inplace else frame.copy()
+    height, width = image.shape[:2]
+    roi = out[y:y + height, x:x + width]
+    image = image[:roi.shape[0], :roi.shape[1]]
+    alpha = image[..., 3].astype(np.float32) * (1 / 255)
+    roi[:] = cv2.blendLinear(np.ascontiguousarray(image[..., :3]), roi, alpha, 1 - alpha)
+    return out
 
 
 def hair_weight(hair: HairLayer, pose: tuple[float, float]) -> float:

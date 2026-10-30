@@ -28,9 +28,13 @@ SAFETY_SECONDS = 0.006     # margin before the next render is due
 POLL_SECONDS = 0.001        # the voice waiting for a face job to end (it must start at once)
 VIDEO_POLL_SECONDS = 0.003  # a face job waiting for a gap (every wake-up takes the face process's GIL)
 
+LONG_JOB_MS = 20.0          # a face swap; shorter jobs (a 3D head render) let a waiting one go first
+LONG_WAIT_SECONDS = 0.06    # once a long job has waited this long, short ones wait for it
+SHORT_WAIT_SECONDS = 0.03   # and once a short one has waited this long, the next long one waits for it
+
 # Slots in the shared array.
-_ARRIVAL, _RENDER_END, _PERIOD, _DELAY, _RENDER_MS, _RENDERING, _VIDEO_BUSY = range(7)
-_SLOTS = 8
+_ARRIVAL, _RENDER_END, _PERIOD, _DELAY, _RENDER_MS, _RENDERING, _VIDEO_BUSY, _LONG_WAITING, _SHORT_WAITING = range(9)
+_SLOTS = 9
 
 
 def _smooth(current: float, value: float, weight: float = 0.2) -> float:
@@ -152,16 +156,32 @@ class GpuArbiter:
 
     @contextlib.contextmanager
     def video(self, expected_ms: float, timeout: float = 0.5) -> Iterator[bool]:
-        """Around one face swap; yields False (holding nothing) when no gap opened within ``timeout``."""
+        """Around one video job (a face swap, a 3D head render); yields False (holding nothing) when
+        no gap opened within ``timeout``. One job at a time across processes (the face process and
+        the 3D head's), so neither slows the other into missing the voice's gaps."""
         deadline = self.clock() + timeout
         granted = False
+        long = expected_ms >= LONG_JOB_MS
+        s = self._state
         while True:
             now = self.clock()
+            waiting_slot = _LONG_WAITING if long else _SHORT_WAITING
+            if not s[waiting_slot]:
+                s[waiting_slot] = now
             # The process's video lock is taken only once the job fits, never while waiting:
-            # a long job waiting for a big gap does not hold up a short one that fits now.
-            if self._fits(expected_ms / 1000, now) and self._video_lock.acquire(blocking=False):
-                if self._fits(expected_ms / 1000, self.clock()):
+            # a long job waiting for a big gap does not hold up a short one that fits now, until
+            # it has waited a while (then short ones wait for it: a swap is never starved).
+            other = _SHORT_WAITING if long else _LONG_WAITING
+            waited = now - s[other] if s[other] > 0 else 0.0
+            mine = now - s[waiting_slot]
+            # The other kind of job has waited long enough, and longer than this one: it goes first
+            # (only one of the two ever yields; 1 s: its process is gone).
+            starving = (SHORT_WAIT_SECONDS if long else LONG_WAIT_SECONDS) < waited < 1.0 and waited > mine
+            if (not s[_VIDEO_BUSY] and not starving and self._fits(expected_ms / 1000, now)
+                    and self._video_lock.acquire(blocking=False)):
+                if not s[_VIDEO_BUSY] and self._fits(expected_ms / 1000, self.clock()):
                     self._state[_VIDEO_BUSY] = 1.0
+                    s[waiting_slot] = 0.0
                     # The voice may have started in between: then step back.
                     if not self._state[_RENDERING]:
                         granted = True
@@ -169,6 +189,7 @@ class GpuArbiter:
                     self._state[_VIDEO_BUSY] = 0.0
                 self._video_lock.release()
             if now >= deadline:
+                s[_LONG_WAITING if long else _SHORT_WAITING] = 0.0
                 break
             time.sleep(VIDEO_POLL_SECONDS)
         try:

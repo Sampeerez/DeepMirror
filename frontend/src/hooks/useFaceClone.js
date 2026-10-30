@@ -57,7 +57,7 @@ export default function useFaceClone() {
   const add = useCallback((files, name) => run(() => addFace(files, name)), [run]);
   const activate = useCallback((faceId) => run(() => activateFace(faceId)), [run]);
   const remove = useCallback((faceId) => run(() => deleteFace(faceId)), [run]);
-  const buildHead = useCallback((faceId) => run(() => buildFaceHead(faceId)), [run]);
+  const buildHead = useCallback((faceId, quality) => run(() => buildFaceHead(faceId, quality)), [run]);
   const updateSettings = useCallback((partial) => run(async () => {
     const { settings } = await updateVideoSettings(partial);
     setStatus((current) => (current ? { ...current, settings } : current));

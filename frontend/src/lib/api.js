@@ -315,10 +315,9 @@ export const activateFace = (faceId) => request(`/video/faces/${encodeURICompone
   method: 'POST',
 });
 export const deleteFace = (faceId) => request(`/video/faces/${encodeURIComponent(faceId)}`, { method: 'DELETE' });
-/** Build (or rebuild) a face's 3D head in the background. */
-export const buildFaceHead = (faceId) => request(`/video/faces/${encodeURIComponent(faceId)}/head3d`, {
-  method: 'POST',
-});
+/** Build (or rebuild) a face's 3D head in the background (`best`: trained longer on its photos). */
+export const buildFaceHead = (faceId, quality = 'standard') =>
+  request(`/video/faces/${encodeURIComponent(faceId)}/head3d?quality=${quality}`, { method: 'POST' });
 export const faceHeadPreviewUrl = (faceId, version = 0) =>
   `${API_BASE}/video/faces/${encodeURIComponent(faceId)}/head3d.jpg?v=${version}`;
 export const faceThumbnailUrl = (faceId) => `${API_BASE}/video/faces/${encodeURIComponent(faceId)}/thumbnail`;

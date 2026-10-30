@@ -388,3 +388,26 @@ class TestHair:
         filled = cover(crop, OwnHead(0.0, known, paint))
         assert filled.shape == crop.shape
         assert abs(int(filled[100, 256, 0]) - 200) <= 2   # the background's colour, smoothly
+
+
+def test_video_jobs_do_not_overlap_across_processes_and_a_swap_is_not_starved():
+    clock = [100.0]
+    owner = GpuArbiter(clock=lambda: clock[0])
+    other = GpuArbiter(owner.name, clock=lambda: clock[0])   # the 3D head's process
+    try:
+        with owner.video(40.0, timeout=0.0) as swap:
+            assert swap
+            with other.video(8.0, timeout=0.0) as render:
+                assert not render                   # one job at a time, whoever runs it
+        # A swap that has waited a while goes before the next short render.
+        with owner.video(40.0, timeout=0.0):
+            pass
+        owner._state[7] = clock[0] - 0.1             # a long job waiting for 100 ms
+        with other.video(8.0, timeout=0.0) as render:
+            assert not render
+        owner._state[7] = clock[0] - 5.0             # ...or a waiter whose process is gone: ignored
+        with other.video(8.0, timeout=0.0) as render:
+            assert render
+    finally:
+        other.close()
+        owner.close()

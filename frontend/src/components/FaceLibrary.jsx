@@ -124,8 +124,8 @@ function FaceTile({ item, wearing, onWear, onDelete, onBuild, busy }) {
           <img src={faceThumbnailUrl(item.id)} alt="" className="aspect-square w-full object-cover" />
           {head?.state === 'ready' ? (
             <img src={faceHeadPreviewUrl(item.id, head.updated)} alt={`3D head of ${item.name}`}
-              title="The 3D head, as built"
-              className="absolute bottom-1.5 right-1.5 h-1/3 w-1/3 rounded-md border border-line-strong bg-white object-cover" />
+              title="The 3D head, as built: from the left, the front and the right"
+              className="absolute inset-x-1.5 bottom-1.5 aspect-[3/1] w-[calc(100%-0.75rem)] rounded-md border border-line-strong bg-white object-contain" />
           ) : null}
         </div>
       ) : (
@@ -152,7 +152,7 @@ function FaceTile({ item, wearing, onWear, onDelete, onBuild, busy }) {
           {onBuild && head ? (
             <Button size="sm" icon={Box} onClick={onBuild} disabled={busy || building} loading={building}
               aria-label={`Build the 3D head of ${item.name}`}
-              title={head.state === 'ready' ? 'Rebuild the 3D head' : 'Build the 3D head'} />
+              title={head.state === 'ready' ? 'Train the 3D head longer (finer, a few minutes)' : 'Build the 3D head'} />
           ) : null}
           {item ? (
             <Button size="sm" variant="danger" icon={Trash2} onClick={onDelete} disabled={busy}
@@ -183,7 +183,8 @@ function FaceLibrary({ face }) {
           {faces.map((item) => (
             <FaceTile key={item.id} item={item} wearing={active === item.id} busy={face.busy}
               onWear={() => face.activate(item.id)} onDelete={() => face.remove(item.id)}
-              onBuild={face.status?.head3d ? () => face.buildHead(item.id) : null} />
+              onBuild={face.status?.head3d
+                ? () => face.buildHead(item.id, item.head3d?.state === 'ready' ? 'best' : 'standard') : null} />
           ))}
         </ul>
         {face.error ? <p className="mt-3 break-words text-xs text-danger-fg" role="alert">{face.error}</p> : null}

@@ -132,10 +132,10 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         from backend.video.head_process import RemoteHead
 
         engine.remote = RemoteHead(head_conn)
-    from backend.video.avatar import HEAD_FILE, HeadDriver, LamInstall, LiveAvatarSession
+    from backend.video.avatar import HEAD_FILE, HeadDriver, LamInstall
 
     install = LamInstall.default()
-    live: LiveFaceSession | LiveAvatarSession | None = None
+    live: LiveFaceSession | None = None
     # The 3D head (Clone: 3D head): wanted, built for this face, and its driver process.
     want_3d = start_mode == "3d"
     head_3d: Path | None = None
@@ -193,7 +193,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                 if camera is not None and offset is not None:
                     camera.push(t + offset, frame)
             now = time.monotonic()
-            if now - last_plan > 10.0 and not planning.is_set() and not isinstance(session, LiveAvatarSession):
+            if now - last_plan > 10.0 and not planning.is_set():
                 # The voice started or stopped: maybe another swapper fits better. On its own
                 # thread: loading and warming a swapper waits for GPU gaps, and the frames must
                 # keep going out meanwhile.
@@ -213,7 +213,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         send("log", level, text)
 
     def avatar_ready() -> bool:
-        """Whether frames go through the 3D head now (else the face swap carries on)."""
+        """Whether the 3D head dresses the frames now (else Face + hair carries on meanwhile)."""
         nonlocal driver
         if not want_3d or head_3d is None or not install.available():
             return False
@@ -227,16 +227,15 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         return driver.ready and driver.use(head_3d)
 
     def session_for_frame():
-        """The live session for the next frame: with a built 3D head, the 3D head (the camera as it is
-        for the few seconds its process takes to start: no face swap loaded meanwhile); else the swap."""
+        """The live session for the next frame: the face swap, dressed by the 3D head once its
+        process is ready (Face + hair until then, and for a face without a 3D head)."""
         nonlocal live
-        use_avatar = want_3d and head_3d is not None and install.available()
-        avatar_ready()   # starts the head process and loads the head as needed
-        if live is not None and isinstance(live, LiveAvatarSession) != use_avatar:
+        use_avatar = avatar_ready() and driver is not None
+        if live is not None and (live.head3d is not None) != use_avatar:
             live.close()
             live = None
         if live is None:
-            live = LiveAvatarSession(driver, engine) if use_avatar and driver is not None else LiveFaceSession(engine)
+            live = LiveFaceSession(engine, head3d=driver if use_avatar else None)
         return live
 
     class _Forward(logging.Handler):
@@ -276,7 +275,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     try:
         models.measure(Path(cache_path), arbiter)
         # Loaded now, not on the first frame: a swapper takes a second or two to load and warm up.
-        if models.available() and not (want_3d and install.available()):   # the 3D head needs no swapper
+        if models.available():
             engine.plan()
             last_plan = time.monotonic()
         send("ready", {"swap_ms": models.swap_ms, "available": models.available()})
@@ -312,7 +311,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                     avatar_ready()
                     # Until the 3D head is ready (or for a face without one): the face and the photo's hair.
                     engine.settings.apply({**message[1], "mode": "hair"} if want_3d else message[1])
-                    if engine.settings.swapper != before and not want_3d:
+                    if engine.settings.swapper != before:
                         engine.plan()
                 elif kind == "enroll":
                     _, request, images = message

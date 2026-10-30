@@ -21,6 +21,8 @@ from backend.video.worker import FaceWorker, decode_image, encode_jpeg
 logger = logging.getLogger(__name__)
 
 SETTING_KEYS = ("mode", "swapper", "enhance", "mouth", "occlusion")
+BEST_TRAIN_STEPS = 6000   # "best" 3D head: three times the standard training on the face's photos
+
 # Live: the 3D head (when built, else Face + hair), Face + hair, or the face only.
 LIVE_MODES = ("3d", "hair", "face")
 DEFAULT_SETTINGS = {"mode": "hair", "swapper": "auto", "enhance": "auto", "mouth": "auto", "occlusion": True}
@@ -41,7 +43,7 @@ class FaceService:
         # Each face's 3D head, built in the background (only with the 3D head installed).
         self.heads = HeadBuilder(self.library.root, lambda: self.assets.folder("video") / "bisenet_resnet_34.onnx",
                                  lambda: self.arbiter.gap() is not None, log_dir=self.data_dir / "logs",
-                                 on_built=lambda _face: self._send_identity())
+                                 on_built=lambda _face: self._send_identity(), arbiter_name=self.arbiter.name)
         self.installer = Head3DInstaller(self.data_dir, on_ready=self._build_missing_heads)
 
     # --- Settings ---------------------------------------------------------
@@ -165,9 +167,10 @@ class FaceService:
             self.heads.request(face["id"])
         return face
 
-    def build_head(self, face_id: str) -> None:
+    def build_head(self, face_id: str, quality: str = "standard") -> None:
+        """Build (or rebuild) a face's 3D head; "best" trains it longer on the face's photos."""
         self.library.photos(face_id)   # FaceNotFoundError for an unknown face
-        self.heads.request(face_id)
+        self.heads.request(face_id, steps=BEST_TRAIN_STEPS if quality == "best" else None)
 
     def activate(self, face_id: str | None) -> None:
         self.library.set_active(face_id)
