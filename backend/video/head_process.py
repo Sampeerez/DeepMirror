@@ -45,6 +45,15 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, gpu: bool) -> None:
                 break
             if kind == "reset":
                 engine.reset_head()
+            elif kind == "measure":
+                from backend.video.head_engines import measure_head
+
+                took = None
+                try:
+                    took = measure_head(engine)
+                except Exception:
+                    logger.exception("Measuring the head failed")
+                conn.send(("measured", took, None))
             elif kind == "portrait":
                 engine.set_portrait(message[2])
             elif kind == "render":
@@ -55,7 +64,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, gpu: bool) -> None:
                 except Exception:
                     logger.exception("Head render failed")
                 conn.send(("layer", request, None if layer is None else
-                           (layer.t, layer.image, layer.alpha, layer.face, layer.pose)))
+                           (layer.t, layer.image, layer.alpha, layer.face, layer.pose, layer.worn)))
     except (EOFError, BrokenPipeError, KeyboardInterrupt):
         pass
     finally:
@@ -78,6 +87,23 @@ class RemoteHead:
     def reset(self) -> None:
         with self._lock, contextlib.suppress(OSError, EOFError, BrokenPipeError):
             self._send("reset")
+
+    def measure(self, timeout: float = 180.0) -> float | None:
+        """One frame of the whole head on this GPU, in ms (None: it cannot run)."""
+        with self._lock:
+            try:
+                if not self.ready:
+                    if not self.conn.poll(timeout):
+                        return None
+                    self.ready = self.conn.recv()[0] == "ready"
+                self._send("measure")
+                while self.conn.poll(timeout):
+                    kind, took, _ = self.conn.recv()
+                    if kind == "measured":
+                        return took
+            except (OSError, EOFError, BrokenPipeError):
+                logger.warning("The head process is gone")
+            return None
 
     def render(self, frame: np.ndarray, points: np.ndarray, t: float, portrait: np.ndarray, wait: float):
         """The head layer for ``frame`` (a HeadLayer), or None when the GPU stayed busy."""

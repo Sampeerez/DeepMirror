@@ -97,8 +97,9 @@ print('ok', torch.cuda.get_device_name(0))
 
 
 class Progress:
-    def __init__(self, path: Path | None) -> None:
+    def __init__(self, path: Path | None, steps: dict[str, float] | None = None) -> None:
         self.path = path
+        self.steps = steps if steps is not None else STEPS
         self.done = 0.0
         self.step = ""
         self._last = 0.0
@@ -109,7 +110,7 @@ class Progress:
         if self.path is None or (not force and now - self._last < 0.5):
             return
         self._last = now
-        share = STEPS.get(self.step, 0.0)
+        share = self.steps.get(self.step, 0.0)
         data = {"state": state, "step": self.step, "progress": round(min(1.0, self.done + share * within), 3),
                 "error": error, "updated": time.time()}
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,7 +124,7 @@ class Progress:
         self.write(force=True)
 
     def finish(self) -> None:
-        self.done += STEPS.get(self.step, 0.0)
+        self.done += self.steps.get(self.step, 0.0)
         self.write(force=True)
 
 

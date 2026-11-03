@@ -27,6 +27,15 @@ const THEMES = [
   { value: 'dark', label: 'Dark', icon: Moon },
 ];
 const SWAPPER_NAMES = { hyperswap_1b_256: 'HyperSwap', inswapper_128: 'inswapper', ghost_1_256: 'GHOST' };
+// The clone engines (backend/video/head_engines.py).
+const ENGINE_NAMES = {
+  personalive: 'AI head (PersonaLive, experimental)',
+  head: "The photo's head, moving (LivePortrait)",
+  '3d': '3D head',
+  hair: 'Face + hair',
+  face: 'Face only',
+};
+
 // What each face model is best at, as its button label.
 const SWAPPER_CHOICES = { hyperswap_1b_256: 'Sharp', inswapper_128: 'Exact', ghost_1_256: 'Fast' };
 // The buffer as one slider, from the shortest delay to the steadiest.
@@ -251,15 +260,21 @@ function Settings({
             value={face.status?.head3d_install?.state === 'installing'
               ? `3D ${Math.round((face.status.head3d_install.progress || 0) * 100)}%` : null}>
             <Segmented label="Clone" hideLabel accent="face" size="sm"
-              value={['3d', 'face'].includes(faceSettings.mode) ? faceSettings.mode : 'hair'}
+              value={faceSettings.mode || 'auto'}
               onChange={(mode) => changeFace({ mode })} className="w-full"
               options={[
+                { value: 'auto', label: 'Auto', hint: stats?.engine
+                  ? `${ENGINE_NAMES[stats.engine] || stats.engine}${stats.engine_reason ? ` · ${stats.engine_reason}` : ''}`
+                  : 'The best that fits this PC' },
+                ...(face.status?.personalive?.state === 'ready'
+                  ? [{ value: 'personalive', label: 'AI', hint: ENGINE_NAMES.personalive }] : []),
+                { value: 'head', label: 'Head', hint: ENGINE_NAMES.head },
                 ...(face.status?.head3d || face.status?.head3d_install?.state === 'installing' ? [{
-                  value: '3d', label: '3D head', disabled: !face.status?.head3d,
+                  value: '3d', label: '3D', disabled: !face.status?.head3d,
                   hint: face.status?.head3d ? headLabel(face.activeFace?.head3d) : installLabel(face.status.head3d_install),
                 }] : []),
-                { value: 'hair', label: 'Face + hair', hint: "The face and the photo's hair" },
-                { value: 'face', label: 'Face only', hint: 'The inside of the face' }]} />
+                { value: 'hair', label: 'Hair', hint: "The face and the photo's hair" },
+                { value: 'face', label: 'Face', hint: 'The inside of the face' }]} />
           </SettingRow>
           <SettingRow label="Face model" icon={ScanFace}>
             <Segmented label="Face model" hideLabel accent="face" size="sm" value={faceSettings.swapper || 'auto'}
@@ -286,6 +301,7 @@ function Settings({
         <More title="Performance">
           <dl className="divide-y divide-line">
             <Stat label="Shown" value={video.running ? `${video.shownFps} fps` : '—'} />
+            <Stat label="Clone" value={ENGINE_NAMES[stats?.engine] || '—'} />
             <Stat label="Face swaps" value={stats ? `${stats.keys_per_second}/s` : '—'} />
             <Stat label="Face model" value={SWAPPER_NAMES[stats?.swapper] || stats?.swapper || '—'} />
             <Stat label="One swap" value={ms(stats?.swap_ms)} />

@@ -39,6 +39,12 @@ def nvidia_memory_mb() -> int:
 
 
 class Head3DInstaller:
+    SCRIPT = "setup_head3d.py"
+    MIN_GPU_MB = MIN_GPU_MB
+    MIN_FREE_GB = MIN_FREE_GB
+    OFF_VARIABLE = "OVC_HEAD3D"
+    TITLE = "3D head"
+
     def __init__(self, data_dir: Path, install: LamInstall | None = None,
                  on_ready: Callable[[], None] | None = None) -> None:
         self.install = install or LamInstall.default()
@@ -51,17 +57,17 @@ class Head3DInstaller:
 
     def why_not(self) -> str | None:
         """Why this computer does not get the 3D head installed by itself (None: it does)."""
-        if os.environ.get("OVC_HEAD3D", "").strip().lower() in ("0", "off", "false", "no"):
-            return "Turned off (OVC_HEAD3D)"
+        if os.environ.get(self.OFF_VARIABLE, "").strip().lower() in ("0", "off", "false", "no"):
+            return f"Turned off ({self.OFF_VARIABLE})"
         if sys.platform != "win32":
-            return "Installed by itself on Windows only (see scripts/setup_head3d.py)"
+            return f"Installed by itself on Windows only (see scripts/{self.SCRIPT})"
         memory = nvidia_memory_mb()
-        if memory < MIN_GPU_MB:
-            return "Needs an NVIDIA GPU with 6 GB or more" if memory else "Needs an NVIDIA GPU"
+        if memory < self.MIN_GPU_MB:
+            return f"Needs an NVIDIA GPU with {self.MIN_GPU_MB // 1000} GB or more" if memory else "Needs an NVIDIA GPU"
         self.install.root.mkdir(parents=True, exist_ok=True)
         free = shutil.disk_usage(self.install.root).free / 2**30
-        if free < MIN_FREE_GB:
-            return f"Needs {MIN_FREE_GB} GB free on the disk ({free:.0f} GB now)"
+        if free < self.MIN_FREE_GB:
+            return f"Needs {self.MIN_FREE_GB} GB free on the disk ({free:.0f} GB now)"
         return None
 
     def start_if_needed(self) -> None:
@@ -72,7 +78,7 @@ class Head3DInstaller:
         if self._reason is None:
             self.start()
         else:
-            logger.info("3D head not installed: %s", self._reason)
+            logger.info("%s not installed: %s", self.TITLE, self._reason)
 
     def start(self) -> None:
         with self._lock:
@@ -83,22 +89,22 @@ class Head3DInstaller:
             try:
                 env = {k: v for k, v in os.environ.items() if k.upper() != "VIRTUAL_ENV"}
                 self._process = subprocess.Popen(
-                    [sys.executable, "-u", str(ROOT / "scripts" / "setup_head3d.py"), "--status", str(self.status_path)],
+                    [sys.executable, "-u", str(ROOT / "scripts" / self.SCRIPT), "--status", str(self.status_path)],
                     cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env,
                     creationflags=NO_WINDOW | (BELOW_NORMAL if sys.platform == "win32" else 0))
             finally:
                 log.close()
-        logger.info("Installing the 3D head in the background (log: %s)", self.log_path)
+        logger.info("Installing the %s in the background (log: %s)", self.TITLE, self.log_path)
         threading.Thread(target=self._wait, args=(self._process,), name="head3d-install", daemon=True).start()
 
     def _wait(self, process: subprocess.Popen) -> None:
         code = process.wait()
         if code == 0 and self.install.available():
-            logger.info("3D head installed")
+            logger.info("%s installed", self.TITLE)
             if self.on_ready is not None:
                 self.on_ready()
         else:
-            logger.warning("Installing the 3D head failed (exit %s): see %s", code, self.log_path)
+            logger.warning("Installing the %s failed (exit %s): see %s", self.TITLE, code, self.log_path)
 
     def status(self) -> dict:
         """``{"state": ready | installing | failed | unavailable, "progress", "step", "error"}``"""

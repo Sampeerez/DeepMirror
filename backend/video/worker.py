@@ -132,10 +132,22 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         from backend.video.head_process import RemoteHead
 
         engine.remote = RemoteHead(head_conn)
+    from backend.video import head_engines
     from backend.video.avatar import HEAD_FILE, HeadDriver, LamInstall
+    from backend.video.personalive.client import PersonaLiveHead, PersonaLiveInstall
 
     install = LamInstall.default()
     live: LiveFaceSession | None = None
+    # The clone engine: the one chosen, or the best that fits (head_engines); what it was chosen from.
+    wanted: dict = {"mode": start_mode}
+    engines_cache = Path(cache_path).with_name("head_engines.json")
+    measured = head_engines.load_measured(engines_cache)
+    given_up: set[str] = set()
+    watch = head_engines.EngineWatch()
+    choice = head_engines.Choice("hair", "")
+    diffusion_install = PersonaLiveInstall.default()
+    diffusion: PersonaLiveHead | None = None
+    remote_head = engine.remote
     # The 3D head (Clone: 3D head): wanted, built for this face, and its driver process.
     want_3d = start_mode == "3d"
     head_3d: Path | None = None
@@ -180,6 +192,65 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
         finally:
             planning.clear()
 
+    def use_diffusion(on: bool) -> None:
+        """PersonaLive's process takes the whole head's place, or goes away with its GPU memory."""
+        nonlocal diffusion
+        if on and diffusion is None:
+            diffusion = PersonaLiveHead(diffusion_install, arbiter_name, engine,
+                                        Path(cache_path).parent.parent / "logs" / "personalive-drive.log")
+            engine.remote = diffusion
+            log(logging.INFO, "PersonaLive process started")
+        elif not on and diffusion is not None:
+            engine.remote = remote_head
+            diffusion.close()
+            diffusion = None
+
+    def available_engines() -> set[str]:
+        names = {"hair"}
+        if head_3d is not None and install.available():
+            names.add("3d")
+        if engine.portrait is not None and models.heads_ready:
+            names.add("head")
+        if engine.portrait is not None and diffusion_install.available():
+            names.add("personalive")
+        return names
+
+    def measure_diffusion() -> None:
+        """Once per GPU, when installed: it loads for a minute or so, and only with no voice streaming."""
+        if ("personalive_ms" in measured or not diffusion_install.available() or engine.portrait is None
+                or arbiter.gap() is not None):
+            return
+        trial = PersonaLiveHead(diffusion_install, arbiter_name, engine,
+                                Path(cache_path).parent.parent / "logs" / "personalive-measure.log")
+        try:
+            took = trial.measure(engine.portrait)
+        finally:
+            trial.close()
+        measured["personalive_ms"] = took if took is not None else 1e9   # it does not run here
+        head_engines.store_measured(engines_cache, measured)
+        log(logging.INFO, f"PersonaLive measured: {took} ms per frame")
+        choose_engine()
+
+    def choose_engine() -> None:
+        nonlocal want_3d, choice
+        choice = head_engines.choose(wanted.get("mode", head_engines.AUTO), available_engines(), measured, given_up)
+        want_3d = choice.engine == "3d"
+        use_diffusion(choice.engine == "personalive")
+        # Until the 3D head is ready (or for a face without one): the face and the photo's hair.
+        mode = "hair" if want_3d else "head" if choice.engine == "personalive" else choice.engine
+        engine.settings.apply({**wanted, "mode": mode})
+        avatar_ready()
+
+    def watch_engine(stats: dict) -> None:
+        """Chosen automatically and too much for this computer, now: one level down."""
+        if wanted.get("mode") != head_engines.AUTO or head_engines.next_level(choice.engine) is None:
+            return
+        if watch.update(stats.get("fps_in", 0.0), stats.get("fps_out", 0.0), arbiter.late_chunks):
+            log(logging.WARNING, f"{choice.engine}: {watch.reason}; going down a level")
+            given_up.add(choice.engine)
+            watch.reset()
+            choose_engine()
+
     def emit_frames() -> None:
         nonlocal last_stats, last_plan
         while not stopping.is_set():
@@ -201,7 +272,10 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                 threading.Thread(target=replan, name="face-plan", daemon=True).start()
                 last_plan = now
             if now - last_stats > STATS_SECONDS:
-                send("stats", {**session.stats(), "camera": camera.device if camera else None, "dropped": dropped[0]})
+                stats = session.stats()
+                watch_engine(stats)
+                send("stats", {**stats, "camera": camera.device if camera else None, "dropped": dropped[0],
+                               "engine": choice.engine, "engine_reason": choice.reason})
                 last_stats = now
             if not frames:
                 time.sleep(0.003)
@@ -274,11 +348,18 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
 
     try:
         models.measure(Path(cache_path), arbiter)
+        if "head_ms" not in measured and models.heads_ready and remote_head is not None and arbiter.gap() is None:
+            took = remote_head.measure()
+            if took is not None:
+                measured["head_ms"] = took
+                head_engines.store_measured(engines_cache, measured)
+                log(logging.INFO, f"Whole head measured: {took:.0f} ms per frame")
         # Loaded now, not on the first frame: a swapper takes a second or two to load and warm up.
         if models.available():
             engine.plan()
             last_plan = time.monotonic()
         send("ready", {"swap_ms": models.swap_ms, "available": models.available()})
+        choose_engine()
         while True:
             if not conn.poll(0.05):
                 continue
@@ -304,13 +385,14 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                     engine.hair_photos = list(message[3]) if len(message) > 3 and message[3] else []
                     head = Path(message[2]).parent / HEAD_FILE if len(message) > 2 and message[2] else None
                     head_3d = head if head is not None and head.is_file() else None
-                    avatar_ready()   # with the 3D head chosen: its process starts and loads it now
+                    given_up.clear()
+                    choose_engine()   # with the 3D head chosen: its process starts and loads it now
+                    threading.Thread(target=measure_diffusion, name="face-measure", daemon=True).start()
                 elif kind == "settings":
                     before = engine.settings.swapper
-                    want_3d = message[1].get("mode") == "3d"
-                    avatar_ready()
-                    # Until the 3D head is ready (or for a face without one): the face and the photo's hair.
-                    engine.settings.apply({**message[1], "mode": "hair"} if want_3d else message[1])
+                    wanted = message[1]
+                    given_up.clear()
+                    choose_engine()
                     if engine.settings.swapper != before:
                         engine.plan()
                 elif kind == "enroll":
@@ -356,6 +438,8 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
             camera.close()
         if driver is not None:
             driver.close()
+        if diffusion is not None:
+            diffusion.close()
         arbiter.close()
 
 

@@ -73,6 +73,8 @@ def contain_children() -> bool:
 
 
 def _windows_priority(priority_class: int) -> bool:
+    if sys.platform != "win32":
+        return False
     import ctypes
     from ctypes import wintypes
 

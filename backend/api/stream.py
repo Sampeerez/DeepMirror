@@ -407,6 +407,7 @@ class StreamSession:
         if elapsed_ms <= budget:
             return
         self._slow_chunks += 1
+        self.manager.arbiter.chunk_late()
         if now - self._last_health_log >= 5.0:
             logger.warning("%d chunk(s) took longer than real time (last %.0f ms for %.0f ms of audio; %s)",
                            self._slow_chunks, elapsed_ms, budget, self._stage_text())

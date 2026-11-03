@@ -105,6 +105,23 @@ def run_live(frames: list[np.ndarray], fps: float, session: LiveFaceSession) -> 
     return outputs, stats, time.monotonic() - start
 
 
+def run_every_frame(frames: list[np.ndarray], fps: float, engine: FaceEngine) -> tuple[dict[int, np.ndarray], float]:
+    """Every frame its own head render and swap, however long that takes: the quality a GPU fast
+    enough would show live, measurable on any GPU."""
+    outputs: dict[int, np.ndarray] = {}
+    engine.reset_head()
+    times = []
+    for index, frame in enumerate(frames):
+        t = index / fps
+        tracked = engine.track(frame, t)
+        started = time.perf_counter()
+        layer = engine.head_layer(frame, tracked, t, wait=30.0) if engine.wants_head else None
+        times.append(time.perf_counter() - started)
+        key = engine.keyframe(frame, tracked, t, 30.0, wait=30.0) if tracked.face is not None else None
+        outputs[index] = engine.compose(frame, tracked, t, key, None, 30.0, head=layer)
+    return outputs, float(np.median(times) * 1000.0)
+
+
 def measure(frames: list[np.ndarray], outputs: dict[int, np.ndarray], models: FaceModels, fps: float) -> dict:
     """Hair against the real frame, frame by frame, after the run (nothing here slows the run down)."""
     parser = models.parser
@@ -179,6 +196,8 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=300)
     parser.add_argument("--photos", type=int, default=8)
     parser.add_argument("--steps", type=int, default=0, help="3D head training steps (0: LAM's head as built)")
+    parser.add_argument("--every-frame", action="store_true",
+                        help="whole head: each frame waits for its own render (quality, not speed)")
     parser.add_argument("--tag", default="", help="a name for this run's files")
     parser.add_argument("--rebuild", action="store_true", help="build the 3D head again")
     args = parser.parse_args()
@@ -206,9 +225,15 @@ def main() -> None:
             time.sleep(0.05)
         if driver.error:
             sys.exit(f"The 3D head did not load: {driver.error}")
-    session = LiveFaceSession(engine, head3d=driver)
-    outputs, stats, elapsed = run_live(frames, fps, session)
-    session.close()
+    head_ms = None
+    if args.every_frame:
+        started = time.monotonic()
+        outputs, head_ms = run_every_frame(frames, fps, engine)
+        stats, elapsed = [], time.monotonic() - started
+    else:
+        session = LiveFaceSession(engine, head3d=driver)
+        outputs, stats, elapsed = run_live(frames, fps, session)
+        session.close()
     if driver is not None:
         driver.close()
     metrics = measure(frames, outputs, models, fps)
@@ -230,7 +255,7 @@ def main() -> None:
               "frames_out": len(outputs), "fps_out": round(len(outputs) / max(elapsed, 1e-3), 1),
               "keys_per_second": median("keys_per_second"), "track_ms": median("track_ms"),
               "compose_ms": median("compose_ms"), "render_ms": median("render_ms"),
-              "render_size": median("render_size"), **metrics}
+              "render_size": median("render_size"), "head_render_ms": head_ms, **metrics}
     tag = f"_{args.tag}" if args.tag else ""
     (args.out / f"report{tag}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     sheet(frames, outputs, rows, args.out / f"sheet{tag}.jpg")

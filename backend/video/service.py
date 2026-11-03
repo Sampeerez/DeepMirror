@@ -15,6 +15,7 @@ from backend.compute_arbiter import GpuArbiter
 from backend.video.avatar import HeadBuilder
 from backend.video.head3d_install import Head3DInstaller
 from backend.video.library import FaceLibrary
+from backend.video.personalive.client import PersonaLiveInstaller
 from backend.video.swap import SWAPPERS
 from backend.video.worker import FaceWorker, decode_image, encode_jpeg
 
@@ -23,9 +24,9 @@ logger = logging.getLogger(__name__)
 SETTING_KEYS = ("mode", "swapper", "enhance", "mouth", "occlusion")
 BEST_TRAIN_STEPS = 6000   # "best" 3D head: three times the standard training on the face's photos
 
-# Live: the 3D head (when built, else Face + hair), Face + hair, or the face only.
-LIVE_MODES = ("3d", "hair", "face")
-DEFAULT_SETTINGS = {"mode": "hair", "swapper": "auto", "enhance": "auto", "mouth": "auto", "occlusion": True}
+# Live: the best engine that fits this computer, or one by hand (see head_engines).
+LIVE_MODES = ("auto", "personalive", "head", "3d", "hair", "face")
+DEFAULT_SETTINGS = {"mode": "auto", "swapper": "auto", "enhance": "auto", "mouth": "auto", "occlusion": True}
 
 
 class FaceService:
@@ -45,6 +46,7 @@ class FaceService:
                                  lambda: self.arbiter.gap() is not None, log_dir=self.data_dir / "logs",
                                  on_built=lambda _face: self._send_identity(), arbiter_name=self.arbiter.name)
         self.installer = Head3DInstaller(self.data_dir, on_ready=self._build_missing_heads)
+        self.diffusion_installer = PersonaLiveInstaller(self.data_dir, on_ready=self._send_identity)
 
     # --- Settings ---------------------------------------------------------
 
@@ -54,8 +56,8 @@ class FaceService:
         except (OSError, ValueError):
             stored = {}
         settings = {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k in SETTING_KEYS}}
-        if settings["mode"] not in LIVE_MODES:   # the whole head is for files only now
-            settings["mode"] = "hair"
+        if settings["mode"] not in LIVE_MODES:
+            settings["mode"] = "auto"
         return settings
 
     def update_settings(self, payload: dict) -> dict:
@@ -75,7 +77,7 @@ class FaceService:
         if self._worker is not None:
             self._worker.send("settings", settings)
         active = self.library.active()
-        if settings["mode"] == "3d" and active and self.heads.status(active)["state"] in ("missing", "failed"):
+        if settings["mode"] in ("3d", "auto") and self.heads.available and active and self.heads.status(active)["state"] in ("missing", "failed"):
             self.heads.request(active)   # chosen for a face without one yet: build it now
         return settings
 
@@ -126,6 +128,7 @@ class FaceService:
         """At server start: install the 3D head if this computer suits it, or build the heads
         that faces added meanwhile do not have yet."""
         self.installer.start_if_needed()
+        self.diffusion_installer.start_if_needed()
         self._build_missing_heads()
         # The face process (and the 3D head's) start now, not when the camera is turned on: starting
         # them loads models and creates GPU contexts, which must not happen under a live voice.
@@ -145,6 +148,7 @@ class FaceService:
 
     def close(self) -> None:
         self.installer.close()
+        self.diffusion_installer.close()
         self.heads.close()
         if self._worker is not None:
             self._worker.stop()
@@ -187,6 +191,13 @@ class FaceService:
         except (OSError, ValueError):
             return None
 
+    def _cached_engines(self) -> dict:
+        """What each clone engine was measured at on this computer."""
+        try:
+            return _merge(json.loads((self.data_dir / "cache" / "head_engines.json").read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return {}
+
     def status(self) -> dict:
         return {
             "models_ready": self.models_ready,
@@ -194,6 +205,8 @@ class FaceService:
             "faces": [{**face, "head3d": self.heads.status(face["id"])} for face in self.library.list()],
             "head3d": self.heads.available,
             "head3d_install": self.installer.status(),
+            "personalive": self.diffusion_installer.status(),
+            "measured": self._cached_engines(),
             "active_face": self.library.active(),
             "settings": self.settings,
             "swappers": [{"id": spec.id, "label": spec.label} for spec in SWAPPERS.values()],

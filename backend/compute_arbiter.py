@@ -33,8 +33,8 @@ LONG_WAIT_SECONDS = 0.06    # once a long job has waited this long, short ones w
 SHORT_WAIT_SECONDS = 0.03   # and once a short one has waited this long, the next long one waits for it
 
 # Slots in the shared array.
-_ARRIVAL, _RENDER_END, _PERIOD, _DELAY, _RENDER_MS, _RENDERING, _VIDEO_BUSY, _LONG_WAITING, _SHORT_WAITING = range(9)
-_SLOTS = 9
+_ARRIVAL, _RENDER_END, _PERIOD, _DELAY, _RENDER_MS, _RENDERING, _VIDEO_BUSY, _LONG_WAITING, _SHORT_WAITING, _LATE = range(10)
+_SLOTS = 10
 
 
 def _smooth(current: float, value: float, weight: float = 0.2) -> float:
@@ -122,6 +122,14 @@ class GpuArbiter:
             return None
         period_ms = self.period * 1000
         return max(0.0, period_ms - self.render_ms - SAFETY_SECONDS * 1000), period_ms
+
+    def chunk_late(self) -> None:
+        """The server: a voice chunk took longer than its own duration."""
+        self._state[_LATE] += 1.0
+
+    @property
+    def late_chunks(self) -> float:
+        return float(self._state[_LATE])
 
     def free_share(self) -> float:
         """Fraction of the GPU the face can count on (1.0 when the voice is not streaming)."""

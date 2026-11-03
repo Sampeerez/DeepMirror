@@ -103,12 +103,14 @@ class HeadLayer:
     alpha: np.ndarray           # float32 0..1
     face: np.ndarray            # float32 0..1: the worn face's skin, eyes, nose, mouth
     pose: tuple[float, float] = (0.0, 0.0)   # the head turn it was rendered for (see head_pose)
+    worn: np.ndarray | None = None           # alpha without that fill: for a frame already painted over
 
 
 @dataclass(slots=True)
 class VideoSettings:
     # hair: the face swap plus the photo's hair on every frame (live and files); face: the face only;
-    # head: the whole head animated from the photo (files: every frame gets its own render).
+    # head: the whole head animated from the photo (every frame gets its own render, live where the
+    # GPU can; see head_engines).
     mode: str = "hair"
     swapper: str = "auto"       # "auto" or a SWAPPERS id
     enhance: str = "auto"       # auto | on | off
@@ -196,6 +198,14 @@ class FaceModels:
                     copy()
             self._heads = heads.HeadModels(self.directory, self.gpu, place)
         return self._heads
+
+    def free_heads(self) -> None:
+        """Give LivePortrait's networks' GPU memory back (it loads again when next asked for)."""
+        self._heads = None
+        if self.gpu:
+            import torch
+
+            torch.cuda.empty_cache()
 
     def keep_only(self, swapper_id: str) -> None:
         """Free the swappers not in use (each holds hundreds of MB of GPU memory)."""
@@ -356,7 +366,7 @@ class FaceEngine:
     @property
     def wants_head(self) -> bool:
         return (self.settings.mode == "head" and self.portrait is not None and self.identity is not None
-                and self.models.heads_ready)
+                and (self.models.heads_ready or hasattr(self.remote, "keeps_up")))
 
     def reset_head(self) -> None:
         """The next frame becomes the rest pose the head moves from (a new session)."""
@@ -490,13 +500,14 @@ class FaceEngine:
                                   if found is not None else None)
                     self._hair_for = id(self.portrait)
             return
-        every = OWN_HAIR_SECONDS_3D if self.hair_from_3d else OWN_HAIR_SECONDS
-        if (self._hair is not None or self.hair_from_3d) and (self._own is None or t - self._own.t > every):
+        over = self.hair_from_3d or self.wants_head   # the head goes over the own hair painted out
+        every = OWN_HAIR_SECONDS_3D if over else OWN_HAIR_SECONDS
+        if (self._hair is not None or over) and (self._own is None or t - self._own.t > every):
             crop, _ = hairs.head_crop(frame, tracked.points)
             with self.arbiter.video(self._parse_ms, timeout=0.0) as granted:
                 if granted:
-                    self._own = hairs.parse_own(crop, parser, t, ears=self.hair_from_3d)
-                    if self.hair_from_3d:
+                    self._own = hairs.parse_own(crop, parser, t, ears=over)
+                    if over:
                         self._painter.plate.update(frame, tracked.points, self._own)
 
     def _frontal_photo(self) -> tuple[np.ndarray, Face | None]:
@@ -550,6 +561,10 @@ class FaceEngine:
         return feather(mask, erode=erode, soft=0.06)
 
     # --- The whole head (GPU, in stages) -----------------------------------
+
+    def portrait_points(self, portrait: np.ndarray) -> np.ndarray | None:
+        found = main_face(self.models.detector.detect(portrait))
+        return found.points if found is not None else None
 
     def _prepare_head(self) -> heads.HeadRenderer | None:
         if self.portrait is None:
@@ -627,6 +642,7 @@ class FaceEngine:
         """Cut the rendered head out (hair, ears, neck fading out) and fill in the speaker's own
         hair that the new head does not cover, from the background around it."""
         size = heads.OUTPUT
+        rendered = self._on_the_face(rendered)
         matrix = alignment(points, heads.HEAD_TEMPLATE, size)
         plate = cv2.warpAffine(frame, matrix, (size, size), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         parser = self.models.parser
@@ -677,7 +693,18 @@ class FaceEngine:
         rendered = _light_like(rendered, plate, worn)
         image = cv2.blendLinear(rendered, plate, alpha, 1.0 - alpha)
         face = feather(region(labels_new, parsing.FACE), erode=0.01, soft=0.03)
-        return HeadLayer(t, image, np.maximum(alpha, fill), face, head_pose(points))
+        return HeadLayer(t, image, np.maximum(alpha, fill), face, head_pose(points), alpha)
+
+    def _on_the_face(self, rendered: np.ndarray) -> np.ndarray:
+        """The generated head moved so that its face falls where the speaker's is: the crop is framed
+        on the speaker's five points, but a turned head is not generated exactly there. Off by a
+        little, the swap on top showed a second nose and mouth, and the speaker's own head showed
+        beside the generated one."""
+        found = main_face(self.models.detector.detect(rendered))
+        if found is None:
+            return rendered
+        return cv2.warpAffine(rendered, alignment(found.points, heads.HEAD_TEMPLATE, heads.OUTPUT),
+                              (heads.OUTPUT, heads.OUTPUT), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
 
     # --- Composition (CPU) -------------------------------------------------
@@ -704,7 +731,10 @@ class FaceEngine:
             frame, hair_alpha = self._with_hair(frame, tracked.points, nearest_key)
         if head is not None and self.settings.mode == "head" and weight > 0.0:
             matrix = alignment(tracked.points, heads.HEAD_TEMPLATE, heads.OUTPUT)
-            frame = paste(frame, head.image, head.alpha * weight, matrix)
+            alpha = head.alpha
+            if self._own is not None and head.worn is not None:   # the real background, not a blur
+                frame, alpha = self._painter.apply(frame, tracked.points, self._own), head.worn
+            frame = paste(frame, head.image, alpha * weight, matrix)
         else:
             head, weight = None, 0.0
         return self._swap_onto(frame, tracked, t, before, after, keys_per_second, head, hair_alpha, weight)

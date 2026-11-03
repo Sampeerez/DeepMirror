@@ -79,6 +79,8 @@ async def performance(request: Request) -> dict:
                   "f0_method": manager.default_f0_method()},
         "face": {"swap_ms": face.get("swap_ms"), "swapper": stats.get("swapper"),
                  "keys_per_second": stats.get("keys_per_second"), "fps_out": stats.get("fps_out"),
+                 "engine": stats.get("engine"), "engine_reason": stats.get("engine_reason"),
+                 "engines_measured": face.get("measured"),
                  "track_ms": stats.get("track_ms"), "compose_ms": stats.get("compose_ms")},
     }
 

@@ -29,6 +29,9 @@ HEAD3D_IN_FLIGHT = 2        # frames with the 3D head's process at once (a frame
 HEAD3D_WAIT = 0.15          # how long a frame waits for its own 3D head render
 FRINGE_SHARE = 0.02         # of the head crop: hair over the face from here on counts as a fringe
 HEAD3D_REUSE = 0.2          # a render this much older still dresses a frame whose own did not come
+HEAD_WAIT = 0.15            # how long a frame waits for its own whole-head render...
+HEAD_KEEPS_UP = 15.0        # ...on a GPU rendering at least this many per second (else, the newest)
+HEAD_LAYERS = 8             # recent whole-head renders kept: a frame takes the nearest in time
 
 
 @dataclass(slots=True)
@@ -62,7 +65,8 @@ class LiveFaceSession:
         self._condition = threading.Condition()
         self._closed = False
         self._key_times: deque[float] = deque(maxlen=30)
-        self._head: HeadLayer | None = None
+        self._heads_done: deque[HeadLayer] = deque(maxlen=HEAD_LAYERS)
+        self._head_rendered = -1e9   # the capture time of the newest frame sent to render
         self._head_times: deque[float] = deque(maxlen=10)
         self.frames_in = self.frames_out = self.keys_made = self.keys_skipped = 0
         self._rate_since = (time.monotonic(), 0, 0)   # for the frames in and out per second in stats
@@ -222,9 +226,10 @@ class LiveFaceSession:
                 continue
             with self._condition:
                 record = next((r for r in reversed(self._records) if r.tracked.face is not None), None)
-            if record is None:
-                time.sleep(0.03)
+            if record is None or record.t <= self._head_rendered:   # nothing new: not the same frame again
+                time.sleep(0.003)
                 continue
+            self._head_rendered = record.t
             try:
                 layer = self.engine.head_layer(record.frame, record.tracked, record.t, wait=1.0)
             except Exception:
@@ -232,10 +237,24 @@ class LiveFaceSession:
                 time.sleep(1.0)
                 continue
             if layer is not None:
-                self._head = layer
-                self._head_times.append(time.monotonic())
+                with self._condition:
+                    self._heads_done.append(layer)
+                    self._head_times.append(time.monotonic())
+                    self._condition.notify_all()
 
     # --- Output -----------------------------------------------------------
+
+    def _head_for(self, t: float) -> HeadLayer | None:
+        return min(self._heads_done, key=lambda layer: abs(layer.t - t), default=None)
+
+    def _waits_for_head(self, record: _Record, waiting: float) -> bool:
+        """A GPU that renders the head per frame: the frame waits for its own, the output is delayed
+        for the voice anyway. On a slower one it takes the newest there is."""
+        remote = self.engine.remote
+        return (self.engine.wants_head and record.tracked.face is not None
+                and waiting < getattr(remote, "wait", HEAD_WAIT)
+                and self.heads_per_second >= getattr(remote, "keeps_up", HEAD_KEEPS_UP)
+                and all(layer.t < record.t for layer in self._heads_done))
 
     def _around(self, t: float) -> tuple[Key | None, Key | None]:
         before = after = None
@@ -261,16 +280,19 @@ class LiveFaceSession:
                     break
                 if record.seq is not None and record.seq not in self._layers3d and waiting < HEAD3D_WAIT:
                     break
+                if self._waits_for_head(record, waiting):
+                    break
                 self._records.popleft()
                 before, after = self._around(record.t)
                 layer3d = self._layer3d(record) if self.head3d is not None else None
+                head = self._head_for(record.t)
                 self._tell_fringe()
             started = time.perf_counter()
             if self.engine.identity is None:
                 frame = record.frame
             else:
                 frame = self.engine.compose(record.frame, record.tracked, record.t, before, after,
-                                            self.keys_per_second, head=self._head, layer3d=layer3d)
+                                            self.keys_per_second, head=head, layer3d=layer3d)
             self.compose_ms = 0.9 * self.compose_ms + 0.1 * (time.perf_counter() - started) * 1000
             self.frames_out += 1
             out.append((record.t, frame))

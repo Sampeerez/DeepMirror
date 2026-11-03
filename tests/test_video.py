@@ -160,7 +160,7 @@ class TestApi:
         response = client.patch("/api/video/settings", json={"swapper": "ghost_1_256", "mouth": "on",
                                                              "enhance": "sometimes", "occlusion": False})
         settings = response.json()["settings"]
-        assert settings == {"mode": "hair", "swapper": "ghost_1_256", "enhance": "auto", "mouth": "on",
+        assert settings == {"mode": "auto", "swapper": "ghost_1_256", "enhance": "auto", "mouth": "on",
                             "occlusion": False}
         assert client.get("/api/video/").json()["settings"]["swapper"] == "ghost_1_256"
         assert client.patch("/api/video/settings", json={"mode": "face"}).json()["settings"]["mode"] == "face"
