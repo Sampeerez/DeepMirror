@@ -21,7 +21,7 @@ from backend.video.avatar import NO_WINDOW, LamInstall
 logger = logging.getLogger(__name__)
 
 MIN_GPU_MB = 6000
-MIN_FREE_GB = 12        # downloads and the unpacked install side by side, at the peak
+MIN_FREE_GB = 20        # downloads and the unpacked install (11 GB) side by side, at the peak
 BELOW_NORMAL = 0x4000   # Windows priority class: the voice comes first, also while installing
 
 

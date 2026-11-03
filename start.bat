@@ -55,7 +55,7 @@ if defined UVEXE (
     "  $l = $s.CreateShortcut((Join-Path $dir '%APP_NAME%.lnk'));" ^
     "  $l.TargetPath = '%UVEXE%'; $l.Arguments = 'run --no-sync deepmirror';" ^
     "  $l.WorkingDirectory = '%~dp0'; $l.Description = '%APP_NAME%';" ^
-    "  $l.IconLocation = 'shell32.dll,168'; $l.Save() }" >nul 2>nul
+    "  $l.IconLocation = '%~dp0frontend\public\deepmirror.ico'; $l.Save() }" >nul 2>nul
 )
 title %APP_NAME%
 uv run --no-sync deepmirror %*

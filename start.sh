@@ -52,7 +52,7 @@ Name=$APP_NAME
 Comment=Realtime voice and face cloning
 Exec=sh -c 'cd "$HERE" && exec "$UV_BIN" run --no-sync deepmirror'
 Path=$HERE
-Icon=audio-input-microphone
+Icon=$HERE/frontend/src/assets/logo.svg
 Terminal=true
 Categories=AudioVideo;Audio;
 EOF

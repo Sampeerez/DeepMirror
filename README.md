@@ -81,15 +81,20 @@ Every page is in the sidebar:
   and then trained on all the face's photos (each one's camera and pose fitted, the hair's colours
   refined, kept only if it also fits a photo it never saw). Faces › the cube button trains it
   longer. On a GTX 1660 SUPER: 30 fps next to the live voice. **It installs itself**: the first
-  start on such a computer downloads it in the background (about 7 GB, nothing to compile).
-- **Whole head**: the person's head, hair, beard and ears, not only the inside of the
+  start on such a computer downloads it in the background (about 7 GB, 11 GB once installed; nothing to compile).
+- **Whole head** (Clone › Head): the person's head, hair, beard and ears, not only the inside of the
   face. The sharpest front-facing photo is animated with your pose and expressions (LivePortrait), so
-  hair and skin are the photo's own; the face swap on top keeps your eyes, brows and mouth live. Your
-  own hair where the new head does not reach is filled in from the background around it.
+  hair and skin come from the same picture and move together; each render is placed on your face, and the
+  face swap on top keeps your eyes, brows and mouth live. Your own hair where a render does not reach is
+  painted over with the background seen during the session. Live it needs a GPU rendering 25 or more a
+  second (Auto measures it); on a GTX 1660 SUPER, 1.5 a second.
 - **Face only**: the inside of the face, faster. Its mask follows the parsed outline of the face and
   fades inside it, so there is no halo around it; hands and glasses in front stay in front.
 - **In sync with the voice**: every camera frame carries its capture time and is shown when the
   converted voice is heard, so lips and voice line up, in the preview and on the virtual camera.
+- **No gaps when the camera starts**: the voice keeps half a chunk in hand while the camera runs (about 85 ms
+  more latency), gained by playing 2 % slower for a few seconds rather than with a silence, and given back when
+  it stops. Without a camera the audio is untouched until a real gap happens.
 - **The voice comes first**: the face runs in its own process and uses the GPU only in the gaps the
   voice leaves, so turning video on never cuts the voice. Frames between two face swaps are blended
   and placed with that frame's own face position, so head movement stays exact at camera rate.
@@ -128,8 +133,8 @@ releases and LivePortrait's, and run with ONNX Runtime (CUDA, DirectML or CPU) a
 | Swap | HyperSwap 1b (256 px), inswapper (128 px), GHOST (256 px) | Compared on generated faces: inswapper keeps identity best (ArcFace 0.80–0.90), HyperSwap is the sharpest and masks hands and hair itself, GHOST is the fastest (29 ms). SimSwap kept identity worst (0.58–0.66) and was left out. HyperSwap is stored in fp32 here: its fp16 weights gave NaN on CUDA without tensor cores, and fp32 runs in 43 ms instead of 117 |
 | Occlusion | XSeg | Hands and objects in front of the face, for swappers without their own mask |
 | Detail | GPEN-BFR 256 | Only on close faces when the GPU has room: it costs a little identity |
-| Whole head | LivePortrait (human), run here in PyTorch fp32 in 33 stages of at most ~33 ms | No swap model changes hair or the head's outline (FaceFusion, Deep-Live-Cam, HyperSwap, inswapper, GHOST all replace the inside of the face); animating the photo itself does. fp16 is slower on this GPU and gave NaN |
-| 3D head | LAM-20K (Large Avatar Model, SIGGRAPH 2025), driven by MediaPipe Face Landmarker, under the face swap | One photo to an animatable 3D Gaussian head with its hair (1.8 GB of GPU memory at most, so it fits next to the studio), then trained on every photo of the face, about 3 minutes; renders a frame in ~6 ms, so every frame gets its own head. A one-photo avatar cannot carry live expressions or a mouth: the swap does that part. Runs in its own Python 3.10 environment (`models/lam`, ~7 GB), with its CUDA libraries prebuilt for GTX 10 to RTX 40 (RTX 50 through PTX) |
+| Whole head | LivePortrait (human), run here in PyTorch in 33 stages of at most ~33 ms, fp16 only where measured faster and identical | No swap model changes hair or the head's outline (FaceFusion, Deep-Live-Cam, HyperSwap, inswapper, GHOST all replace the inside of the face); animating the photo itself does. fp16 is slower on this GPU and gave NaN |
+| 3D head | LAM-20K (Large Avatar Model, SIGGRAPH 2025), driven by MediaPipe Face Landmarker, under the face swap | One photo to an animatable 3D Gaussian head with its hair (1.8 GB of GPU memory at most, so it fits next to the studio), then trained on every photo of the face, about 3 minutes; renders a frame in ~6 ms, so every frame gets its own head. A one-photo avatar cannot carry live expressions or a mouth: the swap does that part. Runs in its own Python 3.10 environment (`models/lam`, ~11 GB), with its CUDA libraries prebuilt for GTX 10 to RTX 40 (RTX 50 through PTX) |
 | Parsing | BiSeNet (ResNet-34) | Hair, ears and neck of the worn head, and the speaker's own hair to fill in |
 
 Also reviewed: Deep-Live-Cam and LiveFaceCam (inswapper/HyperSwap with a mouth mask; the real-mouth
