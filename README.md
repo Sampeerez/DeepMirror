@@ -68,6 +68,9 @@ Every page is in the sidebar:
 - **Export** any voice as a `.zip` with its `.pth` and `.index`
 
 ### Face
+- **Auto picks the engine**: the most natural one that fits this GPU, measured here once: PersonaLive
+  (16 GB or more, experimental, not yet run on a real GPU), LivePortrait on every frame (40 ms or less), the
+  3D head, or Face + hair. It goes down a level if the video falls behind or the voice runs late.
 - **3D head** (Windows + NVIDIA GPU with 6 GB or more): the face swap and a 3D head together.
   The swap gives the face itself, so your own expressions, mouth, teeth and blinks are real, every
   frame, with the worn identity. The 3D head, rendered for exactly that frame's pose, gives
@@ -181,6 +184,7 @@ Settings can be overridden with environment variables or a `.env` file:
 | `OVC_RVC_ALLOW_UNSAFE_CHECKPOINTS` | `false` | See Security |
 | `OVC_CORS_ORIGINS` | local | Extra origins allowed to use the API |
 | `OVC_HEAD3D` | on | `off`: never install the 3D head by itself (`uv run python scripts/setup_head3d.py` installs it by hand) |
+| `OVC_PERSONALIVE` | on | `off`: never install PersonaLive by itself (GPUs of 16 GB or more; `uv run python scripts/setup_personalive.py` installs it by hand) |
 
 The full list is in [backend/config.py](backend/config.py).
 
