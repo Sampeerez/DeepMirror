@@ -97,3 +97,21 @@ def test_the_installer_is_off_when_asked(monkeypatch, tmp_path):
     installer.start_if_needed()
     assert installer._process is None
     assert installer.status() == {"state": "unavailable", "error": "Turned off (OVC_HEAD3D)"}
+
+
+def test_the_pose_is_always_in_front_of_the_camera():
+    import cv2
+
+    drive = _drive()
+    # A head model (y up, as FLAME) seen by a camera looking along +z with y down.
+    rng = np.random.default_rng(0)
+    model = rng.uniform(-0.08, 0.08, (51, 3))
+    camera = np.array([[1000.0, 0, 640], [0, 1000.0, 360], [0, 0, 1]])
+    true_r, true_t = np.array([[np.pi], [0.2], [0.0]]), np.array([[0.02], [-0.03], [0.6]])
+    points = cv2.projectPoints(model, true_r, true_t, camera, None)[0][:, 0]
+    ok, r, t = drive.solve_pose(model, points, camera)
+    assert ok and t[2, 0] > 0
+    assert abs(t[2, 0] - 0.6) < 0.02
+    # A previous frame's mirror solution behind the camera is not kept.
+    ok, r, t = drive.solve_pose(model, points, camera, np.array([[0.0], [0.0], [0.0]]), np.array([[0.0], [0.0], [-0.6]]))
+    assert ok and t[2, 0] > 0

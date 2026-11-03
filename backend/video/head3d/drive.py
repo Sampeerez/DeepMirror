@@ -150,8 +150,12 @@ class Head:
         self._landmarks = (faces[:, 17:68], bary[:, 17:68], vertices2landmarks)
         # The head's own extent (what is visible of it, hair included): the render is framed on it,
         # so no pose ever cuts the hair or the chin. Offsets from the root joint, 8 corners.
+        # (Percentiles: a few stray Gaussians must not blow the frame up and leave the head a few
+        # blurred pixels in it.)
         seen = self.xyz[self.opacity[:, 0] > 0.05]
-        low, high = seen.min(0).values, seen.max(0).values
+        low = torch.quantile(seen, 0.005, dim=0) - 0.01
+        high = torch.quantile(seen, 0.995, dim=0) + 0.01
+        self.opacity = self.opacity * ((self.xyz >= low - 0.03) & (self.xyz <= high + 0.03)).all(1, keepdim=True)
         corners = torch.stack([torch.stack([x, y, z]) for x in (low[0], high[0]) for y in (low[1], high[1])
                                for z in (low[2], high[2])])
         self.corners = corners.cpu().double().numpy()
@@ -202,6 +206,22 @@ class Head:
             opacities=self.opacity, scales=self.scaling, rotations=self.rotation, cov3D_precomp=None)
         bgr = image.flip(0) / alpha.clamp(min=1e-3)
         return torch.cat([bgr, alpha], 0).permute(1, 2, 0).clamp(0, 1)
+
+
+def solve_pose(model: np.ndarray, points: np.ndarray, camera: np.ndarray, rvec=None, tvec=None):
+    """The head's pose from its landmarks, always in front of the camera. PnP has a mirror solution
+    behind the camera that fits the points just as well (the head then renders inside out, huge
+    and blurred), so it starts from a head facing the camera and refuses that solution."""
+    width_m = float(np.ptp(model[:, 0])) or 0.1
+    width_px = float(np.ptp(points[:, 0])) or 1.0
+    facing = (np.array([[math.pi], [0.0], [0.0]]),   # FLAME looks along +z with y up; the camera along +z with y down
+              np.array([[0.0], [0.0], [float(camera[0, 0]) * width_m / width_px]]))
+    for start in ((rvec, tvec), facing) if rvec is not None else (facing,):
+        ok, r, t = cv2.solvePnP(model, points, camera, None, start[0].copy(), start[1].copy(), useExtrinsicGuess=True,
+                                flags=cv2.SOLVEPNP_ITERATIVE)
+        if ok and t[2, 0] > 0:
+            return True, r, t
+    return False, None, None
 
 
 def _ycc(bgr):
@@ -417,9 +437,7 @@ def main() -> None:
         focal = FOCAL * max(width, height)
         camera = np.array([[focal, 0, width / 2], [0, focal, height / 2], [0, 0, 1]])
         model = head.landmarks(weights)
-        guess = state["rvec"] is not None
-        ok, rvec, tvec = cv2.solvePnP(model, points, camera, None, state["rvec"], state["tvec"],
-                                      useExtrinsicGuess=guess, flags=cv2.SOLVEPNP_ITERATIVE)
+        ok, rvec, tvec = solve_pose(model, points, camera, state["rvec"], state["tvec"])
         if not ok:
             send("layer", seq, None, timings)
             return
