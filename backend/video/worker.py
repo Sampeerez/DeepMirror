@@ -348,12 +348,15 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
 
     try:
         models.measure(Path(cache_path), arbiter)
-        if "head_ms" not in measured and models.heads_ready and remote_head is not None and arbiter.gap() is None:
-            took = remote_head.measure()
-            if took is not None:
-                measured["head_ms"] = took
+        if "head_fp16" not in measured and models.heads_ready and remote_head is not None and arbiter.gap() is None:
+            result = remote_head.measure()
+            if result is not None:
+                measured.update(result)
                 head_engines.store_measured(engines_cache, measured)
-                log(logging.INFO, f"Whole head measured: {took:.0f} ms per frame")
+                log(logging.INFO, f"Whole head measured: {result['head_ms']:.0f} ms per frame"
+                                  f"{', half precision' if result['head_fp16'] else ''}")
+        if remote_head is not None:
+            remote_head.use_fp16(bool(measured.get("head_fp16")))
         # Loaded now, not on the first frame: a swapper takes a second or two to load and warm up.
         if models.available():
             engine.plan()

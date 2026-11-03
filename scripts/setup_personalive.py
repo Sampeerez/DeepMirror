@@ -34,11 +34,10 @@ COMMIT = "abdd112e01dcf7d89122c2e5efa29fcff0669740"
 CODE_ZIP = f"https://github.com/GVCLab/PersonaLive/archive/{COMMIT}.zip"
 TORCH_INDEX = "https://download.pytorch.org/whl/cu118"
 TORCH = ["torch==2.1.0", "torchvision==0.16.0", "xformers==0.0.22.post7"]
-# requirements_base.txt without its web demo's and its video reader's, which the driver does not use.
-REQUIREMENTS = ["accelerate==1.12.0", "diffusers==0.27.0", "einops==0.8.1", "huggingface_hub==0.25.1",
-                "mediapipe==0.10.11", "numpy==1.26.3", "omegaconf==2.3.0", "opencv-python-headless==4.10.0.84",
-                "Pillow==11.3.0", "safetensors==0.7.0", "scikit-image==0.22.0", "tqdm==4.67.1",
-                "transformers==4.36.2", "peft==0.10.0"]
+# requirements_base.txt, only what its model code imports (not its web demo's).
+REQUIREMENTS = ["accelerate==1.12.0", "av", "diffusers==0.27.0", "einops==0.8.1", "huggingface_hub==0.25.1",
+                "numpy==1.26.3", "omegaconf==2.3.0", "opencv-python-headless==4.10.0.84", "Pillow==11.3.0",
+                "safetensors==0.7.0", "tqdm==4.67.1", "transformers==4.36.2", "peft==0.10.0"]
 HF = "https://huggingface.co"
 PERSONALIVE = f"{HF}/huaichang/PersonaLive/resolve/main/pretrained_weights/personalive"
 BASE = f"{HF}/lambda/sd-image-variations-diffusers/resolve/main"   # PersonaLive's script names its old address
@@ -105,7 +104,7 @@ def install_all(install: PersonaLiveInstall, progress: Progress) -> None:
     progress.finish()
 
     progress.start("packages")
-    if not works(install, "import diffusers, omegaconf, einops, transformers, mediapipe, skimage"):
+    if not works(install, "import av, cv2, diffusers, einops, omegaconf, transformers"):
         run([*pip, *REQUIREMENTS])
     progress.finish()
 

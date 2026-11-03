@@ -38,10 +38,19 @@ class CaptureProcessor extends AudioWorkletProcessor {
   }
 }
 
+// A cushion is gained or given back by playing this much slower or faster: no silence, and a 2 %
+// change for a few seconds does not show.
+const CUSHION_RATE = 0.02;
+
 class PlaybackProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     const chunkSize = options.processorOptions?.chunkSize || 4096;
+    this.chunkSize = chunkSize;
+    this.cushion = 0;           // samples to still have when the next chunk arrives
+    this.draining = false;      // a cushion no longer asked for is being given back
+    this.rate = 1;
+    this.phase = 0;
     this.primeBufferSize = chunkSize;
     this.targetBufferSize = 2 * chunkSize;
     this.ringBufferSize = 6 * chunkSize;
@@ -61,7 +70,13 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.resize(data.chunkSize);
         return;
       }
+      if (data?.type === 'cushion') {
+        this.cushion = Math.round(data.share * this.chunkSize);
+        this.draining = this.cushion === 0;
+        return;
+      }
       if (data instanceof Float32Array) {
+        this.adjustRate();
         for (let i = 0; i < data.length; i++) {
           if (this.availableSamples >= this.ringBufferSize) {
             this.readIndex = (this.readIndex + 1) % this.ringBufferSize;
@@ -73,7 +88,7 @@ class PlaybackProcessor extends AudioWorkletProcessor {
           this.availableSamples += 1;
         }
 
-        while (this.availableSamples > this.targetBufferSize) {
+        while (this.availableSamples > this.targetBufferSize + this.cushion) {
           this.readIndex = (this.readIndex + 1) % this.ringBufferSize;
           this.availableSamples -= 1;
           this.droppedSamples += 1;
@@ -86,8 +101,23 @@ class PlaybackProcessor extends AudioWorkletProcessor {
     };
   }
 
+  /** When a chunk arrives: what is left of the last one says whether the cushion is there. */
+  adjustRate() {
+    const left = this.availableSamples;
+    if (left < this.cushion) {
+      this.rate = 1 - CUSHION_RATE;
+    } else if (this.draining && left > this.chunkSize / 8) {
+      this.rate = 1 + CUSHION_RATE;
+    } else {
+      this.rate = 1;
+      this.draining = false;
+    }
+  }
+
   /** Buffer targets for a new chunk size; queued audio is kept. */
   resize(chunkSize) {
+    this.cushion = Math.round((this.cushion / this.chunkSize) * chunkSize);
+    this.chunkSize = chunkSize;
     const ring = new Float32Array(6 * chunkSize);
     const keep = Math.min(this.availableSamples, ring.length);
     for (let i = 0; i < keep; i++) {
@@ -117,6 +147,8 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         if (this.availableSamples <= 0) {
           this.isPrimed = false;
           this.underruns += 1;
+          // A gap: the next ones are avoided by keeping more in hand from now on.
+          this.cushion = Math.min(this.cushion + Math.round(this.chunkSize / 4), this.chunkSize);
           let sample = this.lastSample;
           for (let j = i; j < channelData.length; j++) {
             sample *= 0.985;
@@ -126,11 +158,22 @@ class PlaybackProcessor extends AudioWorkletProcessor {
           break;
         }
 
-        const sample = this.ringBuffer[this.readIndex];
+        let sample = this.ringBuffer[this.readIndex];
+        if (this.rate === 1 && this.phase === 0) {
+          this.readIndex = (this.readIndex + 1) % this.ringBufferSize;
+          this.availableSamples -= 1;
+        } else {
+          if (this.availableSamples > 1) {
+            sample += this.phase * (this.ringBuffer[(this.readIndex + 1) % this.ringBufferSize] - sample);
+          }
+          this.phase += this.rate;
+          const whole = Math.min(Math.floor(this.phase), this.availableSamples);
+          this.phase = this.rate === 1 ? 0 : this.phase - whole;
+          this.readIndex = (this.readIndex + whole) % this.ringBufferSize;
+          this.availableSamples -= whole;
+        }
         channelData[i] = sample;
         this.lastSample = sample;
-        this.readIndex = (this.readIndex + 1) % this.ringBufferSize;
-        this.availableSamples -= 1;
       }
     }
 

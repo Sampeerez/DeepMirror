@@ -103,7 +103,8 @@ class HeadLayer:
     alpha: np.ndarray           # float32 0..1
     face: np.ndarray            # float32 0..1: the worn face's skin, eyes, nose, mouth
     pose: tuple[float, float] = (0.0, 0.0)   # the head turn it was rendered for (see head_pose)
-    worn: np.ndarray | None = None           # alpha without that fill: for a frame already painted over
+    worn: np.ndarray | None = None           # alpha of the head alone, without that fill
+    fill: np.ndarray | None = None           # that fill's own mask: what this render does not cover
 
 
 @dataclass(slots=True)
@@ -131,6 +132,8 @@ class VideoSettings:
 
 class FaceModels:
     """Loads the face models on first use and shares them between sessions."""
+
+    head_fp16 = False   # the whole head in half precision: only where it was measured to be right
 
     def __init__(self, directory: Path, gpu: bool) -> None:
         self.directory = directory
@@ -197,6 +200,7 @@ class FaceModels:
                 with arbiter.video(40.0, timeout=10.0):
                     copy()
             self._heads = heads.HeadModels(self.directory, self.gpu, place)
+            self._heads.fp16 = self.head_fp16
         return self._heads
 
     def free_heads(self) -> None:
@@ -354,6 +358,7 @@ class FaceEngine:
     # The 3D head gives the hair (and ears, hairline, outline) on every frame instead of the photo's
     # cut-out: compose() gets it per frame, and the speaker's own ears are painted over too.
     hair_from_3d: bool = False
+    _photo_inside: np.ndarray | None = None   # the part of the head crop the photo really shows
     _painter: hairs.OwnPaint = field(default_factory=hairs.OwnPaint)   # over the speaker's own hair
 
     def set_identity(self, embedding: np.ndarray | None) -> None:
@@ -584,6 +589,11 @@ class FaceEngine:
                     return None
                 self._head.set_source(self.portrait, found.points)
             self._head_for = id(self.portrait)
+            # What the photo does not show (a head cut by its edge) comes out as streaks: not worn.
+            inside = cv2.warpAffine(np.ones(self.portrait.shape[:2], np.float32),
+                                    alignment(found.points, heads.HEAD_TEMPLATE, heads.OUTPUT),
+                                    (heads.OUTPUT, heads.OUTPUT), flags=cv2.INTER_LINEAR, borderValue=0.0)
+            self._photo_inside = feather(inside, erode=0.02, soft=0.02) if inside.min() < 0.5 else None
         return self._head
 
     def head_layer(self, frame: np.ndarray, tracked: Tracked, t: float, wait: float = 2.0) -> HeadLayer | None:
@@ -664,6 +674,8 @@ class FaceEngine:
         fade = np.clip((np.arange(size, dtype=np.float32) / size - 0.80) / 0.15, 0, 1)[:, None]
         worn_neck = region(labels_new, neck) * fade
         alpha = feather(np.clip(worn - worn_neck, 0, 1), erode=0.008, soft=0.035)
+        if self._photo_inside is not None:
+            alpha = alpha * self._photo_inside
         fill = np.zeros((size, size), np.float32)
         if labels_own is not None:
             own = region(labels_own, parsing.HEAD)
@@ -674,7 +686,7 @@ class FaceEngine:
                 # The speaker's own hair the new head does not cover is painted over with the
                 # background around it: a normalised blur of everything that is not the speaker's
                 # head (smooth, no streaks), fully opaque over the hair and fading out past it.
-                ring = max(9, int(size * 0.05)) | 1
+                ring = max(5, int(size * 0.015)) | 1
                 hole = cv2.dilate(uncovered, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring, ring)))
                 known = 1.0 - np.clip(cv2.dilate(own, np.ones((5, 5), np.uint8)) + hole, 0, 1)
                 small = (size // 4, size // 4)
@@ -687,13 +699,13 @@ class FaceEngine:
                 filled = cv2.resize(np.clip(filled, 0, 255).astype(np.uint8), (size, size),
                                     interpolation=cv2.INTER_LINEAR)
                 fill = np.maximum(hole, feather(cv2.dilate(hole, np.ones((ring, ring), np.uint8)), erode=0.0,
-                                                soft=0.03))
+                                                soft=0.012))
                 plate = cv2.blendLinear(filled, plate, fill, 1.0 - fill)
         # The photo's own lighting moves half way towards the room's (the head stays the photo's).
         rendered = _light_like(rendered, plate, worn)
         image = cv2.blendLinear(rendered, plate, alpha, 1.0 - alpha)
         face = feather(region(labels_new, parsing.FACE), erode=0.01, soft=0.03)
-        return HeadLayer(t, image, np.maximum(alpha, fill), face, head_pose(points), alpha)
+        return HeadLayer(t, image, np.maximum(alpha, fill), face, head_pose(points), alpha, fill)
 
     def _on_the_face(self, rendered: np.ndarray) -> np.ndarray:
         """The generated head moved so that its face falls where the speaker's is: the crop is framed
@@ -732,8 +744,11 @@ class FaceEngine:
         if head is not None and self.settings.mode == "head" and weight > 0.0:
             matrix = alignment(tracked.points, heads.HEAD_TEMPLATE, heads.OUTPUT)
             alpha = head.alpha
-            if self._own is not None and head.worn is not None:   # the real background, not a blur
-                frame, alpha = self._painter.apply(frame, tracked.points, self._own), head.worn
+            if self._own is not None and not self._own.empty and head.worn is not None and head.fill is not None:
+                # The background as seen, not a blur; only where this very render leaves the
+                # speaker's head uncovered (the last parse of the hair may be half a second old).
+                frame = paste(frame, self._painter.image(frame, tracked.points, self._own), head.fill * weight, matrix)
+                alpha = head.worn
             frame = paste(frame, head.image, alpha * weight, matrix)
         else:
             head, weight = None, 0.0

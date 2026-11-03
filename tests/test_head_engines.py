@@ -122,6 +122,46 @@ def _session(heads_per_second, layers, remote=None):
     return session
 
 
+def test_half_precision_only_if_it_gives_the_same_picture():
+    picture = np.full((8, 8, 3), 120, np.uint8)
+    assert he.same_picture(picture, picture + 2)
+    assert not he.same_picture(picture, np.zeros((8, 8, 3), np.uint8))   # NaNs come out flat
+    assert not he.same_picture(picture, None)
+
+
+def test_what_the_photo_does_not_show_is_not_worn():
+    from types import SimpleNamespace
+
+    import cv2
+
+    from backend.video import head as heads
+    from backend.video.engine import FaceEngine
+    from backend.video.faces import TEMPLATES
+
+    engine = FaceEngine.__new__(FaceEngine)
+    size = heads.OUTPUT
+    target = TEMPLATES[heads.HEAD_TEMPLATE] * size
+    # A photo that ends a little above the eyes: the crop's top has nothing of it.
+    photo = np.zeros((size, size, 3), np.uint8)[int(target[0][1]) - 60:]
+    points = target - (0, int(target[0][1]) - 60)
+    engine.portrait = photo
+    engine._head = SimpleNamespace(set_source=lambda image, found: None)
+    engine._head_for = None
+    engine._photo_inside = None
+    engine.models = SimpleNamespace(detector=SimpleNamespace(detect=lambda image: [
+        SimpleNamespace(points=points, size=100, score=1.0)]))
+
+    class Arbiter:
+        def video(self, *_, **__):
+            return FakeGrant()
+
+    engine.arbiter = Arbiter()
+    assert engine._prepare_head() is engine._head
+    inside = engine._photo_inside
+    assert inside is not None and inside[:20].max() < 0.01 and inside[size // 2, size // 2] > 0.99
+    assert cv2.countNonZero((inside > 0.5).astype(np.uint8)) > 0
+
+
 def test_a_frame_takes_the_render_nearest_in_time():
     session = _session(30.0, [_layer(1.0), _layer(1.1), _layer(1.2)])
     assert session._head_for(1.09).t == 1.1

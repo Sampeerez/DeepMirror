@@ -35,6 +35,8 @@ VIDEO_SHARE = 0.7            # of the camera's frame rate, below which the video
 LATE_SHARE = 0.15            # of the voice's chunks: more than this over real time is too many
 CHUNKS_PER_SECOND = 5.0      # about, for that share
 MEASURE_RENDERS = 5
+FP16_FASTER = 0.9            # half precision must take less than this share of the time...
+FP16_SAME = 3.0              # ...and differ by no more than this on average (0..255)
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,9 +158,11 @@ def store_measured(cache: Path, values: dict, gpu: str | None = None) -> None:
     cache.write_text(json.dumps(stored, indent=1), encoding="utf-8")
 
 
-def measure_head(engine) -> float | None:
-    """One LivePortrait frame on this GPU, in ms (the render, finding its face and the cut-out's two parses), on a
-    made-up picture: the time does not depend on what it shows. Its models are freed afterwards."""
+def measure_head(engine) -> dict | None:
+    """``{"head_ms", "head_fp16"}``: one LivePortrait frame on this GPU, in ms (the render, finding its
+    face and the cut-out's two parses), on a made-up picture: the time does not depend on what it
+    shows. Half precision stays only if it is faster here and gives the same picture (on a GTX 1660
+    it is slower and gives NaN). Its models are freed afterwards."""
     from backend.video import head as heads
 
     models = engine.models.head_models(engine.arbiter)
@@ -174,15 +178,35 @@ def measure_head(engine) -> float | None:
     renderer = heads.HeadRenderer(models)
     with engine.arbiter.video(60.0, timeout=10.0):
         renderer.set_source(picture, points)
-    times = []
-    for _ in range(MEASURE_RENDERS):
-        with engine.arbiter.video(60.0, timeout=10.0):
-            started = time.perf_counter()
-            rendered = renderer.render(picture, points)
-            if parser is not None and rendered is not None:
-                detector.detect(rendered)
-                parser.labels(rendered)
-                parser.labels(rendered)
-            times.append((time.perf_counter() - started) * 1000.0)
+
+    def timed() -> tuple[float, np.ndarray | None]:
+        times, rendered = [], None
+        for _ in range(MEASURE_RENDERS):
+            with engine.arbiter.video(60.0, timeout=10.0):
+                started = time.perf_counter()
+                rendered = renderer.render(picture, points)
+                if parser is not None and rendered is not None:
+                    detector.detect(rendered)
+                    parser.labels(rendered)
+                    parser.labels(rendered)
+                times.append((time.perf_counter() - started) * 1000.0)
+        return statistics.median(times[1:]), rendered   # the first one sets things up
+
+    whole, reference = timed()
+    fp16 = False
+    half = whole
+    if models.device.type == "cuda" and reference is not None:
+        models.fp16 = True
+        try:
+            half, rendered = timed()
+            fp16 = same_picture(reference, rendered) and half < whole * FP16_FASTER
+        except RuntimeError:
+            logger.exception("The whole head in half precision failed")
+        models.fp16 = False
     engine.models.free_heads()
-    return statistics.median(times[1:])   # the first one sets things up
+    return {"head_ms": half if fp16 else whole, "head_fp16": fp16}
+
+
+def same_picture(reference: np.ndarray, other: np.ndarray | None) -> bool:
+    """Whether half precision gave what full precision gave (NaNs come out as flat colour)."""
+    return other is not None and float(np.abs(reference.astype(np.float32) - other).mean()) <= FP16_SAME

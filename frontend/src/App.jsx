@@ -52,6 +52,8 @@ const CAPTURE_SAMPLES_KEY = 'ovc_capture_samples_v1';
 const HEADROOM_SETTLE_MS = 5000;
 // The share of each chunk's time the voice may take while the camera runs.
 const VIDEO_VOICE_SHARE = 0.6;
+// What the voice keeps in hand while the camera runs, as a share of its chunk.
+const VIDEO_VOICE_CUSHION = 0.5;
 
 export default function App() {
   useEffect(() => { document.title = APP_NAME; }, []);
@@ -256,6 +258,11 @@ export default function App() {
     setChunkSize(next.chunkSize);
     changeLiveChunkSize(next.chunkSize);
   }, [overloaded, serverStats, runtimeConfig.chunkSize, setChunkSize, changeLiveChunkSize]);
+
+  const { setCushion } = pipeline;
+  useEffect(() => {
+    if (isRunning) setCushion(video.running ? VIDEO_VOICE_CUSHION : 0);
+  }, [isRunning, video.running, setCushion]);
 
   // No stream, no latency to show.
   useEffect(() => {

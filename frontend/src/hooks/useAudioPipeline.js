@@ -404,6 +404,11 @@ export default function useAudioPipeline(wsHook) {
     setStreamInfo((info) => (info ? { ...info, chunkSize, adaptedFrom: info.adaptedFrom ?? info.chunkSize } : info));
   }, []);
 
+  /** Keep this share of a chunk in hand: with the camera on, the chunks arrive less evenly. */
+  const setCushion = useCallback((share) => {
+    playbackNodeRef.current?.port.postMessage({ type: 'cushion', share });
+  }, []);
+
   useEffect(() => {
     if (!isRecording) return undefined;
     const guard = (event) => { event.preventDefault(); event.returnValue = ''; };
@@ -436,9 +441,11 @@ export default function useAudioPipeline(wsHook) {
     streamInfo,
     playbackStats,
     setChunkSize,
+    setCushion,
   }), [
     start, stop, isRunning, meters, getAnalysers, isRecording, library, recordNotice,
     startRecording, stopRecording, setCaptureSamples, outputSelectionSupported, streamInfo, playbackStats,
     setChunkSize,
+    setCushion,
   ]);
 }

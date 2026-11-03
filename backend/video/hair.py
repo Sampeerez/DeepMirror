@@ -211,6 +211,10 @@ class OwnPaint:
 
         if own.empty:
             return frame
+        return paste(frame, self.image(frame, points, own), own.paint, alignment(points, HEAD_TEMPLATE, SIZE))
+
+    def image(self, frame: np.ndarray, points: np.ndarray, own: OwnHead) -> np.ndarray:
+        """What goes over the hair, in the head crop of ``points``."""
         matrix = alignment(points, HEAD_TEMPLATE, SIZE)
         self._age -= 1
         if self._fill is None or self._age <= 0:
@@ -220,7 +224,7 @@ class OwnPaint:
             if known is not None:
                 fill = cv2.blendLinear(np.clip(known[0], 0, 255).astype(np.uint8), fill, known[1], 1.0 - known[1])
             self._fill, self._age = fill, self.EVERY
-        return paste(frame, self._fill, own.paint, matrix)
+        return self._fill
 
 
 def over(frame: np.ndarray, image: np.ndarray, x: int, y: int, inplace: bool = False) -> np.ndarray:

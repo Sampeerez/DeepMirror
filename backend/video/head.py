@@ -7,7 +7,7 @@ speaker's pose and expressions (relative to the first frame seen), then warps
 and renders it. Hair, beard and skin come from the photo, pixel for pixel.
 
 One render costs about 300 ms on a GTX 1660 SUPER (fp32; fp16 is slower and
-unstable there), far more than the gaps the live voice leaves on the GPU. So a
+unstable there, see head_engines.measure_head), far more than the gaps the live voice leaves on the GPU. So a
 render is cut into *stages*, each short enough to fit one gap, and the caller
 runs them one by one inside ``GpuArbiter.video`` (the voice never waits). Live,
 the head is refreshed a few times a second and moved with the speaker's head on
@@ -89,6 +89,7 @@ class HeadModels:
         from backend.video.liveportrait.warping_network import WarpingNetwork
 
         self.torch = torch
+        self.fp16 = False
         self.device = torch.device("cuda" if gpu and torch.cuda.is_available() else "cpu")
         # cuDNN's autotuner picks 3D convolutions with gigabytes of workspace: not next to the voice.
         torch.backends.cudnn.benchmark = False
@@ -341,7 +342,7 @@ class HeadRenderer:
         steps += [middle(getattr(generator, f"G_middle_{i}")) for i in range(6)]
         steps += [*upper(generator.up_0), *upper(generator.up_1), image]
         for step in steps:
-            yield _without_grad(step, torch)
+            yield _without_grad(step, torch, m.fp16)
 
     def render(self, frame: np.ndarray, points: np.ndarray) -> np.ndarray | None:
         """One whole render at once (files, or when nothing else needs the GPU)."""
@@ -360,8 +361,8 @@ def conv3d_depth_slice(padded, conv, lo: int, hi: int):
                                       padding=(0, conv.padding[1], conv.padding[2]))
 
 
-def _without_grad(step: Callable[[], None], torch) -> Callable[[], None]:
+def _without_grad(step: Callable[[], None], torch, fp16: bool = False) -> Callable[[], None]:
     def run() -> None:
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast("cuda", torch.float16, enabled=fp16):
             step()
     return run

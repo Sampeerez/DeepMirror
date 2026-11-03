@@ -54,6 +54,8 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, gpu: bool) -> None:
                 except Exception:
                     logger.exception("Measuring the head failed")
                 conn.send(("measured", took, None))
+            elif kind == "fp16":
+                models.head_fp16 = message[1]
             elif kind == "portrait":
                 engine.set_portrait(message[2])
             elif kind == "render":
@@ -88,8 +90,12 @@ class RemoteHead:
         with self._lock, contextlib.suppress(OSError, EOFError, BrokenPipeError):
             self._send("reset")
 
-    def measure(self, timeout: float = 180.0) -> float | None:
-        """One frame of the whole head on this GPU, in ms (None: it cannot run)."""
+    def use_fp16(self, on: bool) -> None:
+        with self._lock, contextlib.suppress(OSError, EOFError, BrokenPipeError):
+            self._send("fp16", on)
+
+    def measure(self, timeout: float = 180.0) -> dict | None:
+        """What the whole head does on this GPU (head_engines.measure_head; None: it cannot run)."""
         with self._lock:
             try:
                 if not self.ready:
