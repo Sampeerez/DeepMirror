@@ -144,14 +144,83 @@ def without_fringe(frame: np.ndarray, points: np.ndarray, own: OwnHead) -> np.nd
     return paste(frame, np.clip(fill, 0, 255).astype(np.uint8), own.fringe, matrix)
 
 
-def paint_own(frame: np.ndarray, points: np.ndarray, own: OwnHead) -> np.ndarray:
-    """``frame`` with the speaker's own hair painted over with the background around it (a copy)."""
-    from backend.video.blend import paste
+class Plate:
+    """The background behind the speaker, learnt during the session: every parse shows what is not
+    the speaker; as the head moves, more of the background has been seen. Where it has, the
+    speaker's own hair is painted over with the real thing instead of a blur. Starts again if the
+    picture changes (the camera moved, the light changed)."""
 
-    if own.empty:
-        return frame
-    crop, matrix = head_crop(frame, points)
-    return paste(frame, cover(crop, own), own.paint, matrix)
+    SCALE = 4
+    FOLLOW = 0.3
+    MOVED = 18.0     # mean difference (0..255) over known pixels that means another picture
+
+    def __init__(self) -> None:
+        self.colour: np.ndarray | None = None
+        self.seen: np.ndarray | None = None
+
+    def update(self, frame: np.ndarray, points: np.ndarray, own: OwnHead) -> None:
+        height, width = frame.shape[:2]
+        size = (max(1, width // self.SCALE), max(1, height // self.SCALE))
+        small = cv2.resize(frame, size, interpolation=cv2.INTER_AREA).astype(np.float32)
+        if self.colour is None or self.colour.shape[:2] != small.shape[:2]:
+            self.colour, self.seen = small.copy(), np.zeros(small.shape[:2], np.float32)
+        matrix = alignment(points, HEAD_TEMPLATE, SIZE).astype(np.float64)
+        from_frame = np.array([[1.0 / self.SCALE, 0, 0], [0, 1.0 / self.SCALE, 0]])
+        # known (head crop, small) -> the plate's pixels; outside the crop nothing is known.
+        crop_to_frame = cv2.invertAffineTransform(matrix)
+        scale_up = np.diag([SIZE / own.known.shape[1], SIZE / own.known.shape[0], 1.0])
+        forward = from_frame @ np.vstack([crop_to_frame, [0, 0, 1]]) @ scale_up
+        known = cv2.warpAffine(own.known, forward, size, flags=cv2.INTER_LINEAR, borderValue=0.0)
+        # Well away from the speaker: wisps of hair the parser missed must not end up in the plate.
+        margin = max(3, int(max(size) * 0.03)) | 1
+        sure = cv2.erode((known > 0.95).astype(np.uint8), np.ones((margin, margin), np.uint8)) > 0
+        assert self.seen is not None
+        both = sure & (self.seen > 0)
+        if both.sum() > 200 and float(np.abs(self.colour[both] - small[both]).mean()) > self.MOVED:
+            self.seen[:] = 0.0
+        follow = np.where(self.seen[sure] > 0, self.FOLLOW, 1.0)[:, None]
+        self.colour[sure] += follow * (small[sure] - self.colour[sure])
+        self.seen[sure] = 1.0
+
+    def in_crop(self, matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+        """``(colour, how sure 0..1)`` in the head crop of ``matrix``, or None if nothing is known."""
+        if self.colour is None or self.seen is None or not self.seen.any():
+            return None
+        local = matrix.astype(np.float64).copy()
+        local[:, :2] *= self.SCALE
+        colour = cv2.warpAffine(self.colour, local, (SIZE, SIZE), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        seen = cv2.warpAffine(self.seen, local, (SIZE, SIZE), flags=cv2.INTER_LINEAR, borderValue=0.0)
+        return colour, cv2.GaussianBlur(seen, (0, 0), 3.0)
+
+
+class OwnPaint:
+    """Paints the speaker's own hair over: with the real background where it has been seen (the
+    plate), else with the background around it spread over the hair. The fill is worked out every
+    few frames (it hardly changes) in the head crop, so it moves with the head on every frame."""
+
+    EVERY = 4
+
+    def __init__(self) -> None:
+        self.plate = Plate()
+        self._fill: np.ndarray | None = None
+        self._age = 0
+
+    def apply(self, frame: np.ndarray, points: np.ndarray, own: OwnHead) -> np.ndarray:
+        """``frame`` with the hair painted over (a copy)."""
+        from backend.video.blend import paste
+
+        if own.empty:
+            return frame
+        matrix = alignment(points, HEAD_TEMPLATE, SIZE)
+        self._age -= 1
+        if self._fill is None or self._age <= 0:
+            crop, _ = head_crop(frame, points)
+            fill = cover(crop, own)
+            known = self.plate.in_crop(matrix)
+            if known is not None:
+                fill = cv2.blendLinear(np.clip(known[0], 0, 255).astype(np.uint8), fill, known[1], 1.0 - known[1])
+            self._fill, self._age = fill, self.EVERY
+        return paste(frame, self._fill, own.paint, matrix)
 
 
 def over(frame: np.ndarray, image: np.ndarray, x: int, y: int, inplace: bool = False) -> np.ndarray:

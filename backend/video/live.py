@@ -13,9 +13,10 @@ import logging
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
+import cv2
 import numpy as np
 
 from backend.video.engine import FaceEngine, HeadLayer, Key, Tracked
@@ -26,6 +27,7 @@ MAX_KEYS_PER_SECOND = 30.0
 KEEP_KEYS_SECONDS = 2.0
 HEAD3D_IN_FLIGHT = 2        # frames with the 3D head's process at once (a frame between gets the newest)
 HEAD3D_WAIT = 0.15          # how long a frame waits for its own 3D head render
+FRINGE_SHARE = 0.02         # of the head crop: hair over the face from here on counts as a fringe
 HEAD3D_REUSE = 0.2          # a render this much older still dresses a frame whose own did not come
 
 
@@ -47,8 +49,9 @@ class LiveFaceSession:
         self.engine = engine
         self.head3d = head3d
         self._layers3d: dict[int, Any] = {}   # avatar.Layer (or None: no face there)
-        self._latest3d: tuple[float, Any] | None = None
+        self._latest3d: tuple[float, Any, Any] | None = None   # (time, layer, the five points then)
         self._next_seq = 0
+        self._fringe: bool | None = None
         self._done_seq = -1
         engine.hair_from_3d = head3d is not None
         if head3d is not None:
@@ -131,6 +134,16 @@ class LiveFaceSession:
             self.frames_in += 1
             self._condition.notify_all()
 
+    def _tell_fringe(self) -> None:
+        """The head process comes down to the eyelids only for a speaker with a fringe."""
+        own = self.engine._own
+        if self.head3d is None or own is None:
+            return
+        fringe = own.fringe is not None and float(own.fringe.mean()) > FRINGE_SHARE
+        if fringe != self._fringe:
+            self._fringe = fringe
+            self.head3d.send("fringe", fringe)
+
     def _layer3d(self, record: _Record):
         """The 3D head's layer for this frame (or the newest one, if close in time)."""
         layer = None
@@ -140,10 +153,29 @@ class LiveFaceSession:
             for late in [seq for seq in self._layers3d if seq < record.seq]:
                 del self._layers3d[late]
         if layer is not None:
-            self._latest3d = (record.t, layer)
+            self._latest3d = (record.t, layer, record.tracked.points)
         elif self._latest3d is not None and abs(record.t - self._latest3d[0]) < HEAD3D_REUSE:
-            layer = self._latest3d[1]
+            # The newest render, moved from where the face was then to where it is now: the hair
+            # stays on the head, not a frame behind it.
+            layer = self._moved(self._latest3d[1], self._latest3d[2], record.tracked.points)
         return layer
+
+    @staticmethod
+    def _moved(layer, before, now):
+        if before is None or now is None:
+            return layer
+        matrix, _ = cv2.estimateAffinePartial2D(before.astype(np.float32), now.astype(np.float32), method=cv2.LMEDS)
+        if matrix is None:
+            return layer
+        height, width = layer.image.shape[:2]
+        corners = cv2.transform(np.array([[[layer.x, layer.y], [layer.x + width, layer.y], [layer.x, layer.y + height],
+                                           [layer.x + width, layer.y + height]]], np.float32), matrix)[0]
+        x0, y0 = np.maximum(np.floor(corners.min(0)).astype(int), 0)
+        x1, y1 = np.ceil(corners.max(0)).astype(int)
+        local = matrix.copy()
+        local[:, 2] += matrix[:, :2] @ np.array([layer.x, layer.y], np.float64) - (x0, y0)
+        image = cv2.warpAffine(layer.image, local, (int(x1 - x0), int(y1 - y0)), flags=cv2.INTER_LINEAR)
+        return replace(layer, x=int(x0), y=int(y0), image=image)
 
     # --- Keyframes (worker thread) ----------------------------------------
 
@@ -232,6 +264,7 @@ class LiveFaceSession:
                 self._records.popleft()
                 before, after = self._around(record.t)
                 layer3d = self._layer3d(record) if self.head3d is not None else None
+                self._tell_fringe()
             started = time.perf_counter()
             if self.engine.identity is None:
                 frame = record.frame

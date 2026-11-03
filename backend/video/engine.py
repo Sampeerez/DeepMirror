@@ -344,6 +344,7 @@ class FaceEngine:
     # The 3D head gives the hair (and ears, hairline, outline) on every frame instead of the photo's
     # cut-out: compose() gets it per frame, and the speaker's own ears are painted over too.
     hair_from_3d: bool = False
+    _painter: hairs.OwnPaint = field(default_factory=hairs.OwnPaint)   # over the speaker's own hair
 
     def set_identity(self, embedding: np.ndarray | None) -> None:
         self.identity = embedding
@@ -495,6 +496,8 @@ class FaceEngine:
             with self.arbiter.video(self._parse_ms, timeout=0.0) as granted:
                 if granted:
                     self._own = hairs.parse_own(crop, parser, t, ears=self.hair_from_3d)
+                    if self.hair_from_3d:
+                        self._painter.plate.update(frame, tracked.points, self._own)
 
     def _frontal_photo(self) -> tuple[np.ndarray, Face | None]:
         """The face's photo the hair is cut from: the most frontal one (the hair of a turned head
@@ -689,7 +692,7 @@ class FaceEngine:
             return frame
         if layer3d is not None:
             if self._own is not None:
-                frame = hairs.paint_own(frame, tracked.points, self._own)
+                frame = self._painter.apply(frame, tracked.points, self._own)
             swapped = self._swap_onto(frame, tracked, t, before, after, keys_per_second, None, None, 0.0)
             return hairs.over(swapped, layer3d.image, layer3d.x, layer3d.y, inplace=swapped is not frame)
         # The head was rendered for one head turn; placed on a frame turned further it would show

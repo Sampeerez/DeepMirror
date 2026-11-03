@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import os
+
+# Before anything loads OpenMP or MKL (PyTorch, FAISS, NumPy): their idle threads sleep. By default
+# they spin between jobs, and between the voice's chunks that burnt about 10 of 16 cores, taken
+# from the voice's own detection and from the video. Children inherit this.
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+os.environ.setdefault("KMP_BLOCKTIME", "0")
+os.environ.setdefault("MKL_DYNAMIC", "FALSE")
+
 import argparse
 import logging
-import os
+import sys
 import threading
 import time
 import urllib.request
@@ -72,6 +81,9 @@ def main(argv: list[str] | None = None) -> None:
 
     # Every process the studio starts (face, head) ends with it, however it ends.
     contain_children()
+    # The voice gives up the GIL at each call into its models, some twenty times per chunk, and may
+    # wait this long each time to get it back from the video's threads (5 ms by default).
+    sys.setswitchinterval(0.001)
 
     def ready() -> None:
         print(f"\n  {APP_NAME} is running at {url}\n  Press Ctrl+C here to stop it.\n", flush=True)

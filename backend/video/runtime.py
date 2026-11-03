@@ -45,6 +45,9 @@ def session(path: Path, *, gpu: bool, threads: int | None = None):
     options.log_severity_level = 3
     if threads is not None:
         options.intra_op_num_threads = threads
+    # Idle threads sleep instead of spinning: spinning burns whole cores between frames, and those
+    # cores are the live voice's.
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
     providers: list = ["CPUExecutionProvider"]
     accelerated = gpu_providers() if gpu else ()
     if "CUDAExecutionProvider" in accelerated:

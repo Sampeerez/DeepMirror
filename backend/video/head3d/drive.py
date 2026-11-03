@@ -55,14 +55,25 @@ FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365
              176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
 NOT_SKIN = [[70, 63, 105, 66, 107, 133, 144, 145, 153, 33], [336, 296, 334, 293, 300, 263, 373, 374, 380, 362],
             [61, 39, 37, 0, 267, 269, 291, 405, 314, 17, 84, 181]]
+FRINGE_WHITE = 0.8     # a Gaussian's darkest channel above this may be the build's white, not the person's
+HAIR_NODES = 32        # guide nodes of the hair's motion
+HAIR_ROOT, HAIR_TIP = 0.004, 0.05    # metres from the scalp where a Gaussian starts to follow, and follows fully
+HAIR_STIFF, HAIR_DAMP, HAIR_TIE = 60.0, 7.0, 25.0   # the springs (1/s^2, 1/s, 1/s^2)
+HAIR_GRAVITY, HAIR_INERTIA = 0.25, 0.03             # how strongly gravity and the head's motion pull
+HAIR_REACH = 0.025     # metres: the most a node moves
 # The five points the studio places faces by (eyes, nose tip, mouth corners), from MediaPipe's mesh.
 FIVE = [(33, 133), (362, 263), (4,), (61,), (291,)]
 FLAME = "./model_zoo/human_parametric_models/flame_assets/flame"
-RENDER_MIN, RENDER_MAX = 256, 384   # render side, pixels: the head's size on screen, within these (GPU: the voice first)
+RENDER_MIN = 256       # render side, pixels: the head's size on screen, down to this...
+RENDER_STEPS = (256, 320, 384, 448, 512, 640, 768, 1024)   # ...and up to one of these, as far as the GPU has room
+RENDER_START = 2       # (384)
+RENDER_BUDGET_VOICE, RENDER_BUDGET = 9.0, 16.0    # ms a render may take with the voice streaming, and without
 FRAME_MARGIN = 1.10    # the rendered square: the head's projected extent and this margin
-EDGE_LOW, EDGE_HIGH = 0.2, 0.75   # alpha contrast at the head's outline (Gaussians fade softly)
-SHARPEN = 0.5          # unsharp mask amount on the rendered head
+EDGE_LOW, EDGE_HIGH = 0.08, 0.7   # alpha contrast at the head's outline: soft enough to keep fine strands
+EDGE_DEPTH = 7         # pixels: how far inside the outline the fringe takes its colour from
+SHARPEN = 0.35         # unsharp mask amount on the rendered head
 HOLE_RISE = 0.04       # the face hole's top: just above the upper eyelids
+HOLE_RISE_BARE = 0.42  # without a fringe: up the forehead (eye distances above the upper eyelids)
 HOLE_INSET = 0.9       # above the nose the hole is this much of the face (the swap's fade lies on 3D skin)
 HOLE_WIDEN = 1.18      # below the nose the hole is this much wider than the face
 HOLE_SOFT = 0.006      # its fade, in face widths (short: a half-faded 3D forehead shows what is under it)
@@ -70,10 +81,11 @@ HOLE_SOFT = 0.006      # its fade, in face widths (short: a half-faded 3D forehe
 # (they move with its brow blendshapes): a face swap of a forehead under a fringe draws the fringe's
 # shadow, and the worn person's brows are part of who they are.
 BROWS = [33, 246, 161, 160, 159, 158, 157, 173, 133, 362, 398, 384, 385, 386, 387, 388, 466, 263]
-FOCAL = 0.96           # assumed webcam focal length, in frame widths (~55 degrees across)
+FOCAL = 0.96           # a webcam's usual focal length, in frame widths (~55 degrees across)
 DETECT_WIDTH = 640     # MediaPipe reads a copy this wide (its landmarks are relative: no loss)
 NECK_FADE = 0.012      # metres below the chin over which the photo's neck fades out
 LIGHT_FOLLOW = 0.25    # share of the new light estimate taken each frame
+LIGHT_EVERY = 4        # frames between light measures (the light hardly changes in between)
 LIGHT_SIZE = 128       # the render's copy the light is measured on
 
 
@@ -148,6 +160,11 @@ class Head:
         neck_cut = (1 - 2 * neck_up.to(device)).clamp(0, 1)
         self.opacity = (data["opacity"].float().to(device) * neck_cut * (1 - below)).contiguous()
         self._landmarks = (faces[:, 17:68], bary[:, 17:68], vertices2landmarks)
+        with torch.no_grad():
+            scalp = self.flame.get_cano_verts(betas)[0]
+        reach = (self.xyz - scalp).norm(dim=1) * (self.opacity[:, 0] > 0.05).float()   # how far from the scalp
+        self.rgb = without_white_fringe(self.xyz, self.rgb)
+        self.hair = HairMotion(self.xyz, reach)
         # The head's own extent (what is visible of it, hair included): the render is framed on it,
         # so no pose ever cuts the hair or the chin. Offsets from the root joint, 8 corners.
         # (Percentiles: a few stray Gaussians must not blow the frame up and leave the head a few
@@ -182,6 +199,9 @@ class Head:
             pose=pose, v_shaped=self.v_shaped, posedirs=self.flame.posedirs, parents=self.flame.parents,
             J_regressor=self.flame.J_regressor, pose2rot=True, dtype=torch.float32)
         moved = self.xyz + torch.einsum("k,kvc->vc", weights, self.arkit_up)
+        sway = self.hair.displacement(device)
+        if sway is not None:
+            moved = moved + sway
         moved = self.flame.skinning(v_posed=moved[None], A=transforms, lbs_weights=self.flame.lbs_weights_up,
                                     batch_size=1, num_joints=self.flame.joint_num, dtype=torch.float32,
                                     device=device)[0]
@@ -203,9 +223,46 @@ class Head:
             campos=torch.zeros(3, device=device), prefiltered=False, debug=False)
         image, _, _, alpha = GaussianRasterizer(settings)(
             means3D=moved, means2D=torch.zeros_like(moved), shs=None, colors_precomp=self.rgb,
-            opacities=self.opacity, scales=self.scaling, rotations=self.rotation, cov3D_precomp=None)
+            opacities=self.opacity, scales=self.scaling, rotations=turned_quaternions(self.rotation, R),
+            cov3D_precomp=None)
         bgr = image.flip(0) / alpha.clamp(min=1e-3)
         return torch.cat([bgr, alpha], 0).permute(1, 2, 0).clamp(0, 1)
+
+
+def without_white_fringe(xyz: torch.Tensor, rgb: torch.Tensor) -> torch.Tensor:
+    """Colours with the build's white background taken out. LAM builds against white, so Gaussians
+    around the hair's outline are nearly white (a pale line along it; a blond head's highlights stay
+    below the limit). They take the colour of their nearest ordinary neighbours."""
+    whiteness = rgb.min(dim=1).values
+    white = whiteness > max(FRINGE_WHITE, float(torch.quantile(whiteness, 0.98)) if len(whiteness) else 1.0)
+    white |= whiteness > 0.9
+    plain = torch.nonzero(~white)[:, 0]
+    if not white.any() or len(plain) < 16:
+        return rgb
+    fixed = rgb.clone()
+    for chunk in torch.nonzero(white)[:, 0].split(2048):
+        nearest = torch.cdist(xyz[chunk], xyz[plain]).topk(8, largest=False).indices
+        fixed[chunk] = rgb[plain[nearest]].median(dim=1).values
+    return fixed
+
+
+def turned_quaternions(quaternions: torch.Tensor, rotation: torch.Tensor) -> torch.Tensor:
+    """The Gaussians' orientations (w, x, y, z) turned with the head. LAM moves their centres only:
+    long thin Gaussians (hair strands) would keep pointing the same way while the head turns."""
+    m = rotation
+    w = torch.sqrt((1 + m[0, 0] + m[1, 1] + m[2, 2]).clamp(min=1e-8)) / 2
+    if w < 1e-3:   # a half turn: the formula below has no w to divide by
+        i = int(torch.argmax(torch.diagonal(m)))
+        j, k = (i + 1) % 3, (i + 2) % 3
+        s = torch.sqrt((1 + m[i, i] - m[j, j] - m[k, k]).clamp(min=1e-8)) * 2
+        v = [0.0, 0.0, 0.0]
+        v[i], v[j], v[k] = s / 4, (m[j, i] + m[i, j]) / s, (m[k, i] + m[i, k]) / s
+        w, x, y, z = (m[k, j] - m[j, k]) / s, v[0], v[1], v[2]
+    else:
+        x, y, z = (m[2, 1] - m[1, 2]) / (4 * w), (m[0, 2] - m[2, 0]) / (4 * w), (m[1, 0] - m[0, 1]) / (4 * w)
+    q0, q1, q2, q3 = quaternions.unbind(-1)
+    return torch.stack([w * q0 - x * q1 - y * q2 - z * q3, w * q1 + x * q0 + y * q3 - z * q2,
+                        w * q2 - x * q3 + y * q0 + z * q1, w * q3 + x * q2 - y * q1 + z * q0], -1)
 
 
 def solve_pose(model: np.ndarray, points: np.ndarray, camera: np.ndarray, rvec=None, tvec=None):
@@ -239,6 +296,111 @@ def _bgr(ycc):
     return stack([b, (y - 0.299 * r - 0.114 * b) / 0.587, r], -1)
 
 
+class RenderBudget:
+    """How large the head may render: as sharp as this GPU allows next to the voice. A step up only
+    when the render is well under budget at the present limit, a step down at once when over it."""
+
+    def __init__(self) -> None:
+        self.step = RENDER_START
+        self.calm = 0
+
+    @property
+    def limit(self) -> int:
+        return RENDER_STEPS[self.step]
+
+    def update(self, render_ms: float, size: int, voice: bool) -> None:
+        allowed = RENDER_BUDGET_VOICE if voice else RENDER_BUDGET
+        if render_ms > allowed and self.step > 0:
+            self.step -= 1
+            self.calm = 0
+        elif size >= self.limit and render_ms < 0.55 * allowed and self.step < len(RENDER_STEPS) - 1:
+            self.calm += 1
+            if self.calm >= 60:
+                self.step += 1
+                self.calm = 0
+        else:
+            self.calm = 0
+
+
+class HairMotion:
+    """The hair's own motion: a few guide nodes among the hair Gaussians, each a damped spring pulled
+    by the head's acceleration and by gravity as the head tilts (in the head's own frame), and
+    tied to its neighbours. The further a Gaussian sits from the scalp, the more it follows them,
+    so short hair barely moves and long hair sways. No training and no network: well under a
+    millisecond a frame. (The idea of cage-driven hair in CompHairHead; motion from angular velocity,
+    acceleration and relative gravity as in DynHair.)"""
+
+    def __init__(self, xyz: torch.Tensor, reach: torch.Tensor, nodes: int = HAIR_NODES) -> None:
+        device = xyz.device
+        self.weight = ((reach - HAIR_ROOT) / HAIR_TIP).clamp(0, 1)[:, None]
+        hair = self.weight[:, 0] > 0.02
+        self.active = int(hair.sum()) >= nodes * 4
+        if not self.active:
+            return
+        points = xyz[hair]
+        # Guide nodes: well-spread hair Gaussians (farthest-point sampling).
+        chosen = [int(torch.argmax(self.weight[hair, 0]))]
+        distance = torch.full((len(points),), 1e9, device=device)
+        for _ in range(nodes - 1):
+            distance = torch.minimum(distance, ((points - points[chosen[-1]]) ** 2).sum(1))
+            chosen.append(int(torch.argmax(distance)))
+        centres = points[chosen]
+        # Each hair Gaussian follows its nearest nodes, softly.
+        near = torch.cdist(xyz, centres)
+        values, self.index = near.topk(3, largest=False)
+        soft = torch.softmax(-values / 0.015, dim=1)
+        self.blend = soft * self.weight
+        between = torch.cdist(centres, centres).cpu().numpy()
+        self.neighbours = np.argsort(between, axis=1)[:, 1:5]
+        # Tips swing more freely than what sits near the scalp.
+        tip = self.weight[hair, 0][chosen].cpu().numpy()
+        self.stiffness = HAIR_STIFF * (1.6 - 0.8 * tip)[:, None]
+        self.offset = np.zeros((nodes, 3), np.float64)
+        self.velocity = np.zeros((nodes, 3), np.float64)
+        self.reset()
+
+    def reset(self) -> None:
+        self.last_t = None
+        self.last_position = None
+        self.last_velocity = None
+        if self.active:
+            self.offset[:] = 0.0
+            self.velocity[:] = 0.0
+
+    def step(self, t: float, rotation: np.ndarray, position: np.ndarray) -> None:
+        """Advance to time ``t`` with the head at ``rotation``, ``position`` (camera frame, y down)."""
+        if not self.active:
+            return
+        if self.last_t is None or t <= self.last_t or t - self.last_t > 0.3:
+            self.last_t, self.last_position, self.last_velocity = t, position.copy(), np.zeros(3)
+            self.offset *= 0.5
+            self.velocity[:] = 0.0
+            return
+        dt = t - self.last_t
+        velocity = (position - self.last_position) / dt
+        acceleration = (velocity - self.last_velocity) / dt
+        self.last_t, self.last_position, self.last_velocity = t, position.copy(), velocity
+        # In the head's own frame: gravity (camera +y is down) and the head's acceleration the other way.
+        drive = rotation.T @ (np.array([0.0, 9.81, 0.0]) * HAIR_GRAVITY - np.clip(acceleration, -30.0, 30.0))
+        rest = rotation.T @ (np.array([0.0, 9.81, 0.0]) * HAIR_GRAVITY)   # hanging as in the photo: no shift
+        force = (drive - rest) * HAIR_INERTIA
+        tied = self.offset[self.neighbours].mean(1)
+        for _ in range(max(1, int(dt / 0.012))):
+            h = dt / max(1, int(dt / 0.012))
+            pull = force - self.stiffness * self.offset - HAIR_DAMP * self.velocity + HAIR_TIE * (tied - self.offset)
+            self.velocity += h * pull
+            self.offset += h * self.velocity
+        self.offset = np.clip(self.offset, -HAIR_REACH, HAIR_REACH)
+        self.last_t = t
+
+    def displacement(self, device) -> torch.Tensor | None:
+        """Each Gaussian's displacement now (head frame), or None without hair to move."""
+        if not self.active:
+            return None
+        offsets = torch.from_numpy(self.offset).float().to(device)
+        return (offsets[self.index] * self.blend[..., None]).sum(1)
+
+
 class Light:
     """The head's light moved to the speaker's: statistics of the skin inside the face (eyes, brows
     and mouth left out), in the frame and in the head's render; brightness and contrast fully, the
@@ -249,7 +411,7 @@ class Light:
         self.reset()
 
     def reset(self) -> None:
-        self.gain, self.shift = 1.0, np.zeros(3, np.float32)
+        self.gain, self.shift, self.slope = 1.0, np.zeros(3, np.float32), 0.0
 
     @staticmethod
     def _skin(shape, mesh: np.ndarray) -> np.ndarray:
@@ -280,13 +442,23 @@ class Light:
         shift[1:] *= 0.6
         self.gain += LIGHT_FOLLOW * (gain - self.gain)
         self.shift += LIGHT_FOLLOW * (shift - self.shift)
+        # Where the light comes from: the speaker's skin brighter on one side than the head's is.
+        def tilt(mask, picture):
+            middle = (np.nonzero(mask)[1].min() + np.nonzero(mask)[1].max()) / 2
+            xs = np.nonzero(mask)[1]
+            luma = _ycc(picture)[..., 0][mask]
+            return float(luma[xs > middle].mean() - luma[xs <= middle].mean()) if (xs > middle).any() and (xs <= middle).any() else 0.0
+
+        slope = tilt(theirs_mask, crop.astype(np.float32) / 255.0) - tilt(ours_mask, small[..., :3].astype(np.float32))
+        self.slope += LIGHT_FOLLOW * (float(np.clip(slope, -0.25, 0.25)) - self.slope)
 
     def apply(self, image: torch.Tensor) -> torch.Tensor:
         """``image``: H x W x 4 (BGR, straight alpha, 0..1) on the GPU."""
         ycc = _ycc(image[..., :3])
         tone = ((ycc[..., :1] - 0.24) / 0.27).clamp(0, 1)
         shift = torch.as_tensor(self.shift, device=image.device)
-        ycc = torch.cat([ycc[..., :1] * self.gain + shift[0], ycc[..., 1:] + shift[1:] * tone], -1)
+        across = torch.linspace(-1.0, 1.0, image.shape[1], device=image.device)[None, :, None]
+        ycc = torch.cat([ycc[..., :1] * self.gain + shift[0] + self.slope * across, ycc[..., 1:] + shift[1:] * tone], -1)
         return torch.cat([_bgr(ycc).clamp(0, 1), image[..., 3:]], -1)
 
 
@@ -316,17 +488,19 @@ def clean_edges(image: torch.Tensor) -> torch.Tensor:
     colour, alpha = planes[:3], planes[3:]
     shaped = ((alpha - EDGE_LOW) / (EDGE_HIGH - EDGE_LOW)).clamp(0, 1)
     shaped = shaped * shaped * (3 - 2 * shaped)
-    core = (alpha > 0.92).float()
-    blurred = _blur(torch.cat([colour * core, core]), 2.0)
+    # The fringe's colour: from well inside the outline (even opaque Gaussians on the outline carry
+    # the white the head was built against).
+    core = -torch.nn.functional.max_pool2d(-(alpha > 0.92).float()[None], EDGE_DEPTH, 1, EDGE_DEPTH // 2)[0]
+    blurred = _blur(torch.cat([colour * core, core]), 3.0)
     weight = blurred[3:]
     inside = blurred[:3] / weight.clamp(min=1e-4)
-    fringe = (1 - core) * (weight > 0.05).float()
+    fringe = (1 - core) * (weight > 0.02).float()
     colour = colour * (1 - fringe) + inside * fringe
     colour = colour + SHARPEN * (colour - _blur(colour, 1.0))
     return torch.cat([colour.clamp(0, 1), shaped]).permute(1, 2, 0)
 
 
-def face_hole(shape: tuple[int, int], mesh: np.ndarray) -> np.ndarray:
+def face_hole(shape: tuple[int, int], mesh: np.ndarray, fringe: bool = True) -> np.ndarray:
     """0..1 where the face swap shows instead of the 3D head: the face itself (from just above the
     brows; the 3D forehead and hairline overlap the swap's top) and, below the nose, everything a
     little wider than the face down to the bottom (the photo's jaw and stubble never ring the
@@ -335,7 +509,9 @@ def face_hole(shape: tuple[int, int], mesh: np.ndarray) -> np.ndarray:
     chin, between = mesh[152], (mesh[33] + mesh[263]) / 2
     up = (between - chin) / (np.linalg.norm(between - chin) or 1.0)
     side = np.array([up[1], -up[0]])
-    brows = mesh[BROWS] + up * eyes * HOLE_RISE
+    # With a fringe the forehead's swap draws the fringe's shadow: the 3D head comes down to the
+    # eyelids. Without one the swap, the speaker's own skin, goes up the forehead to the hairline.
+    brows = mesh[BROWS] + up * eyes * (HOLE_RISE if fringe else HOLE_RISE_BARE)
     line = float(np.dot(brows.mean(0), up))
     oval = mesh[FACE_OVAL]
     # Above the nose the hole sits a little inside the face: the swap's soft edge then fades into
@@ -365,7 +541,10 @@ def below_normal_priority() -> None:
     if sys.platform == "win32":
         import ctypes
 
-        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p   # pointer-sized, or the pseudo-handle is cut
+        kernel32.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+        kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x4000)
     else:
         os.nice(5)
 
@@ -400,12 +579,15 @@ def main() -> None:
     cv2.setNumThreads(2)
     head: Head | None = None
     light = Light()
+    budget = RenderBudget()
     tracked: queue.Queue = queue.Queue(maxsize=2)
-    state: dict = {"rvec": None, "tvec": None, "weights": None, "stamp": 0, "hole": True,
+    state: dict = {"rvec": None, "tvec": None, "weights": None, "stamp": 0, "hole": True, "fringe": False,
                    "rotation": OneEuro(min_cutoff=1.2, beta=0.6), "position": OneEuro(min_cutoff=1.2, beta=4.0)}
     timings = {"track_ms": 0.0, "render_ms": 3.0, "render_size": 0}
 
     def reset() -> None:
+        if head is not None:
+            head.hair.reset()
         state["rvec"] = state["tvec"] = state["weights"] = None
         state["rotation"].x = state["position"].x = None
         light.reset()
@@ -434,9 +616,9 @@ def main() -> None:
             weights = torch.where(FAST, weights, 0.6 * weights + 0.4 * state["weights"])
         state["weights"] = weights
         weights = weights.to("cuda")
+        model = head.landmarks(weights)
         focal = FOCAL * max(width, height)
         camera = np.array([[focal, 0, width / 2], [0, focal, height / 2], [0, 0, 1]])
-        model = head.landmarks(weights)
         ok, rvec, tvec = solve_pose(model, points, camera, state["rvec"], state["tvec"])
         if not ok:
             send("layer", seq, None, timings)
@@ -445,8 +627,8 @@ def main() -> None:
         smooth_r = state["rotation"](rvec.ravel(), t)
         smooth_t = state["position"](tvec.ravel(), t)
         timings["track_ms"] = 0.9 * timings["track_ms"] + 0.1 * (time.perf_counter() - started) * 1000
-        tracked.put((seq, frame, mesh, weights, cv2.Rodrigues(smooth_r.reshape(3, 1))[0], smooth_t, model, points,
-                     camera))
+        rotation = cv2.Rodrigues(smooth_r.reshape(3, 1))[0]
+        tracked.put((seq, t, frame, mesh, weights, rotation, smooth_t, model, points, camera))
 
     def render_loop() -> None:
         while True:
@@ -462,9 +644,10 @@ def main() -> None:
             timings["layer_ms"] = 0.9 * timings.get("layer_ms", 0.0) + 0.1 * (time.perf_counter() - started) * 1000
             send("layer", item[0], layer, timings)
 
-    def place(frame, mesh, weights, rotation, translation, model, points, camera):
+    def place(t, frame, mesh, weights, rotation, translation, model, points, camera):
         """The head layer for one tracked frame: (x, y, width, height, BGRA bytes, five points), or None."""
         height, width = frame.shape[:2]
+        head.hair.step(t, rotation, translation)
         # Framed on the head's own 3D extent (hair and chin included, with a margin for the jaw and
         # for expressions), so nothing of it is ever cut off.
         corners = (rotation @ head.corners.T).T + translation
@@ -479,7 +662,7 @@ def main() -> None:
         distance = float(np.linalg.norm(centre))
         span = side_px * depth / camera[0, 0]
         # Rendered at about the size it has on screen: sharp, and no GPU spent on pixels never seen.
-        size = int(min(RENDER_MAX, max(RENDER_MIN, round(side_px / 32) * 32)))
+        size = int(min(budget.limit, max(RENDER_MIN, round(side_px / 32) * 32)))
         # A camera at the same place turned to look at the head: the head fills the render.
         z = centre / distance
         x = np.cross([0.0, 1.0, 0.0], z)
@@ -495,13 +678,19 @@ def main() -> None:
             inner = np.array([[focal, 0, size / 2], [0, focal, size / 2], [0, 0, 1]])
             warp = camera @ look.T @ np.linalg.inv(inner)
             # The light: measured on a small copy of the render (and the face in it), applied here.
-            small = torch.nn.functional.interpolate(image.permute(2, 0, 1)[None], size=(LIGHT_SIZE, LIGHT_SIZE),
-                                                    mode="area")[0].permute(1, 2, 0).cpu().numpy()
-            in_render = cv2.perspectiveTransform(mesh[None].astype(np.float64), np.linalg.inv(warp))[0]
-            light.measure(small, in_render * (LIGHT_SIZE / size), frame, mesh)
+            small = None
+            if timings.setdefault("frames", 0) % LIGHT_EVERY == 0:
+                small = torch.nn.functional.interpolate(image.permute(2, 0, 1)[None], size=(LIGHT_SIZE, LIGHT_SIZE),
+                                                        mode="area")[0].permute(1, 2, 0).cpu().numpy()
+            timings["frames"] += 1
             image = (light.apply(image) * 255).to(torch.uint8).cpu().numpy()
             timings["render_ms"] = 0.9 * timings["render_ms"] + 0.1 * (time.perf_counter() - started) * 1000
             timings["render_size"] = size
+            budget.update(timings["render_ms"], size, arbiter.gap() is not None)
+        # The GPU's turn is over: the voice must never wait for CPU work done while holding it.
+        if small is not None:
+            in_render = cv2.perspectiveTransform(mesh[None].astype(np.float64), np.linalg.inv(warp))[0]
+            light.measure(small, in_render * (LIGHT_SIZE / size), frame, mesh)
         quad = cv2.perspectiveTransform(np.array([[[0, 0], [size, 0], [0, size], [size, size]]], np.float64), warp)[0]
         x0, y0 = np.maximum(np.floor(quad.min(0)).astype(int), 0)
         x1, y1 = np.minimum(np.ceil(quad.max(0)).astype(int), [width, height])
@@ -511,7 +700,7 @@ def main() -> None:
         warped = cv2.warpPerspective(image, shift @ warp, (int(x1 - x0), int(y1 - y0)), flags=cv2.INTER_LINEAR)
         local = mesh - [x0, y0]
         if state["hole"]:   # the face swap fills the face
-            warped[..., 3] = (warped[..., 3] * (1.0 - face_hole(warped.shape[:2], local))).astype(np.uint8)
+            warped[..., 3] = (warped[..., 3] * (1.0 - face_hole(warped.shape[:2], local, state["fringe"]))).astype(np.uint8)
         five = [[float(v) for v in mesh[list(group)].mean(0)] for group in FIVE]
         return int(x0), int(y0), int(x1 - x0), int(y1 - y0), warped.tobytes(), five
 
@@ -534,6 +723,8 @@ def main() -> None:
                     send("loaded", message[1], f"{type(exc).__name__}: {exc}")
             elif kind == "hole":   # whether the face is left to the face swap (the default)
                 state["hole"] = bool(message[1])
+            elif kind == "fringe":  # whether the speaker's hair falls over their forehead
+                state["fringe"] = bool(message[1])
             elif kind == "frame":
                 _, seq, t, width, height, data = message
                 frame = np.frombuffer(data, np.uint8).reshape(height, width, 3)

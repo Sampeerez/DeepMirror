@@ -75,3 +75,18 @@ def test_on_windows_the_job_takes_every_child_with_the_server():
     while _alive(child_pid) and time.monotonic() < deadline:
         time.sleep(0.2)
     assert not _alive(child_pid)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows priority classes")
+def test_lowering_the_priority_really_lowers_it():
+    script = textwrap.dedent("""
+        import ctypes
+        from backend.process_guard import lower_priority
+        lower_priority()
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.GetPriorityClass.argtypes = (ctypes.c_void_p,)
+        print(kernel32.GetPriorityClass(kernel32.GetCurrentProcess()))
+    """)
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True).stdout
+    assert int(out.strip()) == 0x4000

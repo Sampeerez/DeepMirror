@@ -19,7 +19,6 @@ import contextlib
 import json
 import logging
 import math
-import sys
 import threading
 import time
 from collections import deque
@@ -39,6 +38,7 @@ from backend.config import Settings
 from backend.inference.auto_pitch import AutoPitch, SpeakerProfile, auto_expressiveness
 from backend.inference.pipeline import ConversionSettings, VoiceConverter
 from backend.model_manager import ModelManager
+from backend.process_guard import raise_priority
 from backend.security import is_origin_allowed
 
 logger = logging.getLogger(__name__)
@@ -570,18 +570,6 @@ class StreamSession:
         return message
 
 
-def _raise_priority() -> None:
-    """Windows: run above normal priority, so a browser or a game in the background delays chunks less."""
-    if sys.platform != "win32":
-        return
-    import ctypes
-
-    above_normal = 0x8000
-    kernel32 = ctypes.windll.kernel32
-    if not kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), above_normal):
-        logger.debug("Could not raise the process priority")
-
-
 async def _read_config(websocket: WebSocket, session: StreamSession) -> bool:
     try:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
@@ -645,7 +633,7 @@ async def audio_websocket(websocket: WebSocket) -> None:
     if not await _read_config(websocket, session):
         return
     logger.info("Audio stream started: %d Hz, %d-sample chunks", session.sample_rate, session.chunk_size)
-    _raise_priority()
+    raise_priority()
 
     last_status = time.perf_counter()
     try:

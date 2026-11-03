@@ -72,13 +72,30 @@ def contain_children() -> bool:
     return True
 
 
+def _windows_priority(priority_class: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # Pointer-sized handles: with ctypes' default int the pseudo-handle is cut and the call fails.
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    return bool(kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), priority_class))
+
+
+def raise_priority() -> None:
+    """This process above normal CPU priority (the server, while the voice is live: a browser or a
+    game in the background delays its chunks less)."""
+    if sys.platform == "win32" and not _windows_priority(0x8000):
+        logger.debug("Could not raise this process's priority")
+
+
 def lower_priority() -> None:
     """This process below normal CPU priority: the live voice (in the server) comes first."""
     try:
         if sys.platform == "win32":
-            import ctypes
-
-            ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)
+            if not _windows_priority(0x4000):
+                logger.debug("Could not lower this process's priority")
         else:
             os.nice(5)
     except OSError:
