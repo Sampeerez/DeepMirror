@@ -1,13 +1,13 @@
 """Which engine clones the head on this computer, best first: measured on its own GPU, never assumed.
 
-personalive  diffusion: face and hair generated together (the most natural, the most expensive);
 head         LivePortrait, a render per frame: face and hair warped together from the photo;
 3d           the face swap dressed by a 3D head with hair physics;
 hair         the face swap and the photo's hair.
 
 "auto" takes the best one that fits; while it runs, ``EngineWatch`` goes down a level if the video
 cannot keep up or the voice starts arriving late. The voice always comes first. An engine the
-speaker chose by hand stays, whatever it costs.
+speaker chose by hand stays, whatever it costs. PersonaLive (diffusion) is only ever chosen by hand:
+it comes about a second late, so its lips would not follow the voice (see personalive/client.py).
 """
 
 from __future__ import annotations
@@ -26,9 +26,8 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 AUTO = "auto"
-LEVELS = ("personalive", "head", "3d", "hair")   # best first
+LEVELS = ("head", "3d", "hair")   # best first
 HEAD_LIVE_MS = 40.0          # LivePortrait: 25 renders a second, the frames between take the nearest
-PERSONALIVE_LIVE_MS = 83.0   # per frame: 12 fps, the least that still looks like motion
 
 WATCH_SECONDS = 15.0         # how long a problem must last before going down a level
 VIDEO_SHARE = 0.7            # of the camera's frame rate, below which the video does not keep up
@@ -52,11 +51,6 @@ def fits(engine: str, measured: dict) -> tuple[bool, str]:
         if ms is None:
             return False, "not measured yet"
         return ms <= HEAD_LIVE_MS, f"{ms:.0f} ms per frame (fits at {HEAD_LIVE_MS:.0f})"
-    if engine == "personalive":
-        ms = measured.get("personalive_ms")
-        if ms is None:
-            return False, "not measured yet"
-        return ms <= PERSONALIVE_LIVE_MS, f"{ms:.0f} ms per frame (fits at {PERSONALIVE_LIVE_MS:.0f})"
     return True, ""
 
 

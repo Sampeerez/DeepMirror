@@ -12,16 +12,15 @@ from backend.video.personalive import drive
 
 def test_auto_takes_the_best_that_fits():
     all_of_them = {"personalive", "head", "3d", "hair"}
-    assert he.choose("auto", all_of_them, {"personalive_ms": 60.0, "head_ms": 15.0}).engine == "personalive"
-    assert he.choose("auto", all_of_them, {"personalive_ms": 200.0, "head_ms": 15.0}).engine == "head"
-    assert he.choose("auto", all_of_them, {"personalive_ms": 200.0, "head_ms": 300.0}).engine == "3d"
+    assert he.choose("auto", all_of_them, {"head_ms": 15.0}).engine == "head"
+    assert he.choose("auto", all_of_them, {"head_ms": 300.0}).engine == "3d"
     assert he.choose("auto", {"head", "hair"}, {"head_ms": 300.0}).engine == "hair"
 
 
 def test_auto_says_why_and_never_relies_on_what_was_not_measured():
     choice = he.choose("auto", {"head", "3d", "hair"}, {"head_ms": 300.0})
     assert choice.engine == "3d" and "300 ms" in choice.reason
-    assert he.choose("auto", {"personalive", "head", "3d", "hair"}, {}).engine == "3d"
+    assert he.choose("auto", {"head", "3d", "hair"}, {}).engine == "3d"
 
 
 def test_an_engine_that_did_not_keep_up_is_skipped():
@@ -32,13 +31,15 @@ def test_an_engine_that_did_not_keep_up_is_skipped():
 
 def test_an_engine_chosen_by_hand_stays_if_it_is_there():
     assert he.choose("head", {"head", "hair"}, {"head_ms": 300.0}).engine == "head"
+    assert he.choose("personalive", {"personalive", "hair"}, {}).engine == "personalive"
     assert he.choose("face", {"hair"}, {}).engine == "face"
     missing = he.choose("personalive", {"head", "hair"}, {})
     assert missing.engine == "hair" and "not ready" in missing.reason
 
 
 def test_levels_go_down_to_the_last():
-    assert [he.next_level(level) for level in he.LEVELS] == ["head", "3d", "hair", None]
+    assert [he.next_level(level) for level in he.LEVELS] == ["3d", "hair", None]
+    assert he.next_level("personalive") is None
     assert he.next_level("face") is None
 
 
@@ -270,6 +271,42 @@ def test_drive_answers_in_fours_with_each_frames_number_and_time():
     seq, t, image = answers[1][1][1]
     assert seq == 5 and t == 5 / 16.0 and image.dtype == np.uint8 and image[0, 0, 0] == 127
     assert pipeline.chunks == [4, 4] and arbiter.asked == 3   # the photo and two chunks, through the arbiter
+
+
+def test_drive_gives_back_each_chunk_with_the_frames_it_shows():
+    # What comes out belongs to the frames handed in three chunks ago; the first three are its fade in.
+    frames = [("frame", seq, seq / 16.0, CROP) for seq in range(20)]
+    pipe = Pipe([("portrait", CROP), *frames, ("portrait", CROP), *frames[:12], ("stop",)])
+    pipeline = FakePipeline()
+    pipeline.temporal_adaptive_step = 4
+    drive.serve(pipe, pipeline, lambda crops: crops, FakeArbiter(), lambda crop: crop)
+    answers = [message for message in pipe.sent if message[0] in ("frames", "portrait_ready")]
+    assert answers[0] == ("portrait_ready",) and answers[3] == ("portrait_ready",)
+    assert [seq for seq, _, _ in answers[1][1]] == [0, 1, 2, 3]
+    assert [seq for seq, _, _ in answers[2][1]] == [4, 5, 6, 7]
+    assert len(answers) == 4   # a new photo starts its fade in again
+
+
+def test_drive_says_when_it_gives_nans():
+    class Broken(FakePipeline):
+        def process_input(self, images):
+            return np.full((len(images), 8, 8, 3), np.nan, np.float32)
+
+    pipe = Pipe([("portrait", CROP), ("measure",), ("stop",)])
+    drive.serve(pipe, Broken(), lambda crops: crops, FakeArbiter(), lambda crop: crop)
+    assert pipe.sent[1] == ("measured", None)
+
+
+def test_personalive_is_never_installed_without_being_chosen(tmp_path, monkeypatch):
+    from backend.video.personalive.client import PersonaLiveInstaller
+
+    installer = PersonaLiveInstaller(tmp_path)
+    started = []
+    monkeypatch.setattr(installer, "start", lambda: started.append(True))
+    monkeypatch.setattr(installer, "why_not", lambda: None)
+    monkeypatch.setattr(installer.install.__class__, "available", lambda self: False)
+    installer.start_if_needed()
+    assert not started
 
 
 def test_drive_ignores_frames_before_a_photo_and_starts_again_with_a_new_one():

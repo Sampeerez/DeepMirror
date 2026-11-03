@@ -1,13 +1,13 @@
 """Install PersonaLive (diffusion: the whole head generated, hair included) into models/personalive.
-Windows, NVIDIA GPU with 16 GB or more. Experimental.
+Windows, NVIDIA GPU with 12 GB or more. Experimental.
 
     uv run python scripts/setup_personalive.py [--status data/personalive-install.json]
 
-The studio runs this by itself on a computer that qualifies (backend/video/personalive/client.py);
+The studio runs this the first time Clone > AI is chosen (backend/video/personalive/client.py);
 OVC_PERSONALIVE=off turns that off. About 16 GB of downloads, each weight checked by SHA-256, in an
-environment of its own (Python 3.10, PyTorch 2.1). Then head_engines measures it on this GPU, and it
-is used only if it fits. Licence: code under Apache-2.0, but its authors release the project for
-academic research only; so it is for non-commercial use here too.
+environment of its own (Python 3.10, PyTorch 2.1): about 20 GB once installed. Licence: code under
+Apache-2.0, but its authors release the project for academic research only; so it is for
+non-commercial use here too.
 """
 
 from __future__ import annotations
@@ -71,6 +71,8 @@ SMOKE_TEST = """
 import sys, torch
 sys.path.insert(0, ".")
 assert torch.cuda.is_available()
+# A real operation: this PyTorch may have no kernels for the newest GPUs (it only fails when used).
+torch.nn.functional.conv2d(torch.zeros(1, 1, 4, 4).cuda(), torch.zeros(1, 1, 3, 3).cuda())
 import src.wrapper
 print(torch.cuda.get_device_name(0))
 """

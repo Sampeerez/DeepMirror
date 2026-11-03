@@ -1,6 +1,6 @@
 """How natural is the worn head? A benchmark with a ground truth, for any GPU.
 
-    uv run python scripts/bench_head.py <video of one person> <out folder> [--engine 3d|hair|face|head]
+    uv run python scripts/bench_head.py <video of one person> <out folder> [--engine 3d|hair|face|head|personalive]
         [--frames 300] [--photos 8] [--steps 0] [--tag name]
 
 The head is built from frames of the video and worn over the same person in the same video, so the
@@ -31,6 +31,7 @@ from backend.video import parser as parsing  # noqa: E402
 from backend.video.avatar import HEAD_FILE, HeadBuilder, HeadDriver, LamInstall  # noqa: E402
 from backend.video.engine import FaceEngine, FaceModels, VideoSettings, head_pose  # noqa: E402
 from backend.video.live import LiveFaceSession  # noqa: E402
+from backend.video.personalive.client import PersonaLiveHead, PersonaLiveInstall  # noqa: E402
 
 FACE_DIR = ROOT / "models" / "assets" / "face"
 YAW_BINS = (0.0, 0.1, 0.2, 0.35, 10.0)   # head_pose units: straight on, slight, turned, far
@@ -192,7 +193,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("video", type=Path)
     parser.add_argument("out", type=Path)
-    parser.add_argument("--engine", default="3d", choices=["3d", "hair", "face", "head"])
+    parser.add_argument("--engine", default="3d", choices=["3d", "hair", "face", "head", "personalive"])
     parser.add_argument("--frames", type=int, default=300)
     parser.add_argument("--photos", type=int, default=8)
     parser.add_argument("--steps", type=int, default=0, help="3D head training steps (0: LAM's head as built)")
@@ -211,7 +212,8 @@ def main() -> None:
         if args.rebuild:
             (folder / HEAD_FILE).unlink(missing_ok=True)
         build_head(folder, args.steps)
-    engine = FaceEngine(models, arbiter, VideoSettings(mode="hair" if args.engine == "3d" else args.engine))
+    mode = {"3d": "hair", "personalive": "head"}.get(args.engine, args.engine)
+    engine = FaceEngine(models, arbiter, VideoSettings(mode=mode))
     engine.set_identity(identity)
     engine.set_portrait(cv2.imread(str(folder / "photo_0.jpg")))
     engine.hair_photos = [str(path) for path in sorted(folder.glob("photo_*.jpg"))]
@@ -226,6 +228,13 @@ def main() -> None:
         if driver.error:
             sys.exit(f"The 3D head did not load: {driver.error}")
     head_ms = None
+    generated = None
+    if args.engine == "personalive":
+        generated = PersonaLiveHead(PersonaLiveInstall.default(), arbiter.name, engine, args.out / "personalive.log")
+        engine.remote = generated
+        head_ms = generated.measure(engine.portrait)
+        if head_ms is None:
+            sys.exit(f"PersonaLive did not run: {generated.error or 'see personalive.log (NaN or too slow)'}")
     if args.every_frame:
         started = time.monotonic()
         outputs, head_ms = run_every_frame(frames, fps, engine)
@@ -236,6 +245,8 @@ def main() -> None:
         session.close()
     if driver is not None:
         driver.close()
+    if generated is not None:
+        generated.close()
     metrics = measure(frames, outputs, models, fps)
     rows = metrics.pop("rows")
     tail = stats[2:] or stats

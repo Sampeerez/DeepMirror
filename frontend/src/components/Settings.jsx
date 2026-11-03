@@ -29,7 +29,7 @@ const THEMES = [
 const SWAPPER_NAMES = { hyperswap_1b_256: 'HyperSwap', inswapper_128: 'inswapper', ghost_1_256: 'GHOST' };
 // The clone engines (backend/video/head_engines.py).
 const ENGINE_NAMES = {
-  personalive: 'AI head (PersonaLive, experimental)',
+  personalive: 'AI head (PersonaLive, experimental): about a second behind the voice',
   head: "The photo's head, moving (LivePortrait)",
   '3d': '3D head',
   hair: 'Face + hair',
@@ -266,8 +266,9 @@ function Settings({
                 { value: 'auto', label: 'Auto', hint: stats?.engine
                   ? `${ENGINE_NAMES[stats.engine] || stats.engine}${stats.engine_reason ? ` · ${stats.engine_reason}` : ''}`
                   : 'The best that fits this PC' },
-                ...(face.status?.personalive?.state === 'ready'
-                  ? [{ value: 'personalive', label: 'AI', hint: ENGINE_NAMES.personalive }] : []),
+                ...(face.status?.personalive && (face.status.personalive.state !== 'unavailable' || !face.status.personalive.error)
+                  ? [{ value: 'personalive', label: 'AI', hint: face.status.personalive.state === 'ready'
+                    ? ENGINE_NAMES.personalive : `${ENGINE_NAMES.personalive}: about 20 GB, installed when chosen` }] : []),
                 { value: 'head', label: 'Head', hint: ENGINE_NAMES.head },
                 ...(face.status?.head3d || face.status?.head3d_install?.state === 'installing' ? [{
                   value: '3d', label: '3D', disabled: !face.status?.head3d,

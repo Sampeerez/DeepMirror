@@ -1,6 +1,7 @@
 """The studio's side of PersonaLive (experimental: diffusion, the whole head generated, hair included;
-16 GB or more, academic use only). It installs itself like the 3D head (scripts/setup_personalive.py)
-and runs as a process of its own; head_engines measures it on this GPU before anything relies on it.
+12 GB or more, academic use only). Chosen by hand only, and installed when first chosen (about 20 GB,
+scripts/setup_personalive.py): what it generates comes about a second after the camera, later than
+the voice, so lips and voice do not line up as with the other engines. Runs as a process of its own.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 SIZE = 512             # the crops it takes and gives
 RATE = 16.0            # frames per second it is given: what it was made for
-WAIT = 0.6             # how long a frame may wait for its generated head (they come in fours)
+WAIT = 1.3             # how long a frame may wait for its generated head: three chunks of four, plus their time
 KEEPS_UP = 8.0         # generated heads per second from which frames wait for their own
 DRIVER = Path(__file__).with_name("drive.py")
 
@@ -42,7 +43,7 @@ class PersonaLiveInstall(LamInstall):
 
 class PersonaLiveInstaller(Head3DInstaller):
     SCRIPT = "setup_personalive.py"
-    MIN_GPU_MB = 16000
+    MIN_GPU_MB = 12000   # measured: 7.9 GB of its own at most
     MIN_FREE_GB = 30
     OFF_VARIABLE = "OVC_PERSONALIVE"
     TITLE = "PersonaLive"
@@ -51,6 +52,11 @@ class PersonaLiveInstaller(Head3DInstaller):
         super().__init__(data_dir, PersonaLiveInstall.default(), on_ready)
         self.status_path = Path(data_dir) / "personalive-install.json"
         self.log_path = Path(data_dir) / "logs" / "personalive-install.log"
+
+    def start_if_needed(self) -> None:
+        """Never by itself: about 20 GB for an engine only chosen by hand. Says whether it could."""
+        if not self.install.available():
+            self._reason = self.why_not()
 
 
 class PersonaLiveHead:

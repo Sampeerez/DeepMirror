@@ -215,22 +215,6 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
             names.add("personalive")
         return names
 
-    def measure_diffusion() -> None:
-        """Once per GPU, when installed: it loads for a minute or so, and only with no voice streaming."""
-        if ("personalive_ms" in measured or not diffusion_install.available() or engine.portrait is None
-                or arbiter.gap() is not None):
-            return
-        trial = PersonaLiveHead(diffusion_install, arbiter_name, engine,
-                                Path(cache_path).parent.parent / "logs" / "personalive-measure.log")
-        try:
-            took = trial.measure(engine.portrait)
-        finally:
-            trial.close()
-        measured["personalive_ms"] = took if took is not None else 1e9   # it does not run here
-        head_engines.store_measured(engines_cache, measured)
-        log(logging.INFO, f"PersonaLive measured: {took} ms per frame")
-        choose_engine()
-
     def choose_engine() -> None:
         nonlocal want_3d, choice
         choice = head_engines.choose(wanted.get("mode", head_engines.AUTO), available_engines(), measured, given_up)
@@ -390,7 +374,6 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
                     head_3d = head if head is not None and head.is_file() else None
                     given_up.clear()
                     choose_engine()   # with the 3D head chosen: its process starts and loads it now
-                    threading.Thread(target=measure_diffusion, name="face-measure", daemon=True).start()
                 elif kind == "settings":
                     before = engine.settings.swapper
                     wanted = message[1]

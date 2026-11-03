@@ -76,10 +76,18 @@ class FaceService:
         self._settings_path.write_text(json.dumps(settings), encoding="utf-8")
         if self._worker is not None:
             self._worker.send("settings", settings)
+        if settings["mode"] == "personalive":
+            self._install_personalive()
         active = self.library.active()
         if settings["mode"] in ("3d", "auto") and self.heads.available and active and self.heads.status(active)["state"] in ("missing", "failed"):
             self.heads.request(active)   # chosen for a face without one yet: build it now
         return settings
+
+    def _install_personalive(self) -> None:
+        """Chosen for the first time, on a computer that can run it: Face + hair until it is ready."""
+        installer = self.diffusion_installer
+        if not installer.install.available() and installer.why_not() is None:
+            installer.start()
 
     # --- Models -----------------------------------------------------------
 
