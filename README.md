@@ -84,7 +84,10 @@ Every page is in the sidebar:
   sight (it would draw its shadow). The 3D head is built once per face from its best photo (LAM)
   and then trained on all the face's photos (each one's camera and pose fitted, the hair's colours
   refined, kept only if it also fits a photo it never saw). Faces › the cube button trains it
-  longer. On a GTX 1660 SUPER: 30 fps next to the live voice. **It installs itself**: the first
+  longer. Any camera works, in any shape and resolution: nothing is stretched, an upright phone's black
+  bars are left out of the work and the head is fitted to the width of your face. On a GTX 1660 SUPER: 30 fps
+  next to the live voice, with about one frame in three getting its own render of the head (the others move
+  the last one). **It installs itself**: the first
   start on such a computer downloads it in the background (about 7 GB, 11 GB once installed; nothing to compile).
 - **Whole head** (Clone › Head): the person's head, hair, beard and ears, not only the inside of the
   face. The sharpest front-facing photo is animated with your pose and expressions (LivePortrait), so

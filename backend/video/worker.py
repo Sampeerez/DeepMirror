@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 JPEG_QUALITY = 88
 STATS_SECONDS = 1.0
+LOG_STATS_EVERY = 10   # one stats line in the log every so many (what a session really did, afterwards)
 
 
 def encode_jpeg(frame: np.ndarray, quality: int = JPEG_QUALITY) -> bytes:
@@ -60,6 +61,24 @@ def decode_image(data: bytes) -> np.ndarray:
     return frame
 
 
+def fitted(frame: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """``frame`` in a picture of ``size`` (width, height): whole and undistorted, black bars around it."""
+    import cv2
+
+    height, width = frame.shape[:2]
+    if (width, height) == size:
+        return frame
+    scale = min(size[0] / width, size[1] / height)
+    inner = (max(1, round(width * scale)), max(1, round(height * scale)))
+    scaled = cv2.resize(frame, inner, interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR)
+    if inner == size:
+        return scaled
+    out = np.zeros((size[1], size[0], 3), np.uint8)
+    x, y = (size[0] - inner[0]) // 2, (size[1] - inner[1]) // 2
+    out[y:y + inner[1], x:x + inner[0]] = scaled
+    return out
+
+
 # --- Inside the face process --------------------------------------------------
 
 
@@ -80,10 +99,7 @@ class _VirtualCamera:
         self._thread.start()
 
     def push(self, due: float, frame: np.ndarray) -> None:
-        import cv2
-
-        if frame.shape[1::-1] != self.size:
-            frame = cv2.resize(frame, self.size)
+        frame = fitted(frame, self.size)
         with self._lock:
             self._queue.append((due, frame))
             self._queue = self._queue[-90:]
@@ -105,6 +121,14 @@ class _VirtualCamera:
         self._stop.set()
         self._thread.join(timeout=1)
         self.camera.close()
+
+
+def stats_line(stats: dict, engine: str, dropped: int, camera: bool) -> str:
+    """A session's stats in one line of the log."""
+    names = ("fps_in", "fps_out", "keys_per_second", "swap_ms", "track_ms", "compose_ms", "render_ms", "render_size",
+             "head_fit", "layers", "picture", "gpu_share")
+    return " ".join([f"engine={engine}", *(f"{name}={stats.get(name)}" for name in names),
+                     f"dropped={dropped}", f"virtual_camera={camera}"])
 
 
 def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu: bool,
@@ -166,6 +190,7 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
     # wait: if tracking falls behind, the oldest frame is dropped, never the newest.
     incoming: queue.Queue = queue.Queue(maxsize=3)
     dropped = [0]   # frames tracking could not keep up with
+    stats_sent = [0]
 
     def send(*message) -> None:
         with send_lock, contextlib.suppress(BrokenPipeError, EOFError, OSError):
@@ -260,6 +285,9 @@ def run(conn: Connection, arbiter_name: str, face_dir: str, cache_path: str, gpu
             if now - last_stats > STATS_SECONDS:
                 stats = session.stats()
                 watch_engine(stats)
+                stats_sent[0] += 1
+                if stats_sent[0] % LOG_STATS_EVERY == 0:
+                    log(logging.INFO, f"Video: {stats_line(stats, choice.engine, dropped[0], camera is not None)}")
                 send("stats", {**stats, "camera": camera.device if camera else None, "dropped": dropped[0],
                                "engine": choice.engine, "engine_reason": choice.reason})
                 last_stats = now

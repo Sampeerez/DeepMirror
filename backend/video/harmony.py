@@ -80,7 +80,9 @@ def _measure(under: np.ndarray, image: np.ndarray, face: np.ndarray) -> np.ndarr
         weight = (inside & (np.abs(rest).max(2) < OUTLIER)).astype(np.float32)
         sigma = max(1.0, ours.shape[1] * reach)
         spread = cv2.GaussianBlur(weight, (0, 0), sigma)
-        weighted = np.asarray(rest * weight[..., None], np.float32)
-        local = cv2.GaussianBlur(weighted, (0, 0), sigma) / np.maximum(spread, 1e-3)[..., None]
-        field += np.clip(local, -MOST, MOST) * np.clip(spread / SURE, 0, 1)[..., None]
+        # Brightness only: the tint of a place near the face is the whole face's (per channel, whatever
+        # differs there, a brow or an eyelid, came out as a patch of colour on the forehead).
+        weighted = np.asarray(rest.mean(2) * weight, np.float32)
+        local = cv2.GaussianBlur(weighted, (0, 0), sigma) / np.maximum(spread, 1e-3)
+        field += (np.clip(local, -MOST, MOST) * np.clip(spread / SURE, 0, 1))[..., None]
     return np.clip(field, LOWEST, HIGHEST)

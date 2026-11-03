@@ -54,7 +54,9 @@ MEDIAPIPE_68 = [71, 63, 105, 66, 107, 336, 296, 334, 293, 301, 168, 197, 5, 4, 7
 # The face's outline.
 FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
              176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
-STRAY_TINT = 0.12      # how far from the hair's own tint a Gaussian is a speck, at the least
+STRAY_TINT = 0.25      # how far from the hair's own tint (for its brightness) a Gaussian is a stray, at the least
+STRAY_SPREAD = 2.5     # ...and at the least this many times the usual distance
+STRAY_DARK = 0.1       # brightness added under the division: near black has no tint to speak of
 FRINGE_WHITE = 0.8     # a Gaussian's darkest channel above this may be the build's white, not the person's
 HAIR_NODES = 32        # guide nodes of the hair's motion
 HAIR_ROOT, HAIR_TIP = 0.004, 0.05    # metres from the scalp where a Gaussian starts to follow, and follows fully
@@ -88,6 +90,17 @@ BROWS = [33, 246, 161, 160, 159, 158, 157, 173, 133, 362, 398, 384, 385, 386, 38
 FOCAL = 0.96           # a webcam's usual focal length, in frame widths (~55 degrees across)
 DETECT_WIDTH = 640     # MediaPipe reads a copy this wide (its landmarks are relative: no loss)
 NECK_FADE = 0.012      # metres below the chin over which the photo's neck fades out
+# The head fitted to the speaker's: the width of the face at the ears against the head's own there, which
+# answers for a different head and for a camera whose focal length is not the assumed one (it cannot
+# be told from the landmarks, tried on renders with a known one; this ratio comes out 1 at the right one).
+FIT_SIDES = (234, 454)   # MediaPipe's mesh, for iBUG 68 points 0 and 16
+FIT_LOWEST, FIT_HIGHEST = 0.8, 1.1
+FIT_SAMPLES = 45         # measures kept (every few frames, facing the camera), at least a third of them to act
+FIT_EVERY = 5
+FIT_FACING = 0.3         # how far the head may be turned (sine) for a measure
+FIT_FOLLOW = 0.02        # share of the way to it, per frame: it never jumps
+FIT_CORE = 0.045         # metres to each side of the head's middle that stay: the face, its landmarks and the swap's fit
+SPLAT_FILL = 0.25        # a hair Gaussian is at least this wide, of the distance to its neighbours (no dots on a turn)
 
 
 class OneEuro:
@@ -161,10 +174,19 @@ class Head:
         neck_cut = (1 - 2 * neck_up.to(device)).clamp(0, 1)
         self.opacity = (data["opacity"].float().to(device) * neck_cut * (1 - below)).contiguous()
         self._landmarks = (faces[:, 17:68], bary[:, 17:68], vertices2landmarks)
+        self._sides = (faces[:, [0, 16]], bary[:, [0, 16]])
+        ears = vertices2landmarks(self.v_shaped, self.flame.faces, *self._sides)[0]
+        brows = vertices2landmarks(self.v_shaped, self.flame.faces, faces[:, 17:27], bary[:, 17:27])[0]
+        # What the fit moves from: the middle of the head, the brows, the plane of the ears.
+        self.fit_origin = torch.stack([(ears[0, 0] + ears[1, 0]) / 2, brows[:, 1].max(), ears[:, 2].mean()])
+        self.fit_half_width = float((ears[1, 0] - ears[0, 0]).abs() / 2)
+        self.fit = 1.0
         with torch.no_grad():
             scalp = self.flame.get_cano_verts(betas)[0]
         reach = (self.xyz - scalp).norm(dim=1) * (self.opacity[:, 0] > 0.05).float()   # how far from the scalp
-        self.rgb = without_stray_hair(self.xyz, without_white_fringe(self.xyz, self.rgb), reach > HAIR_ROOT)
+        above = self.xyz[:, 1] > self.fit_origin[1]
+        self.rgb = without_stray_hair(self.xyz, without_white_fringe(self.xyz, self.rgb), (reach > HAIR_ROOT) & above)
+        self.scaling = filled_splats(self.xyz, self.scaling, (reach > HAIR_ROOT) & (self.opacity[:, 0] > 0.05))
         self.hair = HairMotion(self.xyz, reach)
         # The head's own extent (what is visible of it, hair included): the render is framed on it,
         # so no pose ever cuts the hair or the chin. Offsets from the root joint, 8 corners.
@@ -186,6 +208,15 @@ class Head:
         return to_landmarks(posed, self.flame.faces, faces, bary)[0].double().cpu().numpy()
 
     @torch.no_grad()
+    def width_ratio(self, weights: torch.Tensor, mesh: np.ndarray, rvec: np.ndarray, tvec: np.ndarray,
+                    camera: np.ndarray) -> float:
+        """How wide the speaker's face is at the ears, of how wide this head shows there in this pose."""
+        posed = self.v_shaped + torch.einsum("k,kvc->vc", weights, self.arkit)[None]
+        sides = self._landmarks[2](posed, self.flame.faces, *self._sides)[0].double().cpu().numpy()
+        shown = cv2.projectPoints(sides, rvec, tvec, camera, None)[0][:, 0]
+        return float(np.linalg.norm(mesh[FIT_SIDES[0]] - mesh[FIT_SIDES[1]]) / (np.linalg.norm(shown[0] - shown[1]) or 1.0))
+
+    @torch.no_grad()
     def render(self, weights: torch.Tensor, rotation: np.ndarray, translation: np.ndarray, look: np.ndarray,
                focal: float, size: int) -> torch.Tensor:
         """size x size x 4 (BGR, straight alpha, 0..1) of the head posed in the camera's frame,
@@ -199,7 +230,8 @@ class Head:
         transforms, _ = self.flame.get_transformed_mat(
             pose=pose, v_shaped=self.v_shaped, posedirs=self.flame.posedirs, parents=self.flame.parents,
             J_regressor=self.flame.J_regressor, pose2rot=True, dtype=torch.float32)
-        moved = self.xyz + torch.einsum("k,kvc->vc", weights, self.arkit_up)
+        moved = fitted_head(self.xyz, self.fit_origin, self.fit, self.fit_half_width) \
+            + torch.einsum("k,kvc->vc", weights, self.arkit_up)
         sway = self.hair.displacement(device)
         if sway is not None:
             moved = moved + sway
@@ -230,6 +262,51 @@ class Head:
         return torch.cat([bgr, alpha], 0).permute(1, 2, 0).clamp(0, 1)
 
 
+def fitted_head(xyz: torch.Tensor, origin: torch.Tensor, fit: float, half_width: float) -> torch.Tensor:
+    """The head's points with its sides, top and back brought in (or out) by ``fit`` at the ears. The
+    face in the middle stays where it is, so the pose found from its landmarks holds and the swap sits
+    as before; only what lies around the face changes."""
+    if fit == 1.0:
+        return xyz
+    beyond = (fit * half_width - FIT_CORE) / max(half_width - FIT_CORE, 1e-3)
+    offset = xyz - origin
+    out = offset.clone()
+    across = offset[:, 0].abs()
+    out[:, 0] = torch.where(across > FIT_CORE, offset[:, 0].sign() * (FIT_CORE + (across - FIT_CORE) * beyond), offset[:, 0])
+    out[:, 1] = torch.where(offset[:, 1] > 0, offset[:, 1] * fit, offset[:, 1])
+    out[:, 2] = torch.where(offset[:, 2] < 0, offset[:, 2] * fit, offset[:, 2])
+    return out + origin
+
+
+class HeadFit:
+    """The fit, followed slowly from many measures: a blink or a bad frame never moves the head."""
+
+    def __init__(self) -> None:
+        self.samples: list[float] = []
+
+    def update(self, ratio: float | None, fit: float) -> float:
+        """The fit for now, given the last one and a new measure (None: none this frame)."""
+        if ratio is not None:
+            self.samples = [*self.samples, ratio][-FIT_SAMPLES:]
+        if len(self.samples) < FIT_SAMPLES // 3:
+            return fit
+        target = float(np.clip(np.median(self.samples), FIT_LOWEST, FIT_HIGHEST))
+        return fit + (target - fit) * FIT_FOLLOW
+
+
+def filled_splats(xyz: torch.Tensor, scaling: torch.Tensor, chosen: torch.Tensor) -> torch.Tensor:
+    """Sizes with the chosen Gaussians (the hair) wide enough to touch their neighbours: seen from a
+    side the photo never showed, thin ones far apart read as rows of dots."""
+    if int(chosen.sum()) < 16:
+        return scaling
+    points = xyz[chosen]
+    spacing = torch.cat([torch.cdist(part, points).topk(5, largest=False).values[:, 1:].mean(1)
+                         for part in points.split(2048)])
+    fixed = scaling.clone()
+    fixed[chosen] = scaling[chosen].maximum(SPLAT_FILL * spacing[:, None])
+    return fixed
+
+
 def without_white_fringe(xyz: torch.Tensor, rgb: torch.Tensor) -> torch.Tensor:
     """Colours with the build's white background taken out. LAM builds against white, so Gaussians
     around the hair's outline are nearly white (a pale line along it; a blond head's highlights stay
@@ -248,14 +325,15 @@ def without_white_fringe(xyz: torch.Tensor, rgb: torch.Tensor) -> torch.Tensor:
 
 
 def without_stray_hair(xyz: torch.Tensor, rgb: torch.Tensor, hair: torch.Tensor) -> torch.Tensor:
-    """Colours with the specks taken out of the hair: where LAM had to guess the back and sides of a
-    head, some Gaussians come out in a colour the hair does not have (red dots on dark hair). Measured
-    on the tint, not the brightness, so highlights stay; hair of any colour has its own tint as normal."""
+    """Colours with the specks and patches taken out of the hair: where LAM had to guess the back and
+    sides of a head, some Gaussians come out in a colour the hair does not have (red on dark hair).
+    Measured on the tint for its brightness, so highlights stay; hair of any colour has its own tint as
+    normal. ``hair``: only hair (the skin of a forehead would count as normal tint)."""
     if int(hair.sum()) < 64:
         return rgb
-    tint = rgb - rgb.mean(1, keepdim=True)
+    tint = (rgb - rgb.mean(1, keepdim=True)) / (rgb.mean(1, keepdim=True) + STRAY_DARK)
     away = (tint - tint[hair].median(0).values).norm(dim=1)
-    stray = hair & (away > max(STRAY_TINT, 1.4 * float(torch.quantile(away[hair], 0.75))))
+    stray = hair & (away > max(STRAY_TINT, STRAY_SPREAD * float(away[hair].median())))
     plain = torch.nonzero(hair & ~stray)[:, 0]
     if not stray.any() or len(plain) < 16:
         return rgb
@@ -424,14 +502,14 @@ def _blur(planes: torch.Tensor, sigma: float) -> torch.Tensor:
     return out[0]
 
 
-def clean_edges(image: torch.Tensor) -> torch.Tensor:
+def clean_edges(image: torch.Tensor, side: int | None = None) -> torch.Tensor:
     """A crisp head outline: the Gaussians' soft fringe given contrast, the fringe's colour taken
     from just inside it (LAM's fringe carries the photo's background colour: the halo), and the
-    detail lightly sharpened. ``image``: H x W x 4 (BGR, straight alpha, 0..1), on the GPU."""
+    detail lightly sharpened. ``image``: H x W x 4 (BGR, straight alpha, 0..1), on the GPU. Comes out
+    ``side`` pixels wide: a render smaller than it shows on screen is enlarged before the outline's
+    contrast, or that contrast turns its pixels into steps."""
     planes = image.permute(2, 0, 1)
     colour, alpha = planes[:3], planes[3:]
-    shaped = ((alpha - EDGE_LOW) / (EDGE_HIGH - EDGE_LOW)).clamp(0, 1)
-    shaped = shaped * shaped * (3 - 2 * shaped)
     # The fringe's colour: from well inside the outline (even opaque Gaussians on the outline carry
     # the white the head was built against).
     core = -torch.nn.functional.max_pool2d(-(alpha > 0.92).float()[None], EDGE_DEPTH, 1, EDGE_DEPTH // 2)[0]
@@ -441,6 +519,12 @@ def clean_edges(image: torch.Tensor) -> torch.Tensor:
     fringe = (1 - core) * (weight > 0.02).float()
     colour = colour * (1 - fringe) + inside * fringe
     colour = colour + SHARPEN * (colour - _blur(colour, 1.0))
+    if side is not None and side != image.shape[1]:
+        both = torch.nn.functional.interpolate(torch.cat([colour, alpha])[None], size=(side, side), mode="bilinear",
+                                               align_corners=False)[0]
+        colour, alpha = both[:3], both[3:]
+    shaped = ((alpha - EDGE_LOW) / (EDGE_HIGH - EDGE_LOW)).clamp(0, 1)
+    shaped = shaped * shaped * (3 - 2 * shaped)
     return torch.cat([colour.clamp(0, 1), shaped]).permute(1, 2, 0)
 
 
@@ -532,7 +616,8 @@ def main() -> None:
     head: Head | None = None
     budget = RenderBudget()
     tracked: queue.Queue = queue.Queue(maxsize=2)
-    state: dict = {"rvec": None, "tvec": None, "weights": None, "stamp": 0, "hole": True, "fringe": False,
+    state: dict = {"rvec": None, "tvec": None, "weights": None, "stamp": 0, "hole": True, "fringe": False, "size": None,
+                   "fit": HeadFit(), "fit_age": 0,
                    "rotation": OneEuro(min_cutoff=1.2, beta=0.6), "position": OneEuro(min_cutoff=1.2, beta=4.0)}
     timings = {"track_ms": 0.0, "render_ms": 3.0, "render_size": 0}
 
@@ -549,6 +634,10 @@ def main() -> None:
             return
         started = time.perf_counter()
         height, width = frame.shape[:2]
+        if state["size"] != (width, height):   # another picture: a pose in the last one means nothing here
+            state["size"] = (width, height)
+            state["fit"] = HeadFit()
+            reset()
         scale = min(1.0, DETECT_WIDTH / width)
         small = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else frame
         state["stamp"] = max(state["stamp"] + 1, int(t * 1000))
@@ -574,6 +663,12 @@ def main() -> None:
             send("layer", seq, None, timings)
             return
         state["rvec"], state["tvec"] = rvec, tvec   # the raw fit: the next frame's starting guess
+        ratio = None
+        state["fit_age"] += 1
+        if state["fit_age"] % FIT_EVERY == 0 and abs(cv2.Rodrigues(rvec)[0][0, 2]) < FIT_FACING:
+            ratio = head.width_ratio(weights, mesh, rvec, tvec, camera)
+        head.fit = state["fit"].update(ratio, head.fit)
+        timings["head_fit"] = round(head.fit, 3)
         smooth_r = state["rotation"](rvec.ravel(), t)
         smooth_t = state["position"](tvec.ravel(), t)
         timings["track_ms"] = 0.9 * timings["track_ms"] + 0.1 * (time.perf_counter() - started) * 1000
@@ -623,15 +718,17 @@ def main() -> None:
             if not granted or head is None:
                 return None
             started = time.perf_counter()
-            image = clean_edges(head.render(weights, rotation, translation, look, focal, size))
+            shown = int(min(RENDER_STEPS[-1], max(size, round(side_px / 2) * 2)))
+            image = clean_edges(head.render(weights, rotation, translation, look, focal, size), shown)
             # Back into the frame's own camera (a pure turn of the camera: a homography).
-            inner = np.array([[focal, 0, size / 2], [0, focal, size / 2], [0, 0, 1]])
+            grow = shown / size
+            inner = np.array([[focal * grow, 0, shown / 2], [0, focal * grow, shown / 2], [0, 0, 1]])
             warp = camera @ look.T @ np.linalg.inv(inner)
             image = (image * 255).to(torch.uint8).cpu().numpy()
             timings["render_ms"] = 0.9 * timings["render_ms"] + 0.1 * (time.perf_counter() - started) * 1000
             timings["render_size"] = size
             budget.update(timings["render_ms"], size, arbiter.gap() is not None)
-        quad = cv2.perspectiveTransform(np.array([[[0, 0], [size, 0], [0, size], [size, size]]], np.float64), warp)[0]
+        quad = cv2.perspectiveTransform(np.array([[[0, 0], [shown, 0], [0, shown], [shown, shown]]], np.float64), warp)[0]
         x0, y0 = np.maximum(np.floor(quad.min(0)).astype(int), 0)
         x1, y1 = np.minimum(np.ceil(quad.max(0)).astype(int), [width, height])
         if x1 <= x0 or y1 <= y0:

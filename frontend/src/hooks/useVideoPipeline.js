@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { displayDelayMs, dueFrame, settledDelay } from '../lib/avSync';
+import { captureSize } from '../lib/captureSize';
 import { readStored, writeStored } from '../lib/storage';
 
 const VIDEO_WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/video`;
@@ -171,7 +172,7 @@ export default function useVideoPipeline({ getDelayMs }) {
         const worker = new Worker(new URL('../lib/captureWorker.js', import.meta.url), { type: 'module' });
         const { readable } = new MediaStreamTrackProcessor({ track });
         worker.onmessage = ({ data }) => sendFrame(data.t - performance.timeOrigin, data.buffer);
-        worker.postMessage({ readable, width: WIDTH, height: HEIGHT, quality: JPEG_QUALITY }, [readable]);
+        worker.postMessage({ readable, longest: WIDTH, quality: JPEG_QUALITY }, [readable]);
         workerRef.current = worker;
       }
       const context = canvas.getContext('2d');
@@ -179,7 +180,10 @@ export default function useVideoPipeline({ getDelayMs }) {
         if (ws.readyState !== WebSocket.OPEN || inFlight(inFlightRef.current) >= MAX_IN_FLIGHT) return;
         if (ws.bufferedAmount > 2_000_000 || video.readyState < 2) return;
         const t = performance.now();
-        context.drawImage(video, 0, 0, WIDTH, HEIGHT);
+        // Each camera in its own shape: nothing is stretched into a fixed frame.
+        const size = captureSize(video.videoWidth, video.videoHeight, WIDTH);
+        if (canvas.width !== size.width || canvas.height !== size.height) Object.assign(canvas, size);
+        context.drawImage(video, 0, 0, size.width, size.height);
         const blob = canvas.convertToBlob
           ? await canvas.convertToBlob({ type: 'image/jpeg', quality: JPEG_QUALITY })
           : await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));

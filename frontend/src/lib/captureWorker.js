@@ -6,15 +6,17 @@
 // when an encode is still running the next frame replaces it, and frames are dropped
 // while the page says too many are on their way (``pause``).
 
+import { captureSize } from './captureSize';
+
 let canvas = null;
 let context = null;
 let quality = 0.85;
-let width = 1280;
-let height = 720;
+let longest = 1280;
 let paused = false;
 let reader = null;
 
 async function encode(frame, t) {
+  const { width, height } = captureSize(frame.displayWidth, frame.displayHeight, longest);
   if (!canvas || canvas.width !== width || canvas.height !== height) {
     canvas = new OffscreenCanvas(width, height);
     context = canvas.getContext('2d');
@@ -61,7 +63,7 @@ async function run(readable) {
 self.onmessage = (event) => {
   const message = event.data;
   if (message.readable) {
-    ({ width, height, quality } = message);
+    ({ longest, quality } = message);
     run(message.readable);
   } else if ('paused' in message) {
     paused = message.paused;

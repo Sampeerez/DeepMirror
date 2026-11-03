@@ -375,6 +375,12 @@ class FaceEngine:
         return (self.settings.mode == "head" and self.portrait is not None and self.identity is not None
                 and (self.models.heads_ready or hasattr(self.remote, "keeps_up")))
 
+    def new_picture(self) -> None:
+        """The camera's picture moved within its frames: where the face was means nothing now."""
+        self._last = None
+        self._filter.reset()
+        self.reset_head()
+
     def reset_head(self) -> None:
         """The next frame becomes the rest pose the head moves from (a new session)."""
         self._harmony.reset()

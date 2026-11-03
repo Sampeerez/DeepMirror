@@ -36,7 +36,7 @@ from backend.video import parser as parsing  # noqa: E402
 from backend.video.avatar import HEAD_FILE, HeadBuilder, HeadDriver, LamInstall  # noqa: E402
 from backend.video.engine import FaceEngine, FaceModels, VideoSettings, head_pose  # noqa: E402
 from backend.video.faces import alignment  # noqa: E402
-from backend.video.live import LiveFaceSession  # noqa: E402
+from backend.video.live import LiveFaceSession, picture_box  # noqa: E402
 from backend.video.personalive.client import PersonaLiveHead, PersonaLiveInstall  # noqa: E402
 
 FACE_DIR = ROOT / "models" / "assets" / "face"
@@ -258,15 +258,27 @@ def measure(frames: list[np.ndarray], outputs: dict[int, np.ndarray], models: Fa
             "rows": rows}
 
 
+def bars_changed(frames: list[np.ndarray], outputs: dict[int, np.ndarray]) -> int:
+    """Pixels painted on the camera's black bars, over the whole run (none should be)."""
+    box = picture_box(frames[0])
+    if box is None:
+        return 0
+    outside = np.ones(frames[0].shape[:2], bool)
+    outside[box[1]:box[3], box[0]:box[2]] = False
+    return sum(int((np.abs(outputs[i].astype(np.int16) - frames[i])[outside].max(1) > 8).sum()) for i in outputs if i < len(frames))
+
+
 def sheet(frames: list[np.ndarray], outputs: dict[int, np.ndarray], rows: list[dict], path: Path) -> None:
     if not rows:
         return
     by_turn = sorted(rows, key=lambda row: row["yaw"])
     moves = [(np.linalg.norm(np.array(b["nose"]) - np.array(a["nose"])), b["frame"]) for a, b in itertools.pairwise(rows)]
     picks = [by_turn[0]["frame"], by_turn[len(by_turn) // 2]["frame"], by_turn[-1]["frame"], max(moves)[1] if moves else 0]
+    box = picture_box(frames[0])
+    x0, y0, x1, y1 = box if box is not None else (0, 0, frames[0].shape[1], frames[0].shape[0])
     tiles = []
     for index in picks:
-        pair = np.hstack([frames[index], outputs[index]])
+        pair = np.hstack([frames[index][y0:y1, x0:x1], outputs[index][y0:y1, x0:x1]])
         tiles.append(cv2.resize(pair, (960, int(960 * pair.shape[0] / pair.shape[1]))))
     cv2.imwrite(str(path), np.vstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 90])
     # Close up: the head as worn, large enough to judge its edges, ears and hair.
@@ -348,6 +360,7 @@ def main() -> None:
     if generated is not None:
         generated.close()
     metrics = measure(frames, outputs, models, fps)
+    metrics["bars_changed"] = bars_changed(frames, outputs)
     rows = metrics.pop("rows")
     metrics["seam"] = seam_report(frames, outputs, models)
     tail = stats[2:] or stats
@@ -367,7 +380,7 @@ def main() -> None:
               "frames_out": len(outputs), "fps_out": round(len(outputs) / max(elapsed, 1e-3), 1),
               "keys_per_second": median("keys_per_second"), "track_ms": median("track_ms"),
               "compose_ms": median("compose_ms"), "render_ms": median("render_ms"),
-              "render_size": median("render_size"), "head_render_ms": head_ms, **metrics}
+              "render_size": median("render_size"), "head_fit": tail[-1].get("head_fit") if tail else None, "head_render_ms": head_ms, **metrics}
     tag = f"_{args.tag}" if args.tag else ""
     (args.out / f"report{tag}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     sheet(frames, outputs, rows, args.out / f"sheet{tag}.jpg")

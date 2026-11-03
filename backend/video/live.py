@@ -25,13 +25,76 @@ logger = logging.getLogger(__name__)
 
 MAX_KEYS_PER_SECOND = 30.0
 KEEP_KEYS_SECONDS = 2.0
-HEAD3D_IN_FLIGHT = 2        # frames with the 3D head's process at once (a frame between gets the newest)
+HEAD3D_IN_FLIGHT = 2        # frames with the 3D head's process at once (a frame between gets the newest; more makes the voice late)
 HEAD3D_WAIT = 0.15          # how long a frame waits for its own 3D head render
 FRINGE_SHARE = 0.02         # of the head crop: hair over the face from here on counts as a fringe
-HEAD3D_REUSE = 0.2          # a render this much older still dresses a frame whose own did not come
+HEAD3D_REUSE = 0.35         # a render this much older still dresses a frame whose own did not come
 HEAD_WAIT = 0.15            # how long a frame waits for its own whole-head render...
 HEAD_KEEPS_UP = 15.0        # ...on a GPU rendering at least this many per second (else, the newest)
 HEAD_LAYERS = 8             # recent whole-head renders kept: a frame takes the nearest in time
+BAR_DARK = 24               # brightness (0..255) below which a line of the frame may be a black bar...
+BAR_STRAY = 0.03            # ...with this share of it brighter at the most (an app's small logo on the bar)
+BAR_LEAST = 0.02            # of the frame's side: anything thinner is not a bar
+PICTURE_LEAST = 0.15        # of the frame's side: less than this left is a dark room, not a picture in bars
+PICTURE_EVERY = 15          # frames between looks at where the picture is
+PICTURE_SURE = 3            # looks in a row before the picture is taken to have changed
+PICTURE_SAME = 0.01         # of the frame's side: closer than this is the same picture
+
+
+def picture_box(frame: np.ndarray) -> tuple[int, int, int, int] | None:
+    """Where the camera's real picture is in ``frame`` when it comes inside black bars, at any side
+    (a phone upright in a landscape frame, a wide film in a 4:3 one): ``(x0, y0, x1, y1)``, or None
+    when the whole frame is the picture."""
+    height, width = frame.shape[:2]
+    lit = frame[::4, ::4].max(2) > BAR_DARK
+    sides = []
+    for shares, side in ((lit.mean(0), width), (lit.mean(1), height)):
+        lines = np.nonzero(shares > BAR_STRAY)[0]
+        if not len(lines):
+            return None
+        low, high = int(lines[0]) * 4, min(side, (int(lines[-1]) + 1) * 4)
+        low, high = (low if low >= BAR_LEAST * side else 0), (high if side - high >= BAR_LEAST * side else side)
+        if high - low < PICTURE_LEAST * side:
+            return None
+        sides.append((low, high))
+    (x0, x1), (y0, y1) = sides
+    return None if (x0, y0, x1, y1) == (0, 0, width, height) else (x0, y0, x1, y1)
+
+
+class Picture:
+    """The camera's real picture within its frames, steady: everything downstream works on it alone,
+    so nothing is painted on the bars, their black never gets into a blur and the head's camera is
+    centred on what the lens saw. Taken at once on the first frame, and changed only when several
+    looks in a row agree (a dark moment must not move it)."""
+
+    def __init__(self) -> None:
+        self.box: tuple[int, int, int, int] | None = None
+        self._frames = 0
+        self._wanted: tuple[int, int, int, int] | None = None
+        self._agreed = 0
+
+    def update(self, frame: np.ndarray) -> bool:
+        """Looks at ``frame`` now and then; whether the picture has just moved."""
+        self._frames += 1
+        if self._frames % PICTURE_EVERY != 1:
+            return False
+        found = picture_box(frame)
+        if self._same(found, self.box, frame.shape):
+            self._agreed = 0
+            return False
+        self._agreed = self._agreed + 1 if self._same(found, self._wanted, frame.shape) else 1
+        self._wanted = found
+        if self._frames > 1 and self._agreed < PICTURE_SURE:
+            return False
+        self.box, self._agreed = found, 0
+        return self._frames > 1
+
+    @staticmethod
+    def _same(one, other, shape: tuple[int, ...]) -> bool:
+        if one is None or other is None:
+            return one is other
+        limit = PICTURE_SAME * max(shape[:2])
+        return all(abs(a - b) <= limit for a, b in zip(one, other, strict=True))
 
 
 @dataclass(slots=True)
@@ -41,6 +104,8 @@ class _Record:
     tracked: Tracked
     arrived: float           # server monotonic time
     seq: int | None = None   # its 3D head render, when one was asked for
+    whole: np.ndarray | None = None   # the frame with its bars, when ``frame`` is the picture inside them
+    box: tuple[int, int, int, int] | None = None
 
 
 class LiveFaceSession:
@@ -54,6 +119,8 @@ class LiveFaceSession:
         self._layers3d: dict[int, Any] = {}   # avatar.Layer (or None: no face there)
         self._latest3d: tuple[float, Any, Any] | None = None   # (time, layer, the five points then)
         self._next_seq = 0
+        self._picture = Picture()
+        self.layers_own = self.layers_moved = self.layers_none = 0   # how frames were dressed by the 3D head
         self._fringe: bool | None = None
         self._done_seq = -1
         engine.hair_from_3d = head3d is not None
@@ -107,9 +174,11 @@ class LiveFaceSession:
                 "mode": "3d" if self.head3d is not None else "head" if self.engine.wants_head else "face",
                 "render_ms": round(float(timings3d.get("render_ms", 0.0)), 1) if timings3d else None,
                 "render_size": int(timings3d.get("render_size", 0)) if timings3d else None,
+                "head_fit": timings3d.get("head_fit"),
                 "heads_per_second": round(self.heads_per_second, 2),
                 "swap_ms": self.engine.models.swap_ms.get(swapper or "", None),
                 "track_ms": round(self.track_ms, 1), "compose_ms": round(self.compose_ms, 1),
+                "layers": (self.layers_own, self.layers_moved, self.layers_none), "picture": self._picture.box,
                 "face": self._records[-1].tracked.face is not None if self._records else None,
                 "gpu_share": round(self.engine.arbiter.free_share(), 2)}
 
@@ -122,6 +191,11 @@ class LiveFaceSession:
                 self._condition.notify_all()
 
     def submit(self, t: float, frame: np.ndarray) -> None:
+        if self._picture.update(frame):
+            self.engine.new_picture()
+        whole, box = None, self._picture.box
+        if box is not None:
+            whole, frame = frame, frame[box[1]:box[3], box[0]:box[2]].copy()
         seq = None
         if self.head3d is not None:   # first: it renders while this frame is tracked here
             with self._condition:
@@ -134,7 +208,7 @@ class LiveFaceSession:
         tracked = self.engine.track(frame, t)
         self.track_ms = 0.9 * self.track_ms + 0.1 * (time.perf_counter() - started) * 1000
         with self._condition:
-            self._records.append(_Record(t, frame, tracked, time.monotonic(), seq))
+            self._records.append(_Record(t, frame, tracked, time.monotonic(), seq, whole, box))
             self.frames_in += 1
             self._condition.notify_all()
 
@@ -158,10 +232,14 @@ class LiveFaceSession:
                 del self._layers3d[late]
         if layer is not None:
             self._latest3d = (record.t, layer, record.tracked.points)
+            self.layers_own += 1
         elif self._latest3d is not None and abs(record.t - self._latest3d[0]) < HEAD3D_REUSE:
             # The newest render, moved from where the face was then to where it is now: the hair
             # stays on the head, not a frame behind it.
             layer = self._moved(self._latest3d[1], self._latest3d[2], record.tracked.points)
+            self.layers_moved += 1
+        else:
+            self.layers_none += 1
         return layer
 
     @staticmethod
@@ -299,6 +377,11 @@ class LiveFaceSession:
             else:
                 frame = self.engine.compose(record.frame, record.tracked, record.t, before, after,
                                             self.keys_per_second, head=head, layer3d=layer3d)
+            if record.whole is not None and record.box is not None:   # back between its bars
+                x0, y0, x1, y1 = record.box
+                whole = record.whole.copy()
+                whole[y0:y1, x0:x1] = frame
+                frame = whole
             self.compose_ms = 0.9 * self.compose_ms + 0.1 * (time.perf_counter() - started) * 1000
             self.frames_out += 1
             out.append((record.t, frame))
