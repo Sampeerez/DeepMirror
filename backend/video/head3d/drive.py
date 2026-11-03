@@ -8,7 +8,8 @@ blendshapes (they move the eyeballs too, so the gaze follows); the head's pose c
 landmarks (PnP against the head's own FLAME landmarks, through a One-Euro filter: steady when still,
 no lag when moving); the Gaussians move with FLAME's ARKit blendshapes and that pose; a camera
 turned to look at the head renders it at the size it has on screen, and the render is warped back
-into the frame's own camera. The head's light is then matched to the speaker's skin in the frame.
+into the frame's own camera. Its light is matched in the face process, to the face it dresses
+(harmony.py).
 What goes back is the head layer (BGRA, straight alpha), where it sits in the frame, and the face's
 five points (the studio paints the speaker's own hair over by them).
 
@@ -50,11 +51,10 @@ FAST = torch.tensor([name.startswith(("eyeBlink", "jaw", "mouthClose", "mouthFun
 MEDIAPIPE_68 = [71, 63, 105, 66, 107, 336, 296, 334, 293, 301, 168, 197, 5, 4, 75, 97, 2, 326, 305, 33, 160,
                 158, 133, 153, 144, 362, 385, 387, 263, 373, 380, 61, 39, 37, 0, 267, 269, 291, 405, 314, 17, 84,
                 181, 78, 82, 13, 312, 308, 317, 14, 87]
-# The face's outline and what is not skin inside it (for the light match).
+# The face's outline.
 FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
              176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
-NOT_SKIN = [[70, 63, 105, 66, 107, 133, 144, 145, 153, 33], [336, 296, 334, 293, 300, 263, 373, 374, 380, 362],
-            [61, 39, 37, 0, 267, 269, 291, 405, 314, 17, 84, 181]]
+STRAY_TINT = 0.12      # how far from the hair's own tint a Gaussian is a speck, at the least
 FRINGE_WHITE = 0.8     # a Gaussian's darkest channel above this may be the build's white, not the person's
 HAIR_NODES = 32        # guide nodes of the hair's motion
 HAIR_ROOT, HAIR_TIP = 0.004, 0.05    # metres from the scalp where a Gaussian starts to follow, and follows fully
@@ -75,8 +75,12 @@ SHARPEN = 0.35         # unsharp mask amount on the rendered head
 HOLE_RISE = 0.04       # the face hole's top: just above the upper eyelids
 HOLE_RISE_BARE = 0.42  # without a fringe: up the forehead (eye distances above the upper eyelids)
 HOLE_INSET = 0.9       # above the nose the hole is this much of the face (the swap's fade lies on 3D skin)
-HOLE_WIDEN = 1.18      # below the nose the hole is this much wider than the face
-HOLE_SOFT = 0.006      # its fade, in face widths (short: a half-faded 3D forehead shows what is under it)
+# How much wider than the face the hole is, by height (eye distances above the nose tip): a little
+# inside it around the eyes, well outside at the chin (no 3D jaw beside the speaker's).
+HOLE_WIDTHS = ((-0.9, 2.0), (-0.5, 1.2), (0.3, 0.9))
+HOLE_ARCH = 0.45       # how much lower the hole's top is at its sides than in the middle
+HOLE_SOFT = 0.04       # its fade, in face widths (the head is relit by the face: no line to hide)
+HOLE_SOFT_FRINGE = 0.012   # shorter when it ends at the eyelids: a long fade shows two pairs of brows
 # The upper eyelids: the face hole's top is at their crease. Brows and forehead come from the 3D head
 # (they move with its brow blendshapes): a face swap of a forehead under a fringe draws the fringe's
 # shadow, and the worn person's brows are part of who they are.
@@ -84,9 +88,6 @@ BROWS = [33, 246, 161, 160, 159, 158, 157, 173, 133, 362, 398, 384, 385, 386, 38
 FOCAL = 0.96           # a webcam's usual focal length, in frame widths (~55 degrees across)
 DETECT_WIDTH = 640     # MediaPipe reads a copy this wide (its landmarks are relative: no loss)
 NECK_FADE = 0.012      # metres below the chin over which the photo's neck fades out
-LIGHT_FOLLOW = 0.25    # share of the new light estimate taken each frame
-LIGHT_EVERY = 4        # frames between light measures (the light hardly changes in between)
-LIGHT_SIZE = 128       # the render's copy the light is measured on
 
 
 class OneEuro:
@@ -163,7 +164,7 @@ class Head:
         with torch.no_grad():
             scalp = self.flame.get_cano_verts(betas)[0]
         reach = (self.xyz - scalp).norm(dim=1) * (self.opacity[:, 0] > 0.05).float()   # how far from the scalp
-        self.rgb = without_white_fringe(self.xyz, self.rgb)
+        self.rgb = without_stray_hair(self.xyz, without_white_fringe(self.xyz, self.rgb), reach > HAIR_ROOT)
         self.hair = HairMotion(self.xyz, reach)
         # The head's own extent (what is visible of it, hair included): the render is framed on it,
         # so no pose ever cuts the hair or the chin. Offsets from the root joint, 8 corners.
@@ -246,6 +247,25 @@ def without_white_fringe(xyz: torch.Tensor, rgb: torch.Tensor) -> torch.Tensor:
     return fixed
 
 
+def without_stray_hair(xyz: torch.Tensor, rgb: torch.Tensor, hair: torch.Tensor) -> torch.Tensor:
+    """Colours with the specks taken out of the hair: where LAM had to guess the back and sides of a
+    head, some Gaussians come out in a colour the hair does not have (red dots on dark hair). Measured
+    on the tint, not the brightness, so highlights stay; hair of any colour has its own tint as normal."""
+    if int(hair.sum()) < 64:
+        return rgb
+    tint = rgb - rgb.mean(1, keepdim=True)
+    away = (tint - tint[hair].median(0).values).norm(dim=1)
+    stray = hair & (away > max(STRAY_TINT, 1.4 * float(torch.quantile(away[hair], 0.75))))
+    plain = torch.nonzero(hair & ~stray)[:, 0]
+    if not stray.any() or len(plain) < 16:
+        return rgb
+    fixed = rgb.clone()
+    for chunk in torch.nonzero(stray)[:, 0].split(2048):
+        nearest = torch.cdist(xyz[chunk], xyz[plain]).topk(32, largest=False).indices   # specks come in patches
+        fixed[chunk] = rgb[plain[nearest]].median(dim=1).values
+    return fixed
+
+
 def turned_quaternions(quaternions: torch.Tensor, rotation: torch.Tensor) -> torch.Tensor:
     """The Gaussians' orientations (w, x, y, z) turned with the head. LAM moves their centres only:
     long thin Gaussians (hair strands) would keep pointing the same way while the head turns."""
@@ -279,21 +299,6 @@ def solve_pose(model: np.ndarray, points: np.ndarray, camera: np.ndarray, rvec=N
         if ok and t[2, 0] > 0:
             return True, r, t
     return False, None, None
-
-
-def _ycc(bgr):
-    """BGR (0..1, last axis) to Y, Cb, Cr: a linear transform, so it costs nothing on the GPU."""
-    b, g, r = bgr[..., 0], bgr[..., 1], bgr[..., 2]
-    y = 0.299 * r + 0.587 * g + 0.114 * b
-    stack = torch.stack if torch.is_tensor(bgr) else np.stack
-    return stack([y, 0.564 * (b - y), 0.713 * (r - y)], -1)
-
-
-def _bgr(ycc):
-    y, cb, cr = ycc[..., 0], ycc[..., 1], ycc[..., 2]
-    r, b = y + 1.403 * cr, y + 1.773 * cb
-    stack = torch.stack if torch.is_tensor(ycc) else np.stack
-    return stack([b, (y - 0.299 * r - 0.114 * b) / 0.587, r], -1)
 
 
 class RenderBudget:
@@ -401,67 +406,6 @@ class HairMotion:
         return (offsets[self.index] * self.blend[..., None]).sum(1)
 
 
-class Light:
-    """The head's light moved to the speaker's: statistics of the skin inside the face (eyes, brows
-    and mouth left out), in the frame and in the head's render; brightness and contrast fully, the
-    colour cast part way and only on skin tones (the worn skin tone stays; dark hair keeps its own
-    colour), followed smoothly over time. Measured on small copies, applied on the GPU."""
-
-    def __init__(self) -> None:
-        self.reset()
-
-    def reset(self) -> None:
-        self.gain, self.shift, self.slope = 1.0, np.zeros(3, np.float32), 0.0
-
-    @staticmethod
-    def _skin(shape, mesh: np.ndarray) -> np.ndarray:
-        skin = np.zeros(shape, np.uint8)
-        cv2.fillConvexPoly(skin, cv2.convexHull(mesh[FACE_OVAL].astype(np.int32)), 1)
-        for part in NOT_SKIN:
-            cv2.fillConvexPoly(skin, cv2.convexHull(mesh[part].astype(np.int32)), 0)
-        return cv2.erode(skin, np.ones((3, 3), np.uint8)) > 0
-
-    def measure(self, small: np.ndarray, small_mesh: np.ndarray, frame: np.ndarray, mesh: np.ndarray) -> None:
-        """``small``: the render (BGRA 0..1) at low resolution, ``small_mesh`` the face in it;
-        ``frame`` and ``mesh``: the camera frame and the face in it."""
-        ours_mask = self._skin(small.shape[:2], small_mesh) & (small[..., 3] > 0.95)
-        x0, y0 = np.maximum(mesh.min(0).astype(int), 0)
-        x1, y1 = mesh.max(0).astype(int)
-        crop = frame[y0:y1, x0:x1]
-        if ours_mask.sum() < 50 or crop.size == 0:
-            return
-        scale = min(1.0, 128.0 / max(crop.shape[:2]))
-        crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-        theirs_mask = self._skin(crop.shape[:2], (mesh - [x0, y0]) * scale)
-        if theirs_mask.sum() < 50:
-            return
-        ours = _ycc(small[..., :3][ours_mask].astype(np.float32))
-        theirs = _ycc(crop[theirs_mask].astype(np.float32) / 255.0)
-        gain = float(np.clip((theirs[:, 0].std() + 0.004) / (ours[:, 0].std() + 0.004), 0.75, 1.35))
-        shift = theirs.mean(0) - ours.mean(0) * np.array([gain, 1, 1], np.float32)
-        shift[1:] *= 0.6
-        self.gain += LIGHT_FOLLOW * (gain - self.gain)
-        self.shift += LIGHT_FOLLOW * (shift - self.shift)
-        # Where the light comes from: the speaker's skin brighter on one side than the head's is.
-        def tilt(mask, picture):
-            middle = (np.nonzero(mask)[1].min() + np.nonzero(mask)[1].max()) / 2
-            xs = np.nonzero(mask)[1]
-            luma = _ycc(picture)[..., 0][mask]
-            return float(luma[xs > middle].mean() - luma[xs <= middle].mean()) if (xs > middle).any() and (xs <= middle).any() else 0.0
-
-        slope = tilt(theirs_mask, crop.astype(np.float32) / 255.0) - tilt(ours_mask, small[..., :3].astype(np.float32))
-        self.slope += LIGHT_FOLLOW * (float(np.clip(slope, -0.25, 0.25)) - self.slope)
-
-    def apply(self, image: torch.Tensor) -> torch.Tensor:
-        """``image``: H x W x 4 (BGR, straight alpha, 0..1) on the GPU."""
-        ycc = _ycc(image[..., :3])
-        tone = ((ycc[..., :1] - 0.24) / 0.27).clamp(0, 1)
-        shift = torch.as_tensor(self.shift, device=image.device)
-        across = torch.linspace(-1.0, 1.0, image.shape[1], device=image.device)[None, :, None]
-        ycc = torch.cat([ycc[..., :1] * self.gain + shift[0] + self.slope * across, ycc[..., 1:] + shift[1:] * tone], -1)
-        return torch.cat([_bgr(ycc).clamp(0, 1), image[..., 3:]], -1)
-
-
 def _gauss(sigma: float, device) -> torch.Tensor:
     radius = max(1, int(3 * sigma))
     x = torch.arange(-radius, radius + 1, device=device, dtype=torch.float32)
@@ -500,40 +444,48 @@ def clean_edges(image: torch.Tensor) -> torch.Tensor:
     return torch.cat([colour.clamp(0, 1), shaped]).permute(1, 2, 0)
 
 
-def face_hole(shape: tuple[int, int], mesh: np.ndarray, fringe: bool = True) -> np.ndarray:
-    """0..1 where the face swap shows instead of the 3D head: the face itself (from just above the
-    brows; the 3D forehead and hairline overlap the swap's top) and, below the nose, everything a
-    little wider than the face down to the bottom (the photo's jaw and stubble never ring the
-    speaker's own jaw). Faded at its edge; worked out at a quarter of the size (it is smooth)."""
+def face_hole(shape: tuple[int, int], mesh: np.ndarray, fringe: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    """At a quarter of ``shape``: 0..1 where the face swap shows instead of the 3D head, and the part
+    of that where both show the face (0 or 1; the head's light is measured there, see harmony.py).
+    The hole is the face itself (from just above the brows; the 3D forehead and hairline overlap the
+    swap's top) and, below the nose, everything a little wider than the face down to the bottom (the
+    photo's jaw and stubble never ring the speaker's own jaw). Faded at its edge."""
     eyes = np.linalg.norm(mesh[33] - mesh[263]) or 1.0
     chin, between = mesh[152], (mesh[33] + mesh[263]) / 2
     up = (between - chin) / (np.linalg.norm(between - chin) or 1.0)
     side = np.array([up[1], -up[0]])
     # With a fringe the forehead's swap draws the fringe's shadow: the 3D head comes down to the
     # eyelids. Without one the swap, the speaker's own skin, goes up the forehead to the hairline.
-    brows = mesh[BROWS] + up * eyes * (HOLE_RISE if fringe else HOLE_RISE_BARE)
+    # An arch, like a hairline: highest in the middle.
+    middle = mesh[BROWS].mean(0)
+    across = (mesh[BROWS] - middle) @ side
+    arch = 1.0 - HOLE_ARCH * (across / (np.abs(across).max() or 1.0)) ** 2
+    rise = HOLE_RISE if fringe else HOLE_RISE_BARE
+    brows = mesh[BROWS] + np.outer(arch * eyes * rise, up)
     line = float(np.dot(brows.mean(0), up))
     oval = mesh[FACE_OVAL]
-    # Above the nose the hole sits a little inside the face: the swap's soft edge then fades into
+    # Around the eyes the hole sits a little inside the face: the swap's soft edge then fades into
     # the 3D head's own skin (light-matched), never into what is painted over the speaker's hair.
-    middle = oval.mean(0)
-    upper = (oval - mesh[4]) @ up > 0
-    inset = np.where(upper[:, None], middle + (oval - middle) * HOLE_INSET, oval)
-    face = np.vstack([inset[(inset @ up) <= line], brows])
-    # Below the nose: the face's width plus a margin, down past the bottom of the layer.
-    nose = mesh[4]
-    lower = oval[(oval - nose) @ up <= 0]
-    centre = lower.mean(0)
-    lower = centre + (lower - centre) * np.array([1.0, 1.0]) + np.outer((lower - centre) @ side, side) * (HOLE_WIDEN - 1)
-    far = chin - up * eyes * 6
+    # Going down it widens smoothly past the face (the photo's jaw and stubble never ring the
+    # speaker's own), with no corner where the two meet.
+    centre = oval.mean(0)
+    height = (oval - mesh[4]) @ up
+    width = np.interp(height / eyes, *zip(*HOLE_WIDTHS, strict=True))
+    wider = centre + (oval - centre) * width[:, None]
+    face = np.vstack([wider[(wider @ up) <= line], brows])
+    # Below the face: down past the bottom of the layer.
+    far = mesh[152] - up * eyes * 6
+    lower = wider[height <= 0]
     below = np.vstack([lower, far + side * eyes * 2.2, far - side * eyes * 2.2])
     quarter = (max(1, shape[0] // 4), max(1, shape[1] // 4))
     mask = np.zeros(quarter, np.float32)
     for part in (face, below):
         cv2.fillConvexPoly(mask, cv2.convexHull((part / 4).astype(np.int32)), 1.0)
-    soft = max(0.5, HOLE_SOFT * eyes / 0.4 / 4)   # eyes are about 0.4 face widths apart
-    mask = cv2.GaussianBlur(mask, (0, 0), soft)
-    return cv2.resize(mask, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
+    both = np.zeros(quarter, np.uint8)
+    inset = centre + (oval - centre) * HOLE_INSET
+    cv2.fillConvexPoly(both, cv2.convexHull((np.vstack([inset[(inset @ up) <= line], brows]) / 4).astype(np.int32)), 1)
+    # eyes: about 0.4 face widths apart
+    return cv2.GaussianBlur(mask, (0, 0), max(0.5, (HOLE_SOFT_FRINGE if fringe else HOLE_SOFT) * eyes / 0.4 / 4)), both
 
 
 def below_normal_priority() -> None:
@@ -578,7 +530,6 @@ def main() -> None:
     torch.set_num_threads(1)
     cv2.setNumThreads(2)
     head: Head | None = None
-    light = Light()
     budget = RenderBudget()
     tracked: queue.Queue = queue.Queue(maxsize=2)
     state: dict = {"rvec": None, "tvec": None, "weights": None, "stamp": 0, "hole": True, "fringe": False,
@@ -590,7 +541,6 @@ def main() -> None:
             head.hair.reset()
         state["rvec"] = state["tvec"] = state["weights"] = None
         state["rotation"].x = state["position"].x = None
-        light.reset()
 
     def track(seq: int, t: float, frame: np.ndarray) -> None:
         """MediaPipe and the pose for one frame; to the render thread."""
@@ -677,20 +627,10 @@ def main() -> None:
             # Back into the frame's own camera (a pure turn of the camera: a homography).
             inner = np.array([[focal, 0, size / 2], [0, focal, size / 2], [0, 0, 1]])
             warp = camera @ look.T @ np.linalg.inv(inner)
-            # The light: measured on a small copy of the render (and the face in it), applied here.
-            small = None
-            if timings.setdefault("frames", 0) % LIGHT_EVERY == 0:
-                small = torch.nn.functional.interpolate(image.permute(2, 0, 1)[None], size=(LIGHT_SIZE, LIGHT_SIZE),
-                                                        mode="area")[0].permute(1, 2, 0).cpu().numpy()
-            timings["frames"] += 1
-            image = (light.apply(image) * 255).to(torch.uint8).cpu().numpy()
+            image = (image * 255).to(torch.uint8).cpu().numpy()
             timings["render_ms"] = 0.9 * timings["render_ms"] + 0.1 * (time.perf_counter() - started) * 1000
             timings["render_size"] = size
             budget.update(timings["render_ms"], size, arbiter.gap() is not None)
-        # The GPU's turn is over: the voice must never wait for CPU work done while holding it.
-        if small is not None:
-            in_render = cv2.perspectiveTransform(mesh[None].astype(np.float64), np.linalg.inv(warp))[0]
-            light.measure(small, in_render * (LIGHT_SIZE / size), frame, mesh)
         quad = cv2.perspectiveTransform(np.array([[[0, 0], [size, 0], [0, size], [size, size]]], np.float64), warp)[0]
         x0, y0 = np.maximum(np.floor(quad.min(0)).astype(int), 0)
         x1, y1 = np.minimum(np.ceil(quad.max(0)).astype(int), [width, height])
@@ -699,10 +639,14 @@ def main() -> None:
         shift = np.array([[1, 0, -x0], [0, 1, -y0], [0, 0, 1]], np.float64)
         warped = cv2.warpPerspective(image, shift @ warp, (int(x1 - x0), int(y1 - y0)), flags=cv2.INTER_LINEAR)
         local = mesh - [x0, y0]
+        face = None
         if state["hole"]:   # the face swap fills the face
-            warped[..., 3] = (warped[..., 3] * (1.0 - face_hole(warped.shape[:2], local, state["fringe"]))).astype(np.uint8)
+            small, both = face_hole(warped.shape[:2], local, state["fringe"])
+            full = cv2.resize(small, warped.shape[1::-1], interpolation=cv2.INTER_LINEAR)
+            warped[..., 3] = (warped[..., 3] * (1.0 - full)).astype(np.uint8)
+            face = (both.shape[1], both.shape[0], both.tobytes())
         five = [[float(v) for v in mesh[list(group)].mean(0)] for group in FIVE]
-        return int(x0), int(y0), int(x1 - x0), int(y1 - y0), warped.tobytes(), five
+        return int(x0), int(y0), int(x1 - x0), int(y1 - y0), warped.tobytes(), five, face
 
     renderer = threading.Thread(target=render_loop, name="head3d-render", daemon=True)
     renderer.start()

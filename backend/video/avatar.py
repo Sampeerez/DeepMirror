@@ -281,6 +281,7 @@ class Layer:
     y: int
     image: np.ndarray        # h x w x 4, BGRA, straight alpha
     points: np.ndarray | None = None   # the face's five points in the frame (from the head process)
+    face: np.ndarray | None = None     # uint8 0/1, a quarter of the size: where it and the swap both show the face
 
 
 class HeadDriver:
@@ -351,9 +352,10 @@ class HeadDriver:
                 elif kind == "layer":
                     _, seq, layer, self.timings = message
                     if layer is not None:
-                        x, y, width, height, data, five = layer
+                        x, y, width, height, data, five, face = layer
                         layer = Layer(x, y, np.frombuffer(data, np.uint8).reshape(height, width, 4),
-                                      np.asarray(five, np.float32))
+                                      np.asarray(five, np.float32),
+                                      None if face is None else np.frombuffer(face[2], np.uint8).reshape(face[1], face[0]))
                     self.on_layer(seq, layer)
                 elif kind == "loaded":
                     self.loaded, self.error = (message[1], None) if message[2] is None else (None, message[2])

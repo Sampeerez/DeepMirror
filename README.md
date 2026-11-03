@@ -78,7 +78,8 @@ Every page is in the sidebar:
   The swap gives the face itself, so your own expressions, mouth, teeth and blinks are real, every
   frame, with the worn identity. The 3D head, rendered for exactly that frame's pose, gives
   everything a swap cannot: hair, brows, forehead, ears and the head's outline from any angle, with
-  a hole where the face is and its light matched to yours. Your own hair and ears outside it are
+  a hole where the face is, relit on every frame by the face it dresses, so skin and hair share one
+  light and no line shows where they meet. Your own hair and ears outside it are
   painted over with the background, and a fringe over your forehead is taken out of the swap's
   sight (it would draw its shadow). The 3D head is built once per face from its best photo (LAM)
   and then trained on all the face's photos (each one's camera and pose fitted, the hair's colours

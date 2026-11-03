@@ -42,10 +42,13 @@ def test_the_face_hole_covers_the_face_and_not_the_hair():
         mesh[k] = (320 + 100 * np.cos(angle), 260 + 130 * np.sin(angle))
     mesh[drive.BROWS] = np.column_stack([np.linspace(270, 370, len(drive.BROWS)), np.full(len(drive.BROWS), 232)])
     mesh[33], mesh[263], mesh[152], mesh[4] = (280, 240), (360, 240), (320, 390), (320, 300)
-    hole = drive.face_hole((520, 640), mesh)
-    assert hole[300, 320] > 0.95          # cheeks, nose, mouth: the face swap's
-    assert hole[140, 320] < 0.05          # the top of the head: the 3D head's hair
-    assert drive.face_hole((520, 640), mesh, fringe=False)[195, 320] > drive.face_hole((520, 640), mesh, fringe=True)[195, 320]   # no fringe: the swap goes further up the forehead
+    hole, both = drive.face_hole((520, 640), mesh)
+    assert hole.shape == (130, 160)       # a quarter of the size
+    assert hole[75, 80] > 0.95            # cheeks, nose, mouth: the face swap's
+    assert hole[35, 80] < 0.05            # the top of the head: the 3D head's hair
+    assert both[75, 80] == 1 and both[35, 80] == 0
+    assert both[110, 80 + 34] == 0        # beside the jaw the hole goes on, but what is under it is not the face
+    assert drive.face_hole((520, 640), mesh, fringe=False)[0][49, 80] > drive.face_hole((520, 640), mesh, fringe=True)[0][49, 80]   # no fringe: the swap goes further up the forehead
 
 
 def test_edges_are_soft_and_take_their_colour_from_inside():
@@ -145,6 +148,23 @@ def test_a_reused_3d_layer_moves_with_the_face():
     moved = LiveFaceSession._moved(layer, before, before + np.array([10.0, 5.0], np.float32))
     assert abs(moved.x - 110) <= 1 and abs(moved.y - 55) <= 1
     assert LiveFaceSession._moved(layer, None, before) is layer
+
+
+def test_specks_of_another_colour_leave_the_hair_but_highlights_stay():
+    drive = _drive()
+    import torch
+    generator = torch.Generator().manual_seed(0)
+    xyz = torch.rand(400, 3, generator=generator)
+    rgb = torch.full((400, 3), 0.15) + torch.rand(400, 3, generator=generator) * 0.01
+    rgb[:10] = torch.tensor([0.45, 0.05, 0.05])   # red specks
+    rgb[10:20] = 0.6                              # a highlight: brighter, the same tint
+    hair = torch.ones(400, dtype=torch.bool)
+    hair[-50:] = False
+    rgb[-50:] = torch.tensor([0.8, 0.5, 0.4])     # skin, which is not hair
+    fixed = drive.without_stray_hair(xyz, rgb, hair)
+    assert (fixed[:10] - fixed[:10].mean(1, keepdim=True)).abs().max() < 0.05
+    assert fixed[10:20].equal(rgb[10:20])
+    assert fixed[-50:].equal(rgb[-50:])
 
 
 def test_the_background_plate_learns_and_starts_again_when_the_picture_changes():

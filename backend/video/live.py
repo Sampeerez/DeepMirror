@@ -179,7 +179,13 @@ class LiveFaceSession:
         local = matrix.copy()
         local[:, 2] += matrix[:, :2] @ np.array([layer.x, layer.y], np.float64) - (x0, y0)
         image = cv2.warpAffine(layer.image, local, (int(x1 - x0), int(y1 - y0)), flags=cv2.INTER_LINEAR)
-        return replace(layer, x=int(x0), y=int(y0), image=image)
+        face = layer.face
+        if face is not None:
+            small = local.copy()
+            small[:, 2] /= 4
+            face = cv2.warpAffine(face, small, (max(1, image.shape[1] // 4), max(1, image.shape[0] // 4)),
+                                  flags=cv2.INTER_NEAREST)
+        return replace(layer, x=int(x0), y=int(y0), image=image, face=face)
 
     # --- Keyframes (worker thread) ----------------------------------------
 

@@ -1,13 +1,18 @@
 """How natural is the worn head? A benchmark with a ground truth, for any GPU.
 
     uv run python scripts/bench_head.py <video of one person> <out folder> [--engine 3d|hair|face|head|personalive]
-        [--frames 300] [--photos 8] [--steps 0] [--tag name]
+        [--frames 300] [--photos 8] [--steps 0] [--tag name] [--face id] [--light]
 
 The head is built from frames of the video and worn over the same person in the same video, so the
 real frame is what a perfect clone would show. Per head turn it reports how well the hair matches
 (silhouette IoU, colour PSNR), how far the hair lags behind the face when the head moves, and the
 frame rate, keyframes and GPU memory. Writes ``report.json`` and ``sheet.jpg`` (real | worn, at the
 widest turns and fastest moves).
+
+``--light`` puts the speaker in a dim, pink, uneven room while the head keeps the photos' light: the
+worn head must end up in the room's. ``--face id`` wears a face of the library instead of the video's.
+Then it also reports the seam: the biggest colour step going up the forehead, forehead against
+cheeks, and how much the colour flickers from frame to frame (each next to the real frame's own).
 """
 
 from __future__ import annotations
@@ -30,11 +35,21 @@ from backend.video import hair as hairs  # noqa: E402
 from backend.video import parser as parsing  # noqa: E402
 from backend.video.avatar import HEAD_FILE, HeadBuilder, HeadDriver, LamInstall  # noqa: E402
 from backend.video.engine import FaceEngine, FaceModels, VideoSettings, head_pose  # noqa: E402
+from backend.video.faces import alignment  # noqa: E402
 from backend.video.live import LiveFaceSession  # noqa: E402
 from backend.video.personalive.client import PersonaLiveHead, PersonaLiveInstall  # noqa: E402
 
 FACE_DIR = ROOT / "models" / "assets" / "face"
 YAW_BINS = (0.0, 0.1, 0.2, 0.35, 10.0)   # head_pose units: straight on, slight, turned, far
+
+
+def dim_room(frame: np.ndarray) -> np.ndarray:
+    """``frame`` as a dim room with a pink lamp to one side would show it."""
+    height, width = frame.shape[:2]
+    across = np.linspace(0.82, 1.12, width, dtype=np.float32)[None, :, None]
+    down = np.linspace(1.08, 0.92, height, dtype=np.float32)[:, None, None]
+    tint = np.array([0.74, 0.62, 0.86], np.float32)   # BGR
+    return np.clip(frame.astype(np.float32) * tint * across * down, 0, 255).astype(np.uint8)
 
 
 def read_video(path: Path, limit: int) -> tuple[list[np.ndarray], float]:
@@ -123,6 +138,73 @@ def run_every_frame(frames: list[np.ndarray], fps: float, engine: FaceEngine) ->
     return outputs, float(np.median(times) * 1000.0)
 
 
+def skin_colours(crop: np.ndarray, labels: np.ndarray, points: np.ndarray) -> dict | None:
+    """Colours (LAB) up the middle of the forehead, from the brows to the hair, and on the cheeks."""
+    eyes = points[:2]
+    distance = float(np.linalg.norm(eyes[1] - eyes[0]))
+    middle, level = float(eyes[:, 0].mean()), float(eyes[:, 1].mean())
+    half = int(distance * 0.4)
+    bottom = int(level - 0.45 * distance)
+    x0, x1 = int(middle) - half, int(middle) + half
+    if x0 < 0 or x1 > crop.shape[1] or bottom < 8:
+        return None
+    lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB).astype(np.float32)
+    skin = labels == parsing.SKIN
+    brows = np.nonzero(np.isin(labels[:, x0:x1], (parsing.BROW_L, parsing.BROW_R)).any(1))[0]   # from above the brows, whoever's they are
+    if len(brows):
+        bottom = min(bottom, int(brows.min()) - 3)
+    rows = []
+    for row in range(bottom, -1, -1):
+        inside = skin[row, x0:x1]
+        if inside.mean() < 0.5:
+            break
+        rows.append(lab[row, x0:x1][inside].mean(0))
+    if len(rows) < 8:
+        return None
+    rows = rows[:max(8, int(len(rows) * 0.8))]   # not the hair's own shadow on the skin below it
+    profile = cv2.blur(np.array(rows, np.float32), (1, 3))
+    reach = max(2, int(distance * 0.06))
+    steps = np.abs(profile[reach:] - profile[:-reach]).max(0)
+    below = int(level + 0.55 * distance)
+    size = int(0.2 * distance)
+    cheeks = [lab[below:below + size, int(middle + side * distance * 0.5):int(middle + side * distance * 0.5) + size]
+              for side in (-0.9, 0.5)]
+    cheek = np.concatenate([part.reshape(-1, 3) for part in cheeks])
+    if not len(cheek):
+        return None
+    forehead = profile[len(profile) // 2:].mean(0)
+    return {"steps": steps, "against_cheeks": np.abs(forehead - cheek.mean(0)), "forehead": forehead}
+
+
+def seam_report(frames: list[np.ndarray], outputs: dict[int, np.ndarray], models: FaceModels) -> dict:
+    parser = models.parser
+    assert parser is not None
+    seen: dict[str, list] = {"worn": [], "real": []}
+    for index, real in enumerate(frames):
+        worn = outputs.get(index)
+        found = models.detector.detect(real)
+        if worn is None or not found:
+            continue
+        points = max(found, key=lambda face: face.size).points
+        matrix = alignment(points, hairs.HEAD_TEMPLATE, hairs.SIZE)
+        local = cv2.transform(points.reshape(1, -1, 2).astype(np.float32), matrix).reshape(-1, 2)
+        for name, picture in (("worn", worn), ("real", real)):
+            crop, _ = hairs.head_crop(picture, points)
+            colours = skin_colours(crop, parser.labels(crop), local)
+            if colours is not None:
+                seen[name].append((index, colours))
+    report = {}
+    for name, rows in seen.items():
+        if not rows:
+            continue
+        flicker = [np.abs(b[1]["forehead"] - a[1]["forehead"]) for a, b in itertools.pairwise(rows) if b[0] == a[0] + 1]
+        report[name] = {"frames": len(rows),
+                        "step_lab": np.round(np.median([r[1]["steps"] for r in rows], axis=0), 1).tolist(),
+                        "forehead_vs_cheeks_lab": np.round(np.median([r[1]["against_cheeks"] for r in rows], axis=0), 1).tolist(),
+                        "flicker_lab": np.round(np.mean(flicker, axis=0), 2).tolist() if flicker else None}
+    return report
+
+
 def measure(frames: list[np.ndarray], outputs: dict[int, np.ndarray], models: FaceModels, fps: float) -> dict:
     """Hair against the real frame, frame by frame, after the run (nothing here slows the run down)."""
     parser = models.parser
@@ -187,6 +269,16 @@ def sheet(frames: list[np.ndarray], outputs: dict[int, np.ndarray], rows: list[d
         pair = np.hstack([frames[index], outputs[index]])
         tiles.append(cv2.resize(pair, (960, int(960 * pair.shape[0] / pair.shape[1]))))
     cv2.imwrite(str(path), np.vstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 90])
+    # Close up: the head as worn, large enough to judge its edges, ears and hair.
+    close = []
+    for index in picks:
+        found = rows[0] if not rows else min(rows, key=lambda row: abs(row["frame"] - index))
+        x, y = np.array(found["nose"], int)
+        half = outputs[index].shape[0] // 2
+        patch = outputs[index][max(0, y - half):y + half, max(0, x - half):x + half]
+        close.append(cv2.resize(patch, (480, 480)))
+    cv2.imwrite(str(path.with_name(path.stem + "_close.jpg")), np.vstack([np.hstack(close[:2]), np.hstack(close[2:])]),
+                [cv2.IMWRITE_JPEG_QUALITY, 92])
 
 
 def main() -> None:
@@ -201,21 +293,29 @@ def main() -> None:
                         help="whole head: each frame waits for its own render (quality, not speed)")
     parser.add_argument("--tag", default="", help="a name for this run's files")
     parser.add_argument("--rebuild", action="store_true", help="build the 3D head again")
+    parser.add_argument("--face", default="", help="wear this face of the library (data/faces/<id>)")
+    parser.add_argument("--light", action="store_true", help="the speaker in a dim, pink, uneven room")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     frames, fps = read_video(args.video, args.frames)
     arbiter = GpuArbiter()
     models = FaceModels(FACE_DIR, True)
     models.measure(args.out / "swap_ms.json", arbiter)
-    folder, identity = build_face(frames, args.photos, models, args.out)
-    if args.engine == "3d":
+    if args.face:
+        folder = ROOT / "data" / "faces" / args.face
+        identity = np.load(folder / "identity.npy")
+    else:
+        folder, identity = build_face(frames, args.photos, models, args.out)
+    if args.light:
+        frames = [dim_room(frame) for frame in frames]
+    if args.engine == "3d" and not args.face:
         if args.rebuild:
             (folder / HEAD_FILE).unlink(missing_ok=True)
         build_head(folder, args.steps)
     mode = {"3d": "hair", "personalive": "head"}.get(args.engine, args.engine)
     engine = FaceEngine(models, arbiter, VideoSettings(mode=mode))
     engine.set_identity(identity)
-    engine.set_portrait(cv2.imread(str(folder / "photo_0.jpg")))
+    engine.set_portrait(cv2.imdecode(np.fromfile(folder / "photo_0.jpg", np.uint8), cv2.IMREAD_COLOR))
     engine.hair_photos = [str(path) for path in sorted(folder.glob("photo_*.jpg"))]
     engine.plan()
     driver = None
@@ -249,6 +349,7 @@ def main() -> None:
         generated.close()
     metrics = measure(frames, outputs, models, fps)
     rows = metrics.pop("rows")
+    metrics["seam"] = seam_report(frames, outputs, models)
     tail = stats[2:] or stats
 
     def median(key: str):

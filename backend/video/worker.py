@@ -95,8 +95,10 @@ class _VirtualCamera:
             with self._lock:
                 while self._queue and self._queue[0][0] + self.delay <= now:
                     last = self._queue.pop(0)[1]
-            if last is not None:
-                self.camera.send(last)
+            if last is None:   # the camera can only keep time once a frame has gone out
+                self._stop.wait(1 / self.camera.fps)
+                continue
+            self.camera.send(last)
             self.camera.sleep_until_next_frame()
 
     def close(self) -> None:

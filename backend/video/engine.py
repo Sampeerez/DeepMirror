@@ -37,6 +37,7 @@ from backend.video import head as heads
 from backend.video import parser as parsing
 from backend.video.blend import Occluder, box_mask, mouth_mask, paste
 from backend.video.faces import Face, FaceDetector, FaceLandmarker, FaceRecognizer, alignment, main_face
+from backend.video.harmony import Harmony
 from backend.video.parser import FaceParser, feather, region
 from backend.video.swap import SWAPPERS, FaceEnhancer, FaceSwapper, SwapperSpec, match_colour
 
@@ -360,6 +361,7 @@ class FaceEngine:
     hair_from_3d: bool = False
     _photo_inside: np.ndarray | None = None   # the part of the head crop the photo really shows
     _painter: hairs.OwnPaint = field(default_factory=hairs.OwnPaint)   # over the speaker's own hair
+    _harmony: Harmony = field(default_factory=Harmony)   # the 3D head in the light of the face it dresses
 
     def set_identity(self, embedding: np.ndarray | None) -> None:
         self.identity = embedding
@@ -375,6 +377,7 @@ class FaceEngine:
 
     def reset_head(self) -> None:
         """The next frame becomes the rest pose the head moves from (a new session)."""
+        self._harmony.reset()
         if self.remote is not None:
             self.remote.reset()
         if self._head is not None:
@@ -701,8 +704,8 @@ class FaceEngine:
                 fill = np.maximum(hole, feather(cv2.dilate(hole, np.ones((ring, ring), np.uint8)), erode=0.0,
                                                 soft=0.012))
                 plate = cv2.blendLinear(filled, plate, fill, 1.0 - fill)
-        # The photo's own lighting moves half way towards the room's (the head stays the photo's).
-        rendered = _light_like(rendered, plate, worn)
+        # The room's light on the head: the same match the face on top of it gets.
+        rendered = match_colour(rendered, plate, region(labels_new, parsing.FACE))
         image = cv2.blendLinear(rendered, plate, alpha, 1.0 - alpha)
         face = feather(region(labels_new, parsing.FACE), erode=0.01, soft=0.03)
         return HeadLayer(t, image, np.maximum(alpha, fill), face, head_pose(points), alpha, fill)
@@ -733,7 +736,12 @@ class FaceEngine:
             if self._own is not None:
                 frame = self._painter.apply(frame, tracked.points, self._own)
             swapped = self._swap_onto(frame, tracked, t, before, after, keys_per_second, None, None, 0.0)
-            return hairs.over(swapped, layer3d.image, layer3d.x, layer3d.y, inplace=swapped is not frame)
+            image, colour = layer3d.image, None
+            if layer3d.face is not None and (before is not None or after is not None):
+                image = _inside(swapped, image, layer3d.x, layer3d.y)
+                under = swapped[layer3d.y:layer3d.y + image.shape[0], layer3d.x:layer3d.x + image.shape[1]]
+                colour = self._harmony.relit(under, image, layer3d.face)
+            return hairs.over(swapped, image, layer3d.x, layer3d.y, inplace=swapped is not frame, colour=colour)
         # The head was rendered for one head turn; placed on a frame turned further it would show
         # beside the face. It fades out (the face alone shows) until a fresh render arrives.
         weight = head_freshness(head.pose, head_pose(tracked.points)) if head is not None else 0.0
@@ -836,16 +844,9 @@ class FaceEngine:
         return paste(frame, crop, mask, matrix), alpha
 
 
-def _light_like(image: np.ndarray, reference: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """``image``'s brightness moved half way towards ``reference``'s (inside ``mask``); colours kept."""
-    weight = mask > 0.5
-    if weight.sum() < 64:
-        return image
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB).astype(np.float32)
-    ref = cv2.cvtColor(reference, cv2.COLOR_BGR2LAB).astype(np.float32)
-    shift = 0.5 * (ref[..., 0][weight].mean() - lab[..., 0][weight].mean())
-    lab[..., 0] = np.clip(lab[..., 0] + shift, 0, 255)
-    return cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
+def _inside(frame: np.ndarray, image: np.ndarray, x: int, y: int) -> np.ndarray:
+    """The part of ``image``, placed at ``x``, ``y``, that falls inside ``frame``."""
+    return image[:frame.shape[0] - y, :frame.shape[1] - x]
 
 
 def head_pose(points: np.ndarray) -> tuple[float, float]:

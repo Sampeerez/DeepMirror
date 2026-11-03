@@ -227,14 +227,17 @@ class OwnPaint:
         return self._fill
 
 
-def over(frame: np.ndarray, image: np.ndarray, x: int, y: int, inplace: bool = False) -> np.ndarray:
-    """``frame`` with ``image`` (BGRA, straight alpha) over it at ``x``, ``y``."""
+def over(frame: np.ndarray, image: np.ndarray, x: int, y: int, inplace: bool = False,
+         colour: np.ndarray | None = None) -> np.ndarray:
+    """``frame`` with ``image`` (BGRA, straight alpha) over it at ``x``, ``y`` (``colour``: BGR to use
+    instead of its own)."""
     out = frame if inplace else frame.copy()
     height, width = image.shape[:2]
     roi = out[y:y + height, x:x + width]
     image = image[:roi.shape[0], :roi.shape[1]]
     alpha = image[..., 3].astype(np.float32) * (1 / 255)
-    roi[:] = cv2.blendLinear(np.ascontiguousarray(image[..., :3]), roi, alpha, 1 - alpha)
+    colour = np.ascontiguousarray(image[..., :3]) if colour is None else colour[:roi.shape[0], :roi.shape[1]]
+    roi[:] = cv2.blendLinear(colour, roi, alpha, 1 - alpha)
     return out
 
 
@@ -279,16 +282,13 @@ def cover(crop: np.ndarray, own: OwnHead) -> np.ndarray:
 
 
 def toned(hair: HairLayer, face: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """The hair layer's image with its forehead in the swapped face's skin tone (LAB means),
-    so the forehead and the face below it are one skin. ``face`` and ``mask``: a keyframe's crop."""
+    """The hair layer's image in the swapped face's light: the ratio between the face and the photo's
+    forehead multiplies skin and hair alike, as one light would. ``face`` and ``mask``: a keyframe's crop."""
     if hair.skin is None:
         return hair.image
     weight = mask > 0.5
     skin = hair.skin > 0.5
     if weight.sum() < 64 or skin.sum() < 64:
         return hair.image
-    target = cv2.cvtColor(np.clip(face, 0, 255).astype(np.uint8), cv2.COLOR_BGR2LAB).astype(np.float32)[weight].mean(0)
-    lab = cv2.cvtColor(hair.image, cv2.COLOR_BGR2LAB).astype(np.float32)
-    shift = target - lab[skin].mean(0)
-    shifted = cv2.cvtColor(np.clip(lab + shift, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
-    return cv2.blendLinear(shifted, hair.image, hair.skin, 1.0 - hair.skin)
+    ratio = (face[weight].mean(0) + 4.0) / (hair.image[skin].mean(0) + 4.0)
+    return np.clip(hair.image * np.clip(ratio, 0.35, 1.8).astype(np.float32), 0, 255).astype(np.uint8)
